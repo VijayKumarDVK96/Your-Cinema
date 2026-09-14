@@ -56,4 +56,14 @@ export class AuthController {
       next(err);
     }
   }
+
+  static async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const result = await AuthService.changePassword(userId, req.body);
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
 }

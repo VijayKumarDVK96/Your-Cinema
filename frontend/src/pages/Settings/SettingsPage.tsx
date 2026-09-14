@@ -30,6 +30,10 @@ import CategoryIcon from '@mui/icons-material/Category';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import LockResetIcon from '@mui/icons-material/LockReset';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import InputAdornment from '@mui/material/InputAdornment';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
@@ -114,6 +118,15 @@ export const SettingsPage: React.FC = () => {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
 
+  // Change Password State
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [showPwCurrent, setShowPwCurrent] = useState(false);
+  const [showPwNew, setShowPwNew] = useState(false);
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // AI Settings State (API keys stored securely in .env, Provider & Model switchable here)
   const [aiProvider, setAiProvider] = useState('gemini');
   const [aiModel, setAiModel] = useState('gemini-3.5-flash');
@@ -158,6 +171,30 @@ export const SettingsPage: React.FC = () => {
       setProfileMsg('Profile preferences updated.');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPwMsg(null);
+    if (pwNew !== pwConfirm) {
+      setPwMsg({ type: 'error', text: 'New passwords do not match.' });
+      return;
+    }
+    if (pwNew.length < 6) {
+      setPwMsg({ type: 'error', text: 'New password must be at least 6 characters.' });
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await api.put('/auth/change-password', { currentPassword: pwCurrent, newPassword: pwNew });
+      setPwMsg({ type: 'success', text: 'Password changed successfully.' });
+      setPwCurrent('');
+      setPwNew('');
+      setPwConfirm('');
+    } catch (err: any) {
+      setPwMsg({ type: 'error', text: err.response?.data?.error?.message || err.message || 'Failed to change password.' });
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -279,7 +316,86 @@ export const SettingsPage: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* 2. Pluggable AI Service Configuration */}
+      {/* 2. Change Password */}
+      <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <LockResetIcon sx={{ color: '#38BDF8' }} />
+          <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+            Change Password
+          </Typography>
+        </Box>
+
+        {pwMsg && (
+          <Alert severity={pwMsg.type} sx={{ mb: 2 }} onClose={() => setPwMsg(null)}>
+            {pwMsg.text}
+          </Alert>
+        )}
+
+        <Grid container spacing={2.5}>
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Current Password"
+              type={showPwCurrent ? 'text' : 'password'}
+              value={pwCurrent}
+              onChange={(e) => setPwCurrent(e.target.value)}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPwCurrent((v) => !v)} edge="end" size="small" sx={{ color: '#94A3B8' }}>
+                      {showPwCurrent ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="New Password"
+              type={showPwNew ? 'text' : 'password'}
+              value={pwNew}
+              onChange={(e) => setPwNew(e.target.value)}
+              helperText="Minimum 6 characters"
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPwNew((v) => !v)} edge="end" size="small" sx={{ color: '#94A3B8' }}>
+                      {showPwNew ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Confirm New Password"
+              type="password"
+              value={pwConfirm}
+              onChange={(e) => setPwConfirm(e.target.value)}
+              error={pwConfirm.length > 0 && pwNew !== pwConfirm}
+              helperText={pwConfirm.length > 0 && pwNew !== pwConfirm ? 'Passwords do not match' : ' '}
+            />
+          </Grid>
+        </Grid>
+
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            variant="contained"
+            onClick={handleChangePassword}
+            disabled={pwSaving || !pwCurrent || !pwNew || !pwConfirm}
+            startIcon={pwSaving ? <CircularProgress size={16} /> : <LockResetIcon />}
+            sx={{ background: 'linear-gradient(135deg, #3B82F6, #6366F1)' }}
+          >
+            {pwSaving ? 'Updating…' : 'Update Password'}
+          </Button>
+        </Box>
+      </Paper>
+
+      {/* 3. Pluggable AI Service Configuration */}
       <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

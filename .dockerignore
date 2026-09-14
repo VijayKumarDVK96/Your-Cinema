@@ -1,0 +1,20 @@
+# Root
+.git
+.gitattributes
+.gitignore
+
+# Backend
+backend/node_modules
+backend/dist
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Frontend
+frontend/node_modules
+frontend/dist
+
+# Misc
+**/*.log
+**/.DS_Store
+**/Thumbs.db

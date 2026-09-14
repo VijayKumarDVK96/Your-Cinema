@@ -27,10 +27,16 @@ const profileUpdateSchema = z.object({
   exclude_watched_default: z.boolean().optional(),
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters'),
+});
+
 router.post('/register', validate(registerSchema), AuthController.register);
 router.post('/login', validate(loginSchema), AuthController.login);
 router.post('/logout', AuthController.logout);
 router.get('/me', authenticate, AuthController.getMe);
 router.patch('/profile', authenticate, validate(profileUpdateSchema), AuthController.updateProfile);
+router.put('/change-password', authenticate, validate(changePasswordSchema), AuthController.changePassword);
 
 export default router;

@@ -54,8 +54,11 @@ export class AuthService {
     }
 
     const isValid = await bcrypt.compare(data.password, user.password_hash);
-    // Allow demo user password bypass for immediate evaluation
-    const isDemo = user.email === 'demo@yourcinema.com' && data.password === 'password123';
+    // Demo bypass — only active outside production for quick evaluation
+    const isDemo =
+      config.nodeEnv !== 'production' &&
+      user.email === 'demo@yourcinema.com' &&
+      data.password === 'password123';
     if (!isValid && !isDemo) {
       throw new UnauthorizedError('Invalid email or password.');
     }
@@ -75,6 +78,40 @@ export class AuthService {
       },
       ...tokens,
     };
+  }
+
+  static async changePassword(userId: string, data: { currentPassword: string; newPassword: string }) {
+    const user = isPgConnected
+      ? (await pool.query('SELECT * FROM users WHERE id = $1', [userId])).rows[0]
+      : inMemoryDb.users.get(userId);
+
+    if (!user) {
+      throw new NotFoundError('User not found.');
+    }
+
+    const isValid = await bcrypt.compare(data.currentPassword, user.password_hash);
+    if (!isValid) {
+      throw new UnauthorizedError('Current password is incorrect.');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const newHash = await bcrypt.hash(data.newPassword, salt);
+
+    if (isPgConnected) {
+      await pool.query(
+        `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+        [newHash, userId]
+      );
+    } else {
+      const u = inMemoryDb.users.get(userId);
+      if (u) {
+        u.password_hash = newHash;
+        u.updated_at = new Date().toISOString();
+        inMemoryDb.users.set(userId, u);
+      }
+    }
+
+    return { message: 'Password updated successfully.' };
   }
 
   static async getProfile(userId: string) {
