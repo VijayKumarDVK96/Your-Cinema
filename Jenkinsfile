@@ -109,14 +109,37 @@ pipeline {
             steps {
                 sh """
                     if command -v docker-compose >/dev/null 2>&1; then
-                        DC="docker-compose"
+                        echo "Deploying with docker-compose..."
+                        docker-compose -f docker-compose.yml down --remove-orphans || true
+                        docker-compose -f docker-compose.yml up -d
+                    elif docker compose version >/dev/null 2>&1; then
+                        echo "Deploying with docker compose..."
+                        docker compose -f docker-compose.yml down --remove-orphans || true
+                        docker compose -f docker-compose.yml up -d
                     else
-                        DC="docker compose"
-                    fi
+                        echo "Compose CLI not found on agent - deploying with docker CLI directly..."
+                        docker stop your-cinema-frontend your-cinema-backend 2>/dev/null || true
+                        docker rm -f your-cinema-frontend your-cinema-backend 2>/dev/null || true
 
-                    echo "Using Compose command: \$DC"
-                    \$DC -f docker-compose.yml down --remove-orphans || true
-                    \$DC -f docker-compose.yml up -d --build
+                        docker run -d \
+                            --name your-cinema-backend \
+                            --restart unless-stopped \
+                            --network ${DOCKER_NETWORK} \
+                            --env-file backend/.env \
+                            -e NODE_ENV=production \
+                            -e DB_HOST=postgres \
+                            -e DB_PORT=5432 \
+                            -e CLIENT_URL=http://vijayott.duckdns.org \
+                            -p 5000:5000 \
+                            ${BACKEND_IMAGE}:latest
+
+                        docker run -d \
+                            --name your-cinema-frontend \
+                            --restart unless-stopped \
+                            --network ${DOCKER_NETWORK} \
+                            -p 3000:80 \
+                            ${FRONTEND_IMAGE}:latest
+                    fi
 
                     echo "Waiting for backend to become healthy..."
                     for i in \$(seq 1 20); do
@@ -160,11 +183,15 @@ pipeline {
             echo "Deployment FAILED - check logs above."
             sh """
                 if command -v docker-compose >/dev/null 2>&1; then
-                    DC="docker-compose"
+                    docker-compose -f docker-compose.yml logs --tail=100 || true
+                elif docker compose version >/dev/null 2>&1; then
+                    docker compose -f docker-compose.yml logs --tail=100 || true
                 else
-                    DC="docker compose"
+                    echo "=== Backend Logs ==="
+                    docker logs --tail=100 your-cinema-backend || true
+                    echo "=== Frontend Logs ==="
+                    docker logs --tail=100 your-cinema-frontend || true
                 fi
-                \$DC -f docker-compose.yml logs --tail=100 || true
             """
         }
     }
