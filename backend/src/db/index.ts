@@ -4,13 +4,32 @@ import { Logger } from '../utils/logger.js';
 
 const { Pool } = pg;
 
+let connStr = config.db.connectionString;
+if (connStr && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') {
+  connStr = connStr.replace(/@localhost(:|\/)/, `@${process.env.DB_HOST}$1`);
+}
+
+const poolConfig: pg.PoolConfig = connStr
+  ? {
+      connectionString: connStr,
+      ...(process.env.DB_HOST && process.env.DB_HOST !== 'localhost' ? { host: process.env.DB_HOST } : {}),
+      ...(process.env.DB_PORT ? { port: parseInt(process.env.DB_PORT, 10) } : {}),
+    }
+  : {
+      host: config.db.host,
+      port: config.db.port,
+      user: config.db.user,
+      password: config.db.password,
+      database: config.db.database,
+    };
+
 // Primary PostgreSQL Pool
 export const pool = new Pool({
-  connectionString: config.db.connectionString,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ...poolConfig,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 3000,
+  connectionTimeoutMillis: 5000,
 });
 
 let isPgConnected = false;
@@ -24,7 +43,7 @@ pool.connect()
   })
   .catch((err) => {
     isPgConnected = false;
-    Logger.warn(`PostgreSQL connection failed (${err.message}). Using resilient in-memory data store.`);
+    Logger.warn(`PostgreSQL connection failed (${err.message || err}). Using resilient in-memory data store.`);
   });
 
 // Resilient fallback in-memory state store

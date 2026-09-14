@@ -161,11 +161,16 @@ pipeline {
         stage("Smoke Test") {
             steps {
                 sh """
-                    echo "Testing backend health endpoint..."
-                    curl -fsSL http://localhost:5000/api/health
+                    echo "Testing backend container health..."
+                    docker exec your-cinema-backend wget -qO- http://localhost:5000/api/health
 
-                    echo "Testing frontend..."
-                    curl -fsSL -o /dev/null -w "Frontend HTTP status: %{http_code}\n" http://localhost:3000/
+                    echo "Testing frontend container..."
+                    docker exec your-cinema-frontend wget -qO- http://localhost:80/ >/dev/null
+                    echo "Frontend container is serving traffic."
+
+                    echo "Testing frontend reverse proxy to backend..."
+                    docker exec your-cinema-frontend wget -qO- http://localhost:80/api/health
+                    echo "All smoke tests passed successfully."
                 """
             }
         }
