@@ -18,6 +18,7 @@ pipeline {
         FRONTEND_IMAGE       = "your-cinema-frontend"
         IMAGE_TAG            = "${env.BUILD_NUMBER}"
         DOCKER_NETWORK       = "postgresql_postgres_network"
+        NPM_NETWORK          = "shared-network"
     }
 
     options {
@@ -61,12 +62,14 @@ pipeline {
         stage("Ensure Docker Network") {
             steps {
                 sh """
-                    if ! docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1; then
-                        echo "Network ${DOCKER_NETWORK} not found - creating it..."
-                        docker network create --driver bridge ${DOCKER_NETWORK}
-                    else
-                        echo "Network ${DOCKER_NETWORK} already exists"
-                    fi
+                    for net in ${DOCKER_NETWORK} ${NPM_NETWORK}; do
+                        if ! docker network inspect "\$net" >/dev/null 2>&1; then
+                            echo "Network \$net not found - creating it..."
+                            docker network create --driver bridge "\$net"
+                        else
+                            echo "Network \$net already exists"
+                        fi
+                    done
                 """
             }
         }
@@ -139,6 +142,9 @@ pipeline {
                             --network ${DOCKER_NETWORK} \
                             -p 3000:80 \
                             ${FRONTEND_IMAGE}:latest
+
+                        echo "Connecting frontend to NPM network (${NPM_NETWORK})..."
+                        docker network connect ${NPM_NETWORK} your-cinema-frontend || true
                     fi
 
                     echo "Waiting for backend to become healthy..."
