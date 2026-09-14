@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, CssBaseline } from '@mui/material';
+import { ThemeProvider, CssBaseline, Box, CircularProgress } from '@mui/material';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cinematicTheme } from './theme/theme.js';
 import { AuthProvider, useAuth } from './context/AuthContext.js';
@@ -33,8 +33,31 @@ const queryClient = new QueryClient({
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return null;
-  // If not logged in, allow access in dev mode with demo defaults
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', bgcolor: '#07090E' }}>
+        <CircularProgress sx={{ color: '#E5A93C' }} />
+      </Box>
+    );
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+};
+
+const PublicOnlyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', bgcolor: '#07090E' }}>
+        <CircularProgress sx={{ color: '#E5A93C' }} />
+      </Box>
+    );
+  }
+  if (user) {
+    return <Navigate to="/" replace />;
+  }
   return <>{children}</>;
 };
 
@@ -50,8 +73,22 @@ export const App: React.FC = () => {
                 <BrowserRouter>
                   <Routes>
                     {/* Public Auth Routes */}
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/register" element={<RegisterPage />} />
+                    <Route
+                      path="/login"
+                      element={
+                        <PublicOnlyRoute>
+                          <LoginPage />
+                        </PublicOnlyRoute>
+                      }
+                    />
+                    <Route
+                      path="/register"
+                      element={
+                        <PublicOnlyRoute>
+                          <RegisterPage />
+                        </PublicOnlyRoute>
+                      }
+                    />
 
                     {/* Authenticated Application Layout */}
                     <Route
