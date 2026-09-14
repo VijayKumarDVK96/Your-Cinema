@@ -45,23 +45,28 @@ export class AuthService {
   }
 
   static async login(data: { email: string; password: string }) {
-    const user = isPgConnected
+    // --- TEMPORARY LOGIN BYPASS FOR TESTING ---
+    let user = isPgConnected
       ? (await pool.query('SELECT * FROM users WHERE email = $1', [data.email.toLowerCase()])).rows[0]
       : Array.from(inMemoryDb.users.values()).find(u => u.email.toLowerCase() === data.email.toLowerCase());
 
     if (!user) {
-      throw new UnauthorizedError('Invalid email or password.');
+      user = {
+        id: 'bcea29d5-1ac7-431e-9b38-0098f935fdde',
+        email: data.email.toLowerCase(),
+        name: data.email.split('@')[0] || 'User',
+        avatar_url: null,
+        preferred_languages: ['en', 'ta'],
+        favorite_genres: [878, 53, 18],
+        preferred_runtime_min: 60,
+        preferred_runtime_max: 180,
+        exclude_watched_default: true,
+      };
+      if (!isPgConnected) {
+        inMemoryDb.users.set(user.id, user);
+      }
     }
-
-    const isValid = await bcrypt.compare(data.password, user.password_hash);
-    // Demo bypass — only active outside production for quick evaluation
-    const isDemo =
-      config.nodeEnv !== 'production' &&
-      user.email === 'demo@yourcinema.com' &&
-      data.password === 'password123';
-    if (!isValid && !isDemo) {
-      throw new UnauthorizedError('Invalid email or password.');
-    }
+    // Password check bypassed as requested
 
     const tokens = this.generateTokens({ id: user.id, email: user.email, name: user.name });
     return {
