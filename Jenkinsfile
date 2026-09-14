@@ -162,14 +162,14 @@ pipeline {
             steps {
                 sh """
                     echo "Testing backend container health..."
-                    docker exec your-cinema-backend wget -qO- http://localhost:5000/api/health
+                    docker exec your-cinema-backend wget -qO- http://127.0.0.1:5000/api/health
 
                     echo "Testing frontend container..."
-                    docker exec your-cinema-frontend wget -qO- http://localhost:80/ >/dev/null
+                    docker exec your-cinema-frontend wget -qO- http://127.0.0.1:80/ >/dev/null
                     echo "Frontend container is serving traffic."
 
                     echo "Testing frontend reverse proxy to backend..."
-                    docker exec your-cinema-frontend wget -qO- http://localhost:80/api/health
+                    docker exec your-cinema-frontend wget -qO- http://127.0.0.1:80/api/health
                     echo "All smoke tests passed successfully."
                 """
             }

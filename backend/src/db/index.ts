@@ -4,24 +4,27 @@ import { Logger } from '../utils/logger.js';
 
 const { Pool } = pg;
 
-let connStr = config.db.connectionString;
-if (connStr && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') {
-  connStr = connStr.replace(/@localhost(:|\/)/, `@${process.env.DB_HOST}$1`);
-}
+const isCustomDbConfig = Boolean(
+  (process.env.DB_HOST && process.env.DB_HOST !== 'localhost') || process.env.DB_PASSWORD
+);
 
-const poolConfig: pg.PoolConfig = connStr
+const poolConfig: pg.PoolConfig = isCustomDbConfig
   ? {
-      connectionString: connStr,
-      ...(process.env.DB_HOST && process.env.DB_HOST !== 'localhost' ? { host: process.env.DB_HOST } : {}),
-      ...(process.env.DB_PORT ? { port: parseInt(process.env.DB_PORT, 10) } : {}),
+      host: process.env.DB_HOST || config.db.host,
+      port: parseInt(process.env.DB_PORT || String(config.db.port), 10),
+      user: process.env.DB_USER || config.db.user,
+      password: process.env.DB_PASSWORD || config.db.password,
+      database: process.env.DB_NAME || config.db.database,
     }
-  : {
-      host: config.db.host,
-      port: config.db.port,
-      user: config.db.user,
-      password: config.db.password,
-      database: config.db.database,
-    };
+  : (config.db.connectionString
+      ? { connectionString: config.db.connectionString }
+      : {
+          host: config.db.host,
+          port: config.db.port,
+          user: config.db.user,
+          password: config.db.password,
+          database: config.db.database,
+        });
 
 // Primary PostgreSQL Pool
 export const pool = new Pool({
