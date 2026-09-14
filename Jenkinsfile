@@ -1,17 +1,12 @@
 // ==========================================================
-// Your Cinema — Declarative Jenkins Pipeline
+// Your Cinema - Declarative Jenkins Pipeline
 //
 // Secrets configured in Jenkins as "Secret file" credentials:
-//   your-cinema-backend-env  ? .env file for backend
+//   your-cinema-backend-env  -> .env file for backend
 //
 // Jenkins credential IDs used (configure in
-//   Manage Jenkins ? Credentials):
-//   • your-cinema-backend-env   (Secret file)
-//
-// Environment variables injected at pipeline level:
-//   • DOCKER_REGISTRY    (e.g. "registry.example.com" or "")
-//   • BACKEND_IMAGE_TAG  (defaults to build number)
-//   • FRONTEND_IMAGE_TAG (defaults to build number)
+//   Manage Jenkins -> Credentials):
+//   * your-cinema-backend-env   (Secret file)
 // ==========================================================
 
 pipeline {
@@ -49,7 +44,6 @@ pipeline {
         // --------------------------------------------------
         stage("Prepare Environment Files") {
             steps {
-                // Inject the backend .env from the Jenkins Secret file credential
                 withCredentials([
                     file(credentialsId: "your-cinema-backend-env", variable: "BACKEND_ENV_FILE")
                 ]) {
@@ -63,14 +57,12 @@ pipeline {
 
         // --------------------------------------------------
         // 3. Ensure the external Docker network exists
-        //    (created by the PostgreSQL stack already, but
-        //     this step ensures CI never fails if it`s absent)
         // --------------------------------------------------
         stage("Ensure Docker Network") {
             steps {
                 sh """
                     if ! docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1; then
-                        echo "Network ${DOCKER_NETWORK} not found — creating it..."
+                        echo "Network ${DOCKER_NETWORK} not found - creating it..."
                         docker network create --driver bridge ${DOCKER_NETWORK}
                     else
                         echo "Network ${DOCKER_NETWORK} already exists"
@@ -111,18 +103,14 @@ pipeline {
         }
 
         // --------------------------------------------------
-        // 5. Deploy (stop old ? start new via docker compose)
+        // 5. Deploy
         // --------------------------------------------------
         stage("Deploy") {
             steps {
                 sh """
-                    # Bring down existing stack gracefully
                     docker compose -f docker-compose.yml down --remove-orphans || true
-
-                    # Start new stack in detached mode
                     docker compose -f docker-compose.yml up -d --build
 
-                    # Wait for backend health
                     echo "Waiting for backend to become healthy..."
                     for i in \$(seq 1 20); do
                         STATUS=\$(docker inspect --format="{{.State.Health.Status}}" your-cinema-backend 2>/dev/null || echo "not_found")
@@ -130,7 +118,7 @@ pipeline {
                             echo "Backend is healthy."
                             break
                         fi
-                        echo "  Status: \$STATUS — waiting (attempt \$i/20)..."
+                        echo "  Status: \$STATUS - waiting (attempt \$i/20)..."
                         sleep 6
                     done
                 """
@@ -138,16 +126,16 @@ pipeline {
         }
 
         // --------------------------------------------------
-        // 6. Smoke Test — confirm services are responding
+        // 6. Smoke Test
         // --------------------------------------------------
         stage("Smoke Test") {
             steps {
                 sh """
                     echo "Testing backend health endpoint..."
-                    curl -fsSL http://localhost:5000/api/health | python3 -m json.tool
+                    curl -fsSL http://localhost:5000/api/health
 
                     echo "Testing frontend..."
-                    curl -fsSL -o /dev/null -w "Frontend HTTP status: %{http_code}\\n" http://vijayott.duckdns.org/ || curl -fsSL -o /dev/null -w "Frontend HTTP status (local): %{http_code}\\n" http://localhost:3000/
+                    curl -fsSL -o /dev/null -w "Frontend HTTP status: %{http_code}\n" http://localhost:3000/
                 """
             }
         }
@@ -156,18 +144,14 @@ pipeline {
 
     post {
         always {
-            // Clean up the injected .env (do not leave secrets on disk)
             sh "rm -f backend/.env || true"
         }
         success {
-            echo "? Deployment succeeded — Your Cinema is live on :3000"
+            echo "Deployment succeeded - Your Cinema is live."
         }
         failure {
-            echo "? Deployment FAILED — check logs above"
-            // Collect container logs for debugging
-            sh """
-                docker compose -f docker-compose.yml logs --tail=100 || true
-            """
+            echo "Deployment FAILED - check logs above."
+            sh "docker compose -f docker-compose.yml logs --tail=100 || true"
         }
     }
 }

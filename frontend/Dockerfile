@@ -1,5 +1,5 @@
 ##################################################
-# Stage 1: Builder — build Vite React app
+# Stage 1: Builder ï¿½ build Vite React app
 ##################################################
 FROM node:20-alpine AS builder
 

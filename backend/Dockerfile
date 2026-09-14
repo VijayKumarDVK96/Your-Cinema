@@ -1,5 +1,5 @@
 ##################################################
-# Stage 1: Builder — compile TypeScript
+# Stage 1: Builder ï¿½ compile TypeScript
 ##################################################
 FROM node:20-alpine AS builder
 
