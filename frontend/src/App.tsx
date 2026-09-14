@@ -19,7 +19,6 @@ import { TastePage } from './pages/Taste/TastePage.js';
 import { ImportCenterPage } from './pages/ImportCenter/ImportCenterPage.js';
 import { SettingsPage } from './pages/Settings/SettingsPage.js';
 import { LoginPage } from './pages/Auth/LoginPage.js';
-import { RegisterPage } from './pages/Auth/RegisterPage.js';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,14 +77,6 @@ export const App: React.FC = () => {
                       element={
                         <PublicOnlyRoute>
                           <LoginPage />
-                        </PublicOnlyRoute>
-                      }
-                    />
-                    <Route
-                      path="/register"
-                      element={
-                        <PublicOnlyRoute>
-                          <RegisterPage />
                         </PublicOnlyRoute>
                       }
                     />

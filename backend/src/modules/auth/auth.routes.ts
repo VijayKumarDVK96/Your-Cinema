@@ -32,7 +32,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6, 'New password must be at least 6 characters'),
 });
 
-router.post('/register', validate(registerSchema), AuthController.register);
+// Public registration is disabled - only existing users can log in
+router.post('/register', (_req, res) => {
+  res.status(403).json({ success: false, error: { message: 'Public registration is disabled.' } });
+});
 router.post('/login', validate(loginSchema), AuthController.login);
 router.post('/logout', AuthController.logout);
 router.get('/me', authenticate, AuthController.getMe);

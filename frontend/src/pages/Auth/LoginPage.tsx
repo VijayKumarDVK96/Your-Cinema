@@ -6,10 +6,9 @@ import {
   TextField,
   Button,
   Alert,
-  Link,
 } from '@mui/material';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.js';
 
 export const LoginPage: React.FC = () => {
@@ -96,13 +95,6 @@ export const LoginPage: React.FC = () => {
           >
             {loading ? 'Entering Sanctuary...' : 'Sign In'}
           </Button>
-
-          <Typography variant="body2" sx={{ color: '#94A3B8', mt: 2 }}>
-            Don't have an account?{' '}
-            <Link component={RouterLink} to="/register" sx={{ color: '#E5A93C', fontWeight: 600 }}>
-              Register
-            </Link>
-          </Typography>
         </Box>
       </Paper>
     </Box>
