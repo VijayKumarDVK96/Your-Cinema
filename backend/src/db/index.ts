@@ -4,6 +4,9 @@ import { Logger } from '../utils/logger.js';
 
 const { Pool } = pg;
 
+// Parse PostgreSQL NUMERIC (OID 1700) as float instead of string
+pg.types.setTypeParser(1700, (val: string) => (val === null ? null : parseFloat(val)));
+
 const isCustomDbConfig = Boolean(
   (process.env.DB_HOST && process.env.DB_HOST !== 'localhost') || process.env.DB_PASSWORD
 );

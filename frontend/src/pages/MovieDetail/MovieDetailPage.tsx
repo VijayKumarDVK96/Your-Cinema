@@ -395,7 +395,9 @@ export const MovieDetailPage: React.FC = () => {
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <StarIcon sx={{ color: '#E5A93C', fontSize: 24 }} />
                   <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-                    {movie.personal_rating ? `${movie.personal_rating.toFixed(1)} / 5.0` : 'Not Rated'}
+                    {movie.personal_rating != null && !isNaN(Number(movie.personal_rating))
+                      ? `${Number(movie.personal_rating).toFixed(1)} / 5.0`
+                      : 'Not Rated'}
                   </Typography>
                   <Typography variant="caption" sx={{ color: '#64748B' }}>Personal</Typography>
                 </Box>
@@ -403,7 +405,7 @@ export const MovieDetailPage: React.FC = () => {
                 {movie.vote_average && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                     <Typography variant="body2" sx={{ color: '#64748B' }}>
-                      TMDB: <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{movie.vote_average.toFixed(1)}/10</span>
+                      TMDB: <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{Number(movie.vote_average).toFixed(1)}/10</span>
                     </Typography>
                   </Box>
                 )}

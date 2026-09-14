@@ -72,7 +72,7 @@ export const RatingModal: React.FC<RatingModalProps> = ({
             icon={<StarIcon sx={{ color: '#E5A93C', fontSize: 36 }} />}
           />
           <Typography variant="h5" sx={{ color: '#E5A93C', fontWeight: 700 }}>
-            {rating ? `${rating.toFixed(1)} / 5.0` : 'Not Rated'}
+            {rating != null && !isNaN(Number(rating)) ? `${Number(rating).toFixed(1)} / 5.0` : 'Not Rated'}
           </Typography>
         </Box>
 

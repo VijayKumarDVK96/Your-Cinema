@@ -76,7 +76,7 @@ export const TastePage: React.FC = () => {
           <Paper sx={{ p: 2.5, backgroundColor: '#0B0F19', border: '1px solid rgba(255,255,255,0.06)' }}>
             <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600 }}>AVERAGE RATING</Typography>
             <Typography variant="h4" sx={{ color: '#E5A93C', fontWeight: 800, mt: 0.5 }}>
-              {summary.averageRating ? `${summary.averageRating.toFixed(1)} ★` : '-'}
+              {summary.averageRating != null && !isNaN(Number(summary.averageRating)) ? `${Number(summary.averageRating).toFixed(1)} ★` : '-'}
             </Typography>
             <Typography variant="caption" sx={{ color: '#94A3B8' }}>from personal scores</Typography>
           </Paper>

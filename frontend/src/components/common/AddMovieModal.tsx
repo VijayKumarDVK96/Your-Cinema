@@ -246,7 +246,7 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                       </Box>
                       <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1 }}>
                         {item.media_type === 'tv' ? (item.number_of_seasons ? `${item.number_of_seasons} Seasons • ` : 'Series • ') : ''}
-                        {year} • TMDB {item.vote_average ? item.vote_average.toFixed(1) : '-'}
+                        {year} • TMDB {item.vote_average != null && !isNaN(Number(item.vote_average)) ? Number(item.vote_average).toFixed(1) : '-'}
                       </Typography>
 
                       <Button

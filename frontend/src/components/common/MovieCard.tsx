@@ -252,7 +252,11 @@ export const MovieCard: React.FC<MovieCardProps> = ({
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
               <StarIcon sx={{ fontSize: 15, color: movie.personal_rating ? '#E5A93C' : '#64748B' }} />
               <Typography variant="caption" sx={{ fontWeight: 700, color: movie.personal_rating ? '#E5A93C' : '#94A3B8' }}>
-                {movie.personal_rating ? movie.personal_rating.toFixed(1) : (movie.vote_average ? movie.vote_average.toFixed(1) : '-')}
+                {movie.personal_rating != null && !isNaN(Number(movie.personal_rating))
+                  ? Number(movie.personal_rating).toFixed(1)
+                  : (movie.vote_average != null && !isNaN(Number(movie.vote_average))
+                      ? Number(movie.vote_average).toFixed(1)
+                      : '-')}
               </Typography>
             </Box>
           </Box>
