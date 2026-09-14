@@ -15,6 +15,7 @@ const commitSchema = z.object({
   selectedTmdbIds: z.array(z.number()).min(1, 'Please select at least one movie to import'),
   watchlistId: z.string().optional(),
   newWatchlistName: z.string().optional(),
+  customGenreIds: z.array(z.string()).optional(),
 });
 
 router.post('/match', validate(matchSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -31,6 +32,7 @@ router.post('/commit', validate(commitSchema), async (req: Request, res: Respons
     const results = await ImportService.commitBatch(req.user!.id, req.body.selectedTmdbIds, {
       watchlistId: req.body.watchlistId,
       newWatchlistName: req.body.newWatchlistName,
+      customGenreIds: req.body.customGenreIds,
     });
     return res.status(200).json({ success: true, data: results });
   } catch (err) {

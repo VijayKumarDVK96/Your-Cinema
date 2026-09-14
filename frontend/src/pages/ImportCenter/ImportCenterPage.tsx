@@ -18,12 +18,14 @@ import {
   Alert,
   FormControl,
   InputLabel,
+  Divider,
 } from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchIcon from '@mui/icons-material/Search';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
+import CategoryIcon from '@mui/icons-material/Category';
+import AddIcon from '@mui/icons-material/Add';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 
@@ -48,12 +50,26 @@ export const ImportCenterPage: React.FC = () => {
   const [committing, setCommitting] = useState(false);
   const [importResult, setImportResult] = useState<any | null>(null);
 
+  // Genre selection state
+  const [selectedGenreIds, setSelectedGenreIds] = useState<Set<string>>(new Set());
+  const [newGenreNameInput, setNewGenreNameInput] = useState('');
+  const [creatingGenre, setCreatingGenre] = useState(false);
+
   // Fetch user's existing watchlists
   const { data: watchlists = [] } = useQuery<any[]>({
     queryKey: ['watchlists'],
     queryFn: async () => {
       const res = await api.get('/watchlists');
       return res.data?.data || [];
+    },
+  });
+
+  // Fetch genres (predefined + custom)
+  const { data: genresData, refetch: refetchGenres } = useQuery({
+    queryKey: ['genres'],
+    queryFn: async () => {
+      const res = await api.get('/genres');
+      return res.data?.data;
     },
   });
 
@@ -121,6 +137,33 @@ export const ImportCenterPage: React.FC = () => {
     setSelectedIndices(prev => new Set(prev).add(idx));
   };
 
+  const handleToggleGenre = (id: string) => {
+    setSelectedGenreIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleCreateGenre = async () => {
+    if (!newGenreNameInput.trim()) return;
+    setCreatingGenre(true);
+    try {
+      const res = await api.post('/genres', { name: newGenreNameInput.trim() });
+      const created = res.data?.data;
+      if (created?.id) {
+        setSelectedGenreIds(prev => new Set(prev).add(created.id));
+      }
+      setNewGenreNameInput('');
+      refetchGenres();
+    } catch {
+      // ignore
+    } finally {
+      setCreatingGenre(false);
+    }
+  };
+
   const handleCommitImport = async () => {
     const approvedTmdbIds = Array.from(selectedIndices)
       .map(idx => matches[idx]?.selectedMovie?.id)
@@ -128,7 +171,10 @@ export const ImportCenterPage: React.FC = () => {
 
     if (approvedTmdbIds.length === 0) return;
 
-    const payload: any = { selectedTmdbIds: approvedTmdbIds };
+    const payload: any = {
+      selectedTmdbIds: approvedTmdbIds,
+      customGenreIds: Array.from(selectedGenreIds),
+    };
     if (selectedWatchlistId === '__new__' && newWatchlistName.trim()) {
       payload.newWatchlistName = newWatchlistName.trim();
     } else if (selectedWatchlistId && selectedWatchlistId !== 'none') {
@@ -144,15 +190,20 @@ export const ImportCenterPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
       queryClient.invalidateQueries({ queryKey: ['taste-profile'] });
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+      queryClient.invalidateQueries({ queryKey: ['genres'] });
 
       // Clear matched once imported
       setMatches([]);
       setSelectedIndices(new Set());
+      setSelectedGenreIds(new Set());
       setNewWatchlistName('');
     } finally {
       setCommitting(false);
     }
   };
+
+  const predefinedGenres: any[] = genresData?.predefined || [];
+  const customGenres: any[] = genresData?.custom || [];
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -214,9 +265,155 @@ export const ImportCenterPage: React.FC = () => {
         </Alert>
       )}
 
-      {/* Step 2: Match Review Matrix & Final Approval */}
+      {/* Step 2 Panel (shown after matching) */}
       {matches.length > 0 && (
         <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+
+          {/* ─── Genre Pre-Assignment Panel ─── */}
+          <Paper
+            sx={{
+              p: 2.5,
+              mb: 3,
+              backgroundColor: '#0D1320',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              borderRadius: 2,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <CategoryIcon sx={{ color: '#38BDF8', fontSize: 20 }} />
+              </Box>
+              <Box sx={{ flexGrow: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                  Pre-Assign Custom Genres <span style={{ color: '#64748B', fontWeight: 400 }}>(Optional)</span>
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                  All selected genres will be applied to every movie in this import batch
+                </Typography>
+              </Box>
+              {selectedGenreIds.size > 0 && (
+                <Chip
+                  label={`${selectedGenreIds.size} genre${selectedGenreIds.size > 1 ? 's' : ''} selected`}
+                  size="small"
+                  sx={{ backgroundColor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700 }}
+                />
+              )}
+            </Box>
+
+            {/* Predefined genres — read-only reference */}
+            {predefinedGenres.length > 0 && (
+              <>
+                <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', display: 'block', mb: 0.8 }}>
+                  STANDARD GENRES (read-only — assigned automatically via TMDB)
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.7, mb: 2, maxHeight: 80, overflowY: 'auto' }}>
+                  {predefinedGenres.map((pg: any) => (
+                    <Chip
+                      key={pg.id}
+                      label={pg.name}
+                      size="small"
+                      variant="outlined"
+                      sx={{
+                        height: 24,
+                        fontSize: '0.72rem',
+                        color: pg.color || '#94A3B8',
+                        borderColor: `${pg.color || '#64748B'}50`,
+                        opacity: 0.6,
+                        cursor: 'default',
+                        fontWeight: 500,
+                      }}
+                    />
+                  ))}
+                </Box>
+                <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)', mb: 2 }} />
+              </>
+            )}
+
+            {/* Custom genres — selectable */}
+            <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, letterSpacing: '0.06em', display: 'block', mb: 1 }}>
+              YOUR CUSTOM GENRES — click to select
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5, minHeight: 34 }}>
+              {customGenres.map((cg: any) => {
+                const isSelected = selectedGenreIds.has(cg.id);
+                return (
+                  <Chip
+                    key={cg.id}
+                    label={cg.name}
+                    clickable
+                    onClick={() => handleToggleGenre(cg.id)}
+                    variant={isSelected ? 'filled' : 'outlined'}
+                    sx={{
+                      backgroundColor: isSelected ? `${cg.color || '#38BDF8'}30` : 'transparent',
+                      color: isSelected ? '#FFF' : (cg.color || '#38BDF8'),
+                      borderColor: cg.color || '#38BDF8',
+                      fontWeight: 700,
+                      transition: 'all 0.15s ease',
+                      '&:hover': {
+                        backgroundColor: `${cg.color || '#38BDF8'}20`,
+                        transform: 'scale(1.03)',
+                      },
+                    }}
+                  />
+                );
+              })}
+              {customGenres.length === 0 && (
+                <Typography variant="caption" sx={{ color: '#475569', alignSelf: 'center' }}>
+                  No custom genres yet — create one below to start tagging your imports.
+                </Typography>
+              )}
+            </Box>
+
+            {/* Inline genre creator */}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                size="small"
+                placeholder="Create & auto-select new genre (e.g. Heist, Gangster, Dark Comedy)..."
+                value={newGenreNameInput}
+                onChange={(e) => setNewGenreNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newGenreNameInput.trim()) handleCreateGenre();
+                }}
+                sx={{
+                  flexGrow: 1,
+                  input: { color: '#F8FAFC', fontSize: '0.85rem' },
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: 'rgba(56,189,248,0.2)' },
+                    '&:hover fieldset': { borderColor: '#38BDF8' },
+                    '&.Mui-focused fieldset': { borderColor: '#38BDF8' },
+                  },
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={creatingGenre ? <CircularProgress size={13} /> : <AddIcon />}
+                disabled={!newGenreNameInput.trim() || creatingGenre}
+                onClick={handleCreateGenre}
+                sx={{
+                  color: '#38BDF8',
+                  borderColor: 'rgba(56,189,248,0.4)',
+                  whiteSpace: 'nowrap',
+                  fontWeight: 700,
+                  '&:hover': { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.08)' },
+                }}
+              >
+                {creatingGenre ? 'Creating...' : 'Add & Select'}
+              </Button>
+            </Box>
+          </Paper>
+
           {/* Watchlist Destination Toolbar */}
           <Paper
             sx={{

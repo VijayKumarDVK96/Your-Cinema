@@ -1,6 +1,7 @@
 import { TmdbService } from '../tmdb/tmdb.service.js';
 import { MoviesService } from '../movies/movies.service.js';
 import { WatchlistsService } from '../watchlists/watchlists.service.js';
+import { GenresService } from '../genres/genres.service.js';
 import { BadRequestError } from '../../utils/errors.js';
 import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 
@@ -96,7 +97,7 @@ export class ImportService {
   static async commitBatch(
     userId: string,
     selectedTmdbIds: number[],
-    options?: { watchlistId?: string; newWatchlistName?: string }
+    options?: { watchlistId?: string; newWatchlistName?: string; customGenreIds?: string[] }
   ) {
     if (!selectedTmdbIds || selectedTmdbIds.length === 0) {
       throw new BadRequestError('No approved movies were selected for import.');
@@ -160,6 +161,17 @@ export class ImportService {
           watchlistAddedCount++;
         } catch {
           // already in watchlist or not found
+        }
+      }
+
+      // Attach selected custom genres to this movie
+      if (userMovieId && options?.customGenreIds && options.customGenreIds.length > 0) {
+        for (const genreId of options.customGenreIds) {
+          try {
+            await GenresService.attachGenreToMovie(userMovieId, genreId);
+          } catch {
+            // Ignore errors (duplicate / invalid genre id)
+          }
         }
       }
     }

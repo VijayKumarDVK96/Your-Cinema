@@ -3,6 +3,7 @@ import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 import { TmdbService } from '../tmdb/tmdb.service.js';
 import { WatchlistsService } from '../watchlists/watchlists.service.js';
 import { GenresService } from '../genres/genres.service.js';
+import { TagsService } from '../tags/tags.service.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
 
 export interface MovieFilters {
@@ -856,12 +857,15 @@ export class MoviesService {
 
   static async bulkUpdate(userId: string, data: {
     movieIds: string[];
-    action: 'mark_watched' | 'mark_unwatched' | 'favorite' | 'unfavorite' | 'delete' | 'add_tag' | 'add_to_watchlist';
+    action: 'mark_watched' | 'mark_unwatched' | 'favorite' | 'unfavorite' | 'delete' | 'add_tag' | 'remove_tag' | 'add_genre' | 'remove_genre' | 'add_to_watchlist' | 'edit_tags_genres';
     tagId?: string;
+    tagIds?: string[];
+    genreId?: string;
+    genreIds?: string[];
     watchlistId?: string;
     newWatchlistName?: string;
   }) {
-    const { movieIds, action, tagId, watchlistId, newWatchlistName } = data;
+    const { movieIds, action, tagId, tagIds, genreId, genreIds, watchlistId, newWatchlistName } = data;
     if (!movieIds || movieIds.length === 0) {
       throw new BadRequestError('No movies selected for bulk action.');
     }
@@ -885,6 +889,35 @@ export class MoviesService {
     } else if (action === 'unfavorite') {
       for (const id of movieIds) {
         await this.updateMovie(userId, id, { is_favorite: false });
+      }
+    } else if (action === 'add_tag' && tagId) {
+      for (const id of movieIds) {
+        await TagsService.attachTagToMovie(id, tagId);
+      }
+    } else if (action === 'remove_tag' && tagId) {
+      for (const id of movieIds) {
+        await TagsService.detachTagFromMovie(id, tagId);
+      }
+    } else if (action === 'add_genre' && genreId) {
+      for (const id of movieIds) {
+        await GenresService.attachGenreToMovie(id, genreId);
+      }
+    } else if (action === 'remove_genre' && genreId) {
+      for (const id of movieIds) {
+        await GenresService.detachGenreFromMovie(id, genreId);
+      }
+    } else if (action === 'edit_tags_genres') {
+      for (const id of movieIds) {
+        if (tagIds && tagIds.length > 0) {
+          for (const tid of tagIds) {
+            await TagsService.attachTagToMovie(id, tid);
+          }
+        }
+        if (genreIds && genreIds.length > 0) {
+          for (const gid of genreIds) {
+            await GenresService.attachGenreToMovie(id, gid);
+          }
+        }
       }
     } else if (action === 'add_to_watchlist') {
       let targetWatchlistId = watchlistId;

@@ -24,8 +24,23 @@ const updateMovieSchema = z.object({
 
 const bulkSchema = z.object({
   movieIds: z.array(z.string()),
-  action: z.enum(['mark_watched', 'mark_unwatched', 'favorite', 'unfavorite', 'delete', 'add_tag', 'add_to_watchlist']),
+  action: z.enum([
+    'mark_watched',
+    'mark_unwatched',
+    'favorite',
+    'unfavorite',
+    'delete',
+    'add_tag',
+    'remove_tag',
+    'add_genre',
+    'remove_genre',
+    'add_to_watchlist',
+    'edit_tags_genres'
+  ]),
   tagId: z.string().optional(),
+  tagIds: z.array(z.string()).optional(),
+  genreId: z.string().optional(),
+  genreIds: z.array(z.string()).optional(),
   watchlistId: z.string().optional(),
   newWatchlistName: z.string().optional(),
 });

@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { UserMovie } from '../../types/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
+import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
 
 interface MovieCardProps {
   movie: UserMovie;
@@ -61,7 +62,9 @@ export const MovieCard: React.FC<MovieCardProps> = ({
 
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (ottInfo?.url && primarySource?.source_type === 'ott') {
+    if (primarySource && isYouTubeSource(primarySource)) {
+      openYouTubeAutoplay(primarySource.external_url || '', movie.title);
+    } else if (ottInfo?.url && primarySource?.source_type === 'ott') {
       window.open(ottInfo.url, '_blank', 'noopener,noreferrer');
     } else if (primarySource?.source_type === 'google_drive') {
       openPlayer(movie, primarySource);

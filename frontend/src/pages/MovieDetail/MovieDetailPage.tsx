@@ -57,7 +57,8 @@ import { TmdbRefreshModal } from '../../components/common/TmdbRefreshModal.js';
 import { ManageSourcesModal } from '../../components/common/ManageSourcesModal.js';
 import { SelectSourceModal } from '../../components/common/SelectSourceModal.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
-import { OttBadge } from '../../utils/ottProviders.js';
+import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
+import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
 
 export const MovieDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -241,6 +242,16 @@ export const MovieDetailPage: React.FC = () => {
   const primaryOttSource = ottSources[0] || null;
   const hasMultipleSources = (movie.sources || []).length > 1;
 
+  // If a stored external_url is a TMDB URL, replace it with the OTT platform's own search URL
+  const resolveOttUrl = (src: any): string => {
+    const raw = src?.external_url || '';
+    if (raw && raw.includes('themoviedb.org')) {
+      // Fall back to the platform's search URL
+      return getOttMeta(src.provider_name, src.provider_icon).getDefaultSearchUrl(movie.title);
+    }
+    return raw || getOttMeta(src.provider_name, src.provider_icon).getDefaultSearchUrl(movie.title);
+  };
+
   // Inferred OTT platform for known titles if sources are empty
   const tLower = (movie.title || '').toLowerCase();
   let fallbackOtt: { name: string; icon?: string; url?: string } | null = null;
@@ -260,13 +271,17 @@ export const MovieDetailPage: React.FC = () => {
     if (hasMultipleSources) {
       setSelectSourceOpen(true);
     } else if (primaryOttSource) {
-      if (primaryOttSource.external_url) {
-        window.open(primaryOttSource.external_url, '_blank', 'noopener,noreferrer');
+      if (isYouTubeSource(primaryOttSource)) {
+        openYouTubeAutoplay(primaryOttSource.external_url || '', movie.title);
       } else {
-        openPlayer(movie, primaryOttSource);
+        window.open(resolveOttUrl(primaryOttSource), '_blank', 'noopener,noreferrer');
       }
     } else if (fallbackOtt?.url) {
-      window.open(fallbackOtt.url, '_blank', 'noopener,noreferrer');
+      if (fallbackOtt.name.toLowerCase().includes('youtube')) {
+        openYouTubeAutoplay(fallbackOtt.url, movie.title);
+      } else {
+        window.open(fallbackOtt.url, '_blank', 'noopener,noreferrer');
+      }
     } else if (driveSource) {
       openPlayer(movie, driveSource);
     } else {
@@ -363,7 +378,11 @@ export const MovieDetailPage: React.FC = () => {
                     size="medium"
                     interactive
                     onClick={() => {
-                      if (s.external_url) window.open(s.external_url, '_blank', 'noopener,noreferrer');
+                      if (isYouTubeSource(s)) {
+                        openYouTubeAutoplay(s.external_url || '', movie.title);
+                      } else {
+                        window.open(resolveOttUrl(s), '_blank', 'noopener,noreferrer');
+                      }
                     }}
                   />
                 ))}
@@ -502,40 +521,98 @@ export const MovieDetailPage: React.FC = () => {
                 <Tooltip title={movie.is_favorite ? 'Remove from favorites' : 'Mark favorite'}>
                   <IconButton
                     onClick={() => favMutation.mutate()}
-                    sx={{ color: movie.is_favorite ? '#EF4444' : '#64748B', border: '1px solid rgba(255,255,255,0.1)' }}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '10px',
+                      backgroundColor: movie.is_favorite ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                      border: movie.is_favorite ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                      color: movie.is_favorite ? '#EF4444' : '#94A3B8',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': {
+                        backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                        borderColor: 'rgba(239, 68, 68, 0.5)',
+                        color: '#EF4444',
+                        transform: 'translateY(-1px)',
+                      },
+                    }}
                   >
-                    {movie.is_favorite ? <FavoriteIcon /> : <FavoriteBorderIcon />}
+                    {movie.is_favorite ? <FavoriteIcon sx={{ fontSize: 20 }} /> : <FavoriteBorderIcon sx={{ fontSize: 20 }} />}
                   </IconButton>
                 </Tooltip>
 
-                <Button
-                  variant="outlined"
-                  startIcon={<EditIcon />}
-                  onClick={() => setEditModalOpen(true)}
-                  sx={{ color: '#CBD5E1', borderColor: 'rgba(255,255,255,0.1)' }}
-                >
-                  Edit
-                </Button>
+                <Tooltip title="Edit movie details">
+                  <IconButton
+                    onClick={() => setEditModalOpen(true)}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#94A3B8',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                        borderColor: 'rgba(255, 255, 255, 0.22)',
+                        color: '#F8FAFC',
+                        transform: 'translateY(-1px)',
+                      },
+                    }}
+                  >
+                    <EditIcon sx={{ fontSize: 20 }} />
+                  </IconButton>
+                </Tooltip>
 
-                <Button
-                  variant="outlined"
-                  startIcon={<SyncIcon />}
-                  onClick={() => setRefreshModalOpen(true)}
-                  sx={{ color: '#38BDF8', borderColor: 'rgba(56,189,248,0.3)' }}
-                >
-                  TMDB Refresh
-                </Button>
+                <Tooltip title="Refresh from TMDB">
+                  <IconButton
+                    onClick={() => setRefreshModalOpen(true)}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.06)',
+                      border: '1px solid rgba(56, 189, 248, 0.22)',
+                      color: '#38BDF8',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': {
+                        backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                        borderColor: 'rgba(56, 189, 248, 0.5)',
+                        color: '#7DD3FC',
+                        transform: 'translateY(-1px)',
+                      },
+                    }}
+                  >
+                    <SyncIcon sx={{ fontSize: 20 }} />
+                  </IconButton>
+                </Tooltip>
 
-                <IconButton
-                  onClick={() => {
-                    if (window.confirm(`Are you sure you want to remove "${movie.title}" from your personal library?`)) {
-                      deleteMutation.mutate();
-                    }
-                  }}
-                  sx={{ color: '#64748B', '&:hover': { color: '#EF4444' } }}
-                >
-                  <DeleteOutlineIcon />
-                </IconButton>
+                <Tooltip title="Remove from library">
+                  <IconButton
+                    onClick={() => {
+                      if (window.confirm(`Are you sure you want to remove "${movie.title}" from your personal library?`)) {
+                        deleteMutation.mutate();
+                      }
+                    }}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#94A3B8',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': {
+                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                        borderColor: 'rgba(239, 68, 68, 0.35)',
+                        color: '#EF4444',
+                        transform: 'translateY(-1px)',
+                      },
+                    }}
+                  >
+                    <DeleteOutlineIcon sx={{ fontSize: 20 }} />
+                  </IconButton>
+                </Tooltip>
               </Stack>
             </Box>
           </Grid>
@@ -986,8 +1063,10 @@ export const MovieDetailPage: React.FC = () => {
                         color="primary"
                         endIcon={isOtt && src.external_url ? <OpenInNewIcon sx={{ fontSize: '14px !important' }} /> : undefined}
                         onClick={() => {
-                          if (isOtt && src.external_url) {
-                            window.open(src.external_url, '_blank', 'noopener,noreferrer');
+                          if (isYouTubeSource(src)) {
+                            openYouTubeAutoplay(src.external_url || '', movie.title);
+                          } else if (isOtt) {
+                            window.open(resolveOttUrl(src), '_blank', 'noopener,noreferrer');
                           } else {
                             openPlayer(movie, src);
                           }
@@ -1172,7 +1251,9 @@ export const MovieDetailPage: React.FC = () => {
         onClose={() => setSelectSourceOpen(false)}
         movie={movie}
         onLaunchSource={(src) => {
-          if (src.source_type === 'ott' && src.external_url) {
+          if (isYouTubeSource(src)) {
+            openYouTubeAutoplay(src.external_url || '', movie.title);
+          } else if (src.source_type === 'ott' && src.external_url) {
             window.open(src.external_url, '_blank', 'noopener,noreferrer');
           } else {
             openPlayer(movie, src);

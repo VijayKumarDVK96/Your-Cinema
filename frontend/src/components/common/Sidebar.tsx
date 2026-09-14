@@ -33,9 +33,12 @@ export const Sidebar: React.FC = () => {
         flexDirection: 'column',
         justifyContent: 'space-between',
         py: 2,
-        height: 'calc(100vh - 65px)',
+        height: '100%',
         position: 'sticky',
-        top: 65,
+        top: 0,
+        alignSelf: 'flex-start',
+        minHeight: 'calc(100vh - 65px)',
+        overflowY: 'auto',
       }}
     >
       <List sx={{ px: 1.5 }}>

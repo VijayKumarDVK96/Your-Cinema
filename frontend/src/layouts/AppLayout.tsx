@@ -28,7 +28,7 @@ export const AppLayout: React.FC = () => {
         onSearchChange={handleSearchChange}
       />
 
-      <Box sx={{ display: 'flex', flexGrow: 1 }}>
+      <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden', position: 'relative' }}>
         <Sidebar />
 
         <Box
@@ -40,6 +40,8 @@ export const AppLayout: React.FC = () => {
             maxWidth: '1600px',
             width: '100%',
             mx: 'auto',
+            overflowY: 'auto',
+            height: 'calc(100vh - 65px)',
           }}
         >
           <Outlet />

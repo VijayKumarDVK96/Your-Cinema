@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -11,7 +11,6 @@ import {
   FormControlLabel,
   Alert,
   CircularProgress,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -34,6 +33,9 @@ import LockResetIcon from '@mui/icons-material/LockReset';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import InputAdornment from '@mui/material/InputAdornment';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
@@ -110,6 +112,12 @@ export const SettingsPage: React.FC = () => {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearSuccessMsg, setClearSuccessMsg] = useState<string | null>(null);
+
+  // Export / Import State
+  const [exportLoading, setExportLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   // Profile Form State
   const [name, setName] = useState(user?.name || '');
@@ -224,6 +232,96 @@ export const SettingsPage: React.FC = () => {
       alert(err.message || 'Failed to update AI provider/model.');
     } finally {
       setAiSaving(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    setExportLoading(true);
+    try {
+      const [moviesRes, watchlistsRes, genresRes, tagsRes] = await Promise.all([
+        api.get('/movies?limit=9999'),
+        api.get('/watchlists'),
+        api.get('/genres'),
+        api.get('/tags'),
+      ]);
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        version: '1.0',
+        movies: moviesRes.data?.data?.movies || [],
+        watchlists: watchlistsRes.data?.data || [],
+        customGenres: genresRes.data?.data?.custom || [],
+        tags: tagsRes.data?.data || [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `your-cinema-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || 'Export failed.');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportLoading(true);
+    setImportMsg(null);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      // Validate basic structure
+      if (!payload.version || !Array.isArray(payload.movies)) {
+        throw new Error('Invalid backup file format. Please use a file exported from Your Cinema.');
+      }
+      // Import custom genres first
+      const genreIdMap: Record<string, string> = {};
+      for (const cg of (payload.customGenres || [])) {
+        try {
+          const res = await api.post('/genres', { name: cg.name, color: cg.color, description: cg.description });
+          if (res.data?.data?.id) genreIdMap[cg.id] = res.data.data.id;
+        } catch { /* genre may already exist */ }
+      }
+      // Import tags
+      const tagIdMap: Record<string, string> = {};
+      for (const tag of (payload.tags || [])) {
+        try {
+          const res = await api.post('/tags', { name: tag.name });
+          if (res.data?.data?.id) tagIdMap[tag.id] = res.data.data.id;
+        } catch { /* tag may already exist */ }
+      }
+      // Import movies
+      let importedCount = 0;
+      for (const movie of (payload.movies || [])) {
+        try {
+          const tmdbId = movie.tmdb_id || movie.id;
+          const mediaType = movie.media_type || 'movie';
+          if (!tmdbId) continue;
+          await api.post('/movies', {
+            tmdb_id: tmdbId,
+            media_type: mediaType,
+            watch_status: movie.watch_status,
+            personal_rating: movie.personal_rating,
+            is_favorite: movie.is_favorite,
+            personal_notes: movie.personal_notes,
+          });
+          importedCount++;
+        } catch { /* may already exist */ }
+      }
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['watchlists'] });
+      queryClient.invalidateQueries({ queryKey: ['genres'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      setImportMsg({ type: 'success', text: `Import complete! ${importedCount} movies restored.` });
+    } catch (err: any) {
+      setImportMsg({ type: 'error', text: err.message || 'Import failed. Please check the file format.' });
+    } finally {
+      setImportLoading(false);
+      if (importFileRef.current) importFileRef.current.value = '';
     }
   };
 
@@ -567,7 +665,7 @@ export const SettingsPage: React.FC = () => {
         {/* Informative Stats */}
         <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
           <Chip
-            label={`${genresData?.predefined?.length || 18} Standard Predefined Genres`}
+            label={`${genresData?.predefined?.length || 26} Standard Predefined Genres`}
             size="small"
             sx={{ backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C', fontWeight: 600 }}
           />
@@ -677,7 +775,59 @@ export const SettingsPage: React.FC = () => {
         )}
       </Paper>
 
-      {/* 6. Danger Zone: Sanctuary Reset (Movies, Series, Watchlists & Custom Genres) */}
+      {/* 6. Bulk Export & Import */}
+      <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <DataObjectIcon sx={{ color: '#38BDF8' }} />
+          <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+            Bulk Export & Import
+          </Typography>
+        </Box>
+        <Typography variant="body2" sx={{ color: '#94A3B8', mb: 2.5 }}>
+          Export your entire library — watchlists, edited movies, custom genres, and tags — as a JSON backup file. Use the import to restore or migrate data to another device.
+        </Typography>
+
+        {importMsg && (
+          <Alert severity={importMsg.type} sx={{ mb: 2 }} onClose={() => setImportMsg(null)}>
+            {importMsg.text}
+          </Alert>
+        )}
+
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            variant="contained"
+            startIcon={exportLoading ? <CircularProgress size={16} /> : <FileDownloadIcon />}
+            disabled={exportLoading}
+            onClick={handleExportData}
+            sx={{
+              background: 'linear-gradient(135deg, #0EA5E9, #38BDF8)',
+              fontWeight: 700,
+              '&:hover': { background: 'linear-gradient(135deg, #0284C7, #0EA5E9)' },
+            }}
+          >
+            {exportLoading ? 'Exporting...' : 'Export Library as JSON'}
+          </Button>
+
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={handleImportData}
+          />
+          <Button
+            variant="outlined"
+            startIcon={importLoading ? <CircularProgress size={16} /> : <UploadFileIcon />}
+            disabled={importLoading}
+            onClick={() => importFileRef.current?.click()}
+            sx={{ color: '#94A3B8', borderColor: 'rgba(148,163,184,0.3)', fontWeight: 600 }}
+          >
+            {importLoading ? 'Importing...' : 'Import from JSON Backup'}
+          </Button>
+        </Box>
+      </Paper>
+
+      {/* 7. Danger Zone: Sanctuary Reset (Movies, Series, Watchlists & Custom Genres) */}
       <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <DeleteSweepIcon sx={{ color: '#EF4444' }} />

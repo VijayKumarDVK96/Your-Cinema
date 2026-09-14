@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
 import { UserMovie, MovieSource } from '../types/index.js';
+import { isYouTubeSource, openYouTubeAutoplay } from '../utils/youtube.js';
 
 interface PlayerContextType {
   activeMovie: UserMovie | null;
@@ -17,9 +18,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
   const openPlayer = (movie: UserMovie, source?: MovieSource) => {
-    setActiveMovie(movie);
     // If source not provided, pick first available source or default to trailer
     const chosenSource = source || (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
+
+    // If assigned OTT or source is YouTube, directly open YouTube app or website with autoplay
+    if (chosenSource && isYouTubeSource(chosenSource)) {
+      openYouTubeAutoplay(chosenSource.external_url || '', movie.title);
+      return;
+    }
+
+    setActiveMovie(movie);
     setActiveSource(chosenSource);
     setIsOpen(true);
   };

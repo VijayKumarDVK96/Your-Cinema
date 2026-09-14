@@ -26,16 +26,23 @@ import FavoriteIcon from '@mui/icons-material/Favorite';
 import MovieFilterIcon from '@mui/icons-material/MovieFilter';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import AddIcon from '@mui/icons-material/Add';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import StarIcon from '@mui/icons-material/Star';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
 import { FilterBar } from '../../components/common/FilterBar.js';
 import { SkeletonGrid } from '../../components/feedback/SkeletonGrid.js';
 import { EmptyState } from '../../components/feedback/EmptyState.js';
+import { usePlayer } from '../../context/PlayerContext.js';
+import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
 
 export const MyMoviesPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { openPlayer } = usePlayer();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -53,6 +60,13 @@ export const MyMoviesPage: React.FC = () => {
   const [createWatchlistOpen, setCreateWatchlistOpen] = useState(false);
   const [newWatchlistNameInput, setNewWatchlistNameInput] = useState('');
   const [isBulkMode, setIsBulkMode] = useState<boolean>(false);
+
+  // Bulk Edit Tags & Genres state
+  const [bulkTagsGenresOpen, setBulkTagsGenresOpen] = useState(false);
+  const [selectedBulkTagIds, setSelectedBulkTagIds] = useState<Set<string>>(new Set());
+  const [selectedBulkGenreIds, setSelectedBulkGenreIds] = useState<Set<string>>(new Set());
+  const [newTagNameInput, setNewTagNameInput] = useState('');
+  const [newGenreNameInput, setNewGenreNameInput] = useState('');
 
   const searchTerm = searchParams.get('search') || '';
 
@@ -140,6 +154,55 @@ export const MyMoviesPage: React.FC = () => {
     },
   });
 
+  const bulkTagsGenresMutation = useMutation({
+    mutationFn: async () => {
+      await api.post('/movies/bulk', {
+        movieIds: Array.from(selectedIds),
+        action: 'edit_tags_genres',
+        tagIds: Array.from(selectedBulkTagIds),
+        genreIds: Array.from(selectedBulkGenreIds),
+      });
+    },
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      setIsBulkMode(false);
+      setBulkTagsGenresOpen(false);
+      setSelectedBulkTagIds(new Set());
+      setSelectedBulkGenreIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      queryClient.invalidateQueries({ queryKey: ['genres'] });
+    },
+  });
+
+  const createTagMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await api.post('/tags', { name });
+      return res.data?.data;
+    },
+    onSuccess: (newTag) => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      if (newTag?.id) {
+        setSelectedBulkTagIds(prev => new Set(prev).add(newTag.id));
+      }
+      setNewTagNameInput('');
+    },
+  });
+
+  const createGenreMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await api.post('/genres', { name });
+      return res.data?.data;
+    },
+    onSuccess: (newGenre) => {
+      queryClient.invalidateQueries({ queryKey: ['genres'] });
+      if (newGenre?.id) {
+        setSelectedBulkGenreIds(prev => new Set(prev).add(newGenre.id));
+      }
+      setNewGenreNameInput('');
+    },
+  });
+
   const handleToggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -185,16 +248,32 @@ export const MyMoviesPage: React.FC = () => {
             {isBulkMode ? 'Exit Bulk Mode' : 'Bulk Select'}
           </Button>
 
-          <ButtonGroup size="small" sx={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+          <ButtonGroup size="small" sx={{ backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 1.5 }}>
             <Button
               onClick={() => setViewMode('grid')}
-              sx={{ color: viewMode === 'grid' ? '#E5A93C' : '#64748B' }}
+              variant={viewMode === 'grid' ? 'contained' : 'outlined'}
+              sx={{
+                backgroundColor: viewMode === 'grid' ? 'rgba(229,169,60,0.18)' : 'transparent',
+                color: viewMode === 'grid' ? '#E5A93C' : '#64748B',
+                borderColor: viewMode === 'grid' ? '#E5A93C' : 'rgba(255,255,255,0.1)',
+                '&:hover': {
+                  backgroundColor: viewMode === 'grid' ? 'rgba(229,169,60,0.25)' : 'rgba(255,255,255,0.08)',
+                },
+              }}
             >
               <GridViewIcon fontSize="small" />
             </Button>
             <Button
               onClick={() => setViewMode('list')}
-              sx={{ color: viewMode === 'list' ? '#E5A93C' : '#64748B' }}
+              variant={viewMode === 'list' ? 'contained' : 'outlined'}
+              sx={{
+                backgroundColor: viewMode === 'list' ? 'rgba(229,169,60,0.18)' : 'transparent',
+                color: viewMode === 'list' ? '#E5A93C' : '#64748B',
+                borderColor: viewMode === 'list' ? '#E5A93C' : 'rgba(255,255,255,0.1)',
+                '&:hover': {
+                  backgroundColor: viewMode === 'list' ? 'rgba(229,169,60,0.25)' : 'rgba(255,255,255,0.08)',
+                },
+              }}
             >
               <ViewListIcon fontSize="small" />
             </Button>
@@ -263,6 +342,20 @@ export const MyMoviesPage: React.FC = () => {
               onClick={(e) => setWatchlistAnchorEl(e.currentTarget)}
             >
               Add to Watchlist
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              sx={{
+                color: '#38BDF8',
+                borderColor: 'rgba(56, 189, 248, 0.5)',
+                '&:hover': { borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)' },
+              }}
+              startIcon={<LocalOfferIcon />}
+              disabled={selectedIds.size === 0}
+              onClick={() => setBulkTagsGenresOpen(true)}
+            >
+              Edit Tags & Genres
             </Button>
             <Button
               size="small"
@@ -373,6 +466,217 @@ export const MyMoviesPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Bulk Edit Tags & Genres Dialog */}
+      <Dialog
+        open={bulkTagsGenresOpen}
+        onClose={() => setBulkTagsGenresOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0F172A',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 3,
+            p: 1,
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#F8FAFC', fontWeight: 800, pb: 1 }}>
+          Edit Tags & Genres ({selectedIds.size} {selectedIds.size === 1 ? 'title' : 'titles'} selected)
+        </DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1.5 }}>
+          {/* Tags Section */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 1.2 }}>
+              SELECT TAGS TO APPLY
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+              {(tagsData || []).map((tag: any) => {
+                const isSelected = selectedBulkTagIds.has(tag.id);
+                return (
+                  <Chip
+                    key={tag.id}
+                    label={`#${tag.name}`}
+                    clickable
+                    onClick={() => {
+                      setSelectedBulkTagIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(tag.id)) next.delete(tag.id);
+                        else next.add(tag.id);
+                        return next;
+                      });
+                    }}
+                    variant={isSelected ? 'filled' : 'outlined'}
+                    sx={{
+                      backgroundColor: isSelected ? `${tag.color || '#E5A93C'}33` : 'transparent',
+                      color: isSelected ? '#FFF' : (tag.color || '#E5A93C'),
+                      borderColor: tag.color || '#E5A93C',
+                      fontWeight: 600,
+                    }}
+                  />
+                );
+              })}
+              {(tagsData || []).length === 0 && (
+                <Typography variant="caption" sx={{ color: '#64748B' }}>
+                  No tags created yet. Add one below!
+                </Typography>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Create new tag (e.g. Mind Bending)..."
+                value={newTagNameInput}
+                onChange={(e) => setNewTagNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newTagNameInput.trim()) {
+                    createTagMutation.mutate(newTagNameInput.trim());
+                  }
+                }}
+                sx={{
+                  input: { color: '#F8FAFC', fontSize: '0.875rem' },
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
+                    '&:hover fieldset': { borderColor: '#E5A93C' },
+                  },
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={!newTagNameInput.trim() || createTagMutation.isPending}
+                onClick={() => createTagMutation.mutate(newTagNameInput.trim())}
+                sx={{ color: '#E5A93C', borderColor: 'rgba(229,169,60,0.5)', whiteSpace: 'nowrap' }}
+              >
+                Add Tag
+              </Button>
+            </Box>
+          </Box>
+
+          {/* Genres Section */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700, mb: 1.2 }}>
+              SELECT CUSTOM GENRES TO APPLY
+            </Typography>
+
+            {/* Predefined Genres — read-only reference */}
+            {(genresData?.predefined || []).length > 0 && (
+              <>
+                <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600, mb: 0.8, display: 'block' }}>
+                  TMDB PREDEFINED GENRES (read-only — already linked via TMDB data)
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, mb: 1.5, maxHeight: 90, overflowY: 'auto', pr: 0.5 }}>
+                  {(genresData?.predefined || []).map((pg: any) => (
+                    <Chip
+                      key={pg.id}
+                      label={pg.name}
+                      size="small"
+                      sx={{
+                        backgroundColor: 'transparent',
+                        color: pg.color || '#94A3B8',
+                        borderColor: `${pg.color || '#64748B'}55`,
+                        fontWeight: 500,
+                        fontSize: '0.72rem',
+                        height: 24,
+                        opacity: 0.7,
+                        cursor: 'default',
+                      }}
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </>
+            )}
+
+            {/* Custom Genres — selectable */}
+            <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600, mb: 0.8, display: 'block' }}>
+              YOUR CUSTOM GENRES (selectable)
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+              {((genresData?.custom) || []).map((cg: any) => {
+                const isSelected = selectedBulkGenreIds.has(cg.id);
+                return (
+                  <Chip
+                    key={cg.id}
+                    label={cg.name}
+                    clickable
+                    onClick={() => {
+                      setSelectedBulkGenreIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(cg.id)) next.delete(cg.id);
+                        else next.add(cg.id);
+                        return next;
+                      });
+                    }}
+                    variant={isSelected ? 'filled' : 'outlined'}
+                    sx={{
+                      backgroundColor: isSelected ? `${cg.color || '#38BDF8'}33` : 'transparent',
+                      color: isSelected ? '#FFF' : (cg.color || '#38BDF8'),
+                      borderColor: cg.color || '#38BDF8',
+                      fontWeight: 600,
+                    }}
+                  />
+                );
+              })}
+              {((genresData?.custom) || []).length === 0 && (
+                <Typography variant="caption" sx={{ color: '#64748B' }}>
+                  No custom genres yet. Create them in Settings → Custom Genres, then assign here.
+                </Typography>
+              )}
+            </Box>
+
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Create new custom genre (e.g. Cyberpunk)..."
+                value={newGenreNameInput}
+                onChange={(e) => setNewGenreNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newGenreNameInput.trim()) {
+                    createGenreMutation.mutate(newGenreNameInput.trim());
+                  }
+                }}
+                sx={{
+                  input: { color: '#F8FAFC', fontSize: '0.875rem' },
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
+                    '&:hover fieldset': { borderColor: '#38BDF8' },
+                  },
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={!newGenreNameInput.trim() || createGenreMutation.isPending}
+                onClick={() => createGenreMutation.mutate(newGenreNameInput.trim())}
+                sx={{ color: '#38BDF8', borderColor: 'rgba(56,189,248,0.5)', whiteSpace: 'nowrap' }}
+              >
+                Add Genre
+              </Button>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setBulkTagsGenresOpen(false)} sx={{ color: '#94A3B8' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={
+              (selectedBulkTagIds.size === 0 && selectedBulkGenreIds.size === 0) ||
+              bulkTagsGenresMutation.isPending
+            }
+            onClick={() => bulkTagsGenresMutation.mutate()}
+            sx={{ fontWeight: 700 }}
+          >
+            {bulkTagsGenresMutation.isPending ? 'Applying...' : `Apply to ${selectedIds.size} Titles`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Advanced Filter Bar */}
       <FilterBar
         status={status}
@@ -407,33 +711,192 @@ export const MyMoviesPage: React.FC = () => {
       {isLoading ? (
         <SkeletonGrid count={12} />
       ) : movies.length > 0 ? (
-        <Grid container spacing={2.5}>
-          {movies.map((movie: any) => {
-            const isSelected = selectedIds.has(movie.user_movie_id);
-            return (
-              <Grid item xs={6} sm={4} md={3} lg={2} key={movie.user_movie_id}>
-                <Box sx={{ position: 'relative' }}>
+        viewMode === 'grid' ? (
+          <Grid container spacing={2.5}>
+            {movies.map((movie: any) => {
+              const isSelected = selectedIds.has(movie.user_movie_id);
+              return (
+                <Grid item xs={6} sm={4} md={3} lg={2} key={movie.user_movie_id}>
+                  <Box sx={{ position: 'relative' }}>
+                    {isBulkMode && (
+                      <Box sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10 }}>
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => handleToggleSelect(movie.user_movie_id)}
+                          sx={{
+                            color: '#FFF',
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            borderRadius: '4px',
+                            p: 0.5,
+                            '&.Mui-checked': { color: '#38BDF8', backgroundColor: 'rgba(0,0,0,0.8)' },
+                          }}
+                        />
+                      </Box>
+                    )}
+                    <MovieCard movie={movie} />
+                  </Box>
+                </Grid>
+              );
+            })}
+          </Grid>
+        ) : (
+          <Stack spacing={1.5}>
+            {movies.map((movie: any) => {
+              const isSelected = selectedIds.has(movie.user_movie_id);
+              const posterUrl = movie.poster_path
+                ? (movie.poster_path.startsWith('http') ? movie.poster_path : `https://image.tmdb.org/t/p/w200${movie.poster_path}`)
+                : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80';
+              const year = movie.release_date ? movie.release_date.substring(0, 4) : '';
+              const primarySource = (movie.sources || []).find((s: any) => s.source_type === 'ott' || s.source_type === 'google_drive' || s.source_type === 'youtube') ||
+                (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
+
+              return (
+                <Paper
+                  key={movie.user_movie_id}
+                  onClick={() => navigate(`/movies/${movie.user_movie_id}`)}
+                  sx={{
+                    p: 1.5,
+                    backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.08)' : '#0B0F19',
+                    border: isSelected ? '1px solid #38BDF8' : '1px solid rgba(255, 255, 255, 0.07)',
+                    borderRadius: 2.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                      borderColor: isSelected ? '#38BDF8' : 'rgba(255, 255, 255, 0.16)',
+                      transform: 'translateY(-1px)',
+                    },
+                  }}
+                >
                   {isBulkMode && (
-                    <Box sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10 }}>
-                      <Checkbox
-                        checked={isSelected}
-                        onChange={() => handleToggleSelect(movie.user_movie_id)}
-                        sx={{
-                          color: '#FFF',
-                          backgroundColor: 'rgba(0,0,0,0.6)',
-                          borderRadius: '4px',
-                          p: 0.5,
-                          '&.Mui-checked': { color: '#38BDF8', backgroundColor: 'rgba(0,0,0,0.8)' },
-                        }}
-                      />
-                    </Box>
+                    <Checkbox
+                      checked={isSelected}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => handleToggleSelect(movie.user_movie_id)}
+                      sx={{ color: '#64748B', '&.Mui-checked': { color: '#38BDF8' } }}
+                    />
                   )}
-                  <MovieCard movie={movie} />
-                </Box>
-              </Grid>
-            );
-          })}
-        </Grid>
+
+                  {/* Thumbnail Poster */}
+                  <Box
+                    component="img"
+                    src={posterUrl}
+                    alt={movie.title}
+                    sx={{
+                      width: 52,
+                      height: 78,
+                      objectFit: 'cover',
+                      borderRadius: 1.5,
+                      flexShrink: 0,
+                      backgroundColor: '#1E293B',
+                    }}
+                  />
+
+                  {/* Title & Details */}
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+                      <Typography variant="subtitle1" noWrap sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                        {movie.title}
+                      </Typography>
+                      {movie.media_type === 'tv' && (
+                        <Chip label="Series" size="small" sx={{ height: 20, fontSize: '0.65rem', backgroundColor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700 }} />
+                      )}
+                      {movie.is_favorite && (
+                        <FavoriteIcon sx={{ fontSize: 16, color: '#EF4444' }} />
+                      )}
+                    </Box>
+
+                    <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 0.8 }}>
+                      {year ? `${year} • ` : ''}
+                      {movie.media_type === 'tv'
+                        ? (movie.number_of_seasons ? `${movie.number_of_seasons} Seasons` : 'TV Series')
+                        : (movie.runtime ? `${movie.runtime} mins` : 'Movie')}
+                      {movie.original_language ? ` • ${movie.original_language.toUpperCase()}` : ''}
+                    </Typography>
+
+                    {/* Genres and Tags */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, flexWrap: 'wrap' }}>
+                      {(movie.genres || []).slice(0, 3).map((g: any) => (
+                        <Chip
+                          key={g.id || g.name}
+                          label={g.name}
+                          size="small"
+                          sx={{ height: 20, fontSize: '0.68rem', backgroundColor: 'rgba(255,255,255,0.05)', color: '#CBD5E1' }}
+                        />
+                      ))}
+                      {(movie.tags || []).slice(0, 2).map((t: any) => (
+                        <Chip
+                          key={t.id || t.name}
+                          label={`#${t.name}`}
+                          size="small"
+                          sx={{
+                            height: 20,
+                            fontSize: '0.68rem',
+                            backgroundColor: `${t.color || '#E5A93C'}18`,
+                            color: t.color || '#E5A93C',
+                            borderColor: `${t.color || '#E5A93C'}40`,
+                          }}
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+
+                  {/* Rating Badge */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, px: 1 }}>
+                    <StarIcon sx={{ fontSize: 18, color: movie.personal_rating ? '#E5A93C' : '#64748B' }} />
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: movie.personal_rating ? '#E5A93C' : '#94A3B8' }}>
+                      {movie.personal_rating != null && !isNaN(Number(movie.personal_rating))
+                        ? Number(movie.personal_rating).toFixed(1)
+                        : (movie.vote_average != null && !isNaN(Number(movie.vote_average))
+                            ? Number(movie.vote_average).toFixed(1)
+                            : '-')}
+                    </Typography>
+                  </Box>
+
+                  {/* Watch Status */}
+                  <Box sx={{ flexShrink: 0 }}>
+                    <Chip
+                      label={movie.watch_status === 'watched' ? 'Watched' : movie.watch_status === 'watching' ? 'Watching' : 'Unwatched'}
+                      size="small"
+                      color={movie.watch_status === 'watched' ? 'success' : movie.watch_status === 'watching' ? 'warning' : 'default'}
+                      variant={movie.watch_status === 'watched' ? 'filled' : 'outlined'}
+                      sx={{ height: 24, fontSize: '0.72rem', fontWeight: 600 }}
+                    />
+                  </Box>
+
+                  {/* Play Action */}
+                  <Box sx={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="primary"
+                      startIcon={<PlayCircleOutlineIcon />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (primarySource && isYouTubeSource(primarySource)) {
+                          openYouTubeAutoplay(primarySource.external_url || '', movie.title);
+                        } else if (primarySource?.source_type === 'ott' && primarySource.external_url) {
+                          window.open(primarySource.external_url, '_blank', 'noopener,noreferrer');
+                        } else if (primarySource?.source_type === 'google_drive') {
+                          openPlayer(movie, primarySource);
+                        } else {
+                          navigate(`/movies/${movie.user_movie_id}`);
+                        }
+                      }}
+                      sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.8, py: 0.5 }}
+                    >
+                      {primarySource && isYouTubeSource(primarySource) ? 'YouTube' : 'Play'}
+                    </Button>
+                  </Box>
+                </Paper>
+              );
+            })}
+          </Stack>
+        )
       ) : (
         <EmptyState
           icon={<MovieFilterIcon />}

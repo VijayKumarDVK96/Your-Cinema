@@ -36,7 +36,7 @@ export const SelectSourceModal: React.FC<SelectSourceModalProps> = ({
   onManageSources,
 }) => {
   const sources = movie.sources || [];
-  const ottAndDriveSources = sources.filter(s => s.source_type !== 'youtube');
+  const availableSources = sources;
 
   return (
     <Dialog
@@ -67,13 +67,13 @@ export const SelectSourceModal: React.FC<SelectSourceModalProps> = ({
       </DialogTitle>
 
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1.5 }}>
-        {ottAndDriveSources.length > 0 ? (
+        {availableSources.length > 0 ? (
           <Box>
             <Typography variant="subtitle2" sx={{ color: '#94A3B8', mb: 1.5 }}>
               Choose a streaming provider to watch:
             </Typography>
             <Stack spacing={1.5}>
-              {ottAndDriveSources.map((src) => {
+              {availableSources.map((src) => {
                 const meta = getOttMeta(src.provider_name, src.provider_icon);
                 const isDrive = src.source_type === 'google_drive';
                 return (
