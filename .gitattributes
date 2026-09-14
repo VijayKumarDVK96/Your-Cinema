@@ -1,2 +1,13 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Force LF line endings for all shell/docker/Jenkins files
+Jenkinsfile         text eol=lf
+*.sh                text eol=lf
+Dockerfile          text eol=lf
+*.yml               text eol=lf
+*.yaml              text eol=lf
+nginx.conf          text eol=lf
+.dockerignore       text eol=lf
+*.env               text eol=lf
+
+# Windows files
+*.bat               text eol=crlf
+*.ps1               text eol=crlf
