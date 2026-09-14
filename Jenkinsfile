@@ -108,8 +108,15 @@ pipeline {
         stage("Deploy") {
             steps {
                 sh """
-                    docker compose -f docker-compose.yml down --remove-orphans || true
-                    docker compose -f docker-compose.yml up -d --build
+                    if command -v docker-compose >/dev/null 2>&1; then
+                        DC="docker-compose"
+                    else
+                        DC="docker compose"
+                    fi
+
+                    echo "Using Compose command: \$DC"
+                    \$DC -f docker-compose.yml down --remove-orphans || true
+                    \$DC -f docker-compose.yml up -d --build
 
                     echo "Waiting for backend to become healthy..."
                     for i in \$(seq 1 20); do
@@ -151,7 +158,14 @@ pipeline {
         }
         failure {
             echo "Deployment FAILED - check logs above."
-            sh "docker compose -f docker-compose.yml logs --tail=100 || true"
+            sh """
+                if command -v docker-compose >/dev/null 2>&1; then
+                    DC="docker-compose"
+                else
+                    DC="docker compose"
+                fi
+                \$DC -f docker-compose.yml logs --tail=100 || true
+            """
         }
     }
 }
