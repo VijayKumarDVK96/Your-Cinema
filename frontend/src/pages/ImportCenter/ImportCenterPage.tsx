@@ -19,6 +19,10 @@ import {
   FormControl,
   InputLabel,
   Divider,
+  Tabs,
+  Tab,
+  Tooltip,
+  IconButton,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
@@ -26,8 +30,12 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import CategoryIcon from '@mui/icons-material/Category';
 import AddIcon from '@mui/icons-material/Add';
+import LinkIcon from '@mui/icons-material/Link';
+import MovieIcon from '@mui/icons-material/Movie';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
+import { OttBadge } from '../../utils/ottProviders.js';
 
 interface MatchItem {
   inputTitle: string;
@@ -39,6 +47,9 @@ interface MatchItem {
 
 export const ImportCenterPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<'import' | 'ott'>('import');
+
+  // Movie Import State
   const [inputText, setInputText] = useState(
     'Interstellar\nInception\nDune\nArrival\nOppenheimer\nVikram'
   );
@@ -54,6 +65,17 @@ export const ImportCenterPage: React.FC = () => {
   const [selectedGenreIds, setSelectedGenreIds] = useState<Set<string>>(new Set());
   const [newGenreNameInput, setNewGenreNameInput] = useState('');
   const [creatingGenre, setCreatingGenre] = useState(false);
+
+  // OTT Link Bulk Import State
+  const [ottInputText, setOttInputText] = useState(
+    `The Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nVikram | Disney+ Hotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nInterstellar | Prime Video | https://www.primevideo.com/detail/0STV48F47G`
+  );
+  const [ottLoading, setOttLoading] = useState(false);
+  const [ottPreviewItems, setOttPreviewItems] = useState<any[]>([]);
+  const [selectedOttIndices, setSelectedOttIndices] = useState<Set<number>>(new Set());
+  const [replaceExistingSources, setReplaceExistingSources] = useState(true);
+  const [ottApplying, setOttApplying] = useState(false);
+  const [ottResult, setOttResult] = useState<any | null>(null);
 
   // Fetch user's existing watchlists
   const { data: watchlists = [] } = useQuery<any[]>({
@@ -120,85 +142,178 @@ export const ImportCenterPage: React.FC = () => {
     }
   };
 
-  const handleDisambiguate = (idx: number, candidateId: number) => {
-    setMatches((prev) => {
-      const next = [...prev];
-      const found = next[idx].candidates.find(c => c.id === candidateId);
-      if (found) {
-        next[idx] = {
-          ...next[idx],
-          selectedMovie: found,
-          status: 'matched',
-          confidence: 100,
-        };
-      }
-      return next;
-    });
-    setSelectedIndices(prev => new Set(prev).add(idx));
-  };
+  const handleDisambiguate = (index: number, tmdbId: number) => {
+    const item = matches[index];
+    const cand = item.candidates.find((c) => c.id === tmdbId);
+    if (!cand) return;
 
-  const handleToggleGenre = (id: string) => {
-    setSelectedGenreIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const newMatches = [...matches];
+    newMatches[index] = {
+      ...item,
+      selectedMovie: cand,
+      status: 'matched',
+    };
+    setMatches(newMatches);
+
+    // Ensure row is selected
+    setSelectedIndices((prev) => new Set(prev).add(index));
   };
 
   const handleCreateGenre = async () => {
-    if (!newGenreNameInput.trim()) return;
+    const name = newGenreNameInput.trim();
+    if (!name) return;
     setCreatingGenre(true);
     try {
-      const res = await api.post('/genres', { name: newGenreNameInput.trim() });
+      const res = await api.post('/genres', { name });
       const created = res.data?.data;
+      await refetchGenres();
       if (created?.id) {
-        setSelectedGenreIds(prev => new Set(prev).add(created.id));
+        setSelectedGenreIds((prev) => new Set(prev).add(created.id));
       }
       setNewGenreNameInput('');
-      refetchGenres();
-    } catch {
-      // ignore
+    } catch (e: any) {
+      alert(e.message || 'Failed to create genre');
     } finally {
       setCreatingGenre(false);
     }
   };
 
   const handleCommitImport = async () => {
-    const approvedTmdbIds = Array.from(selectedIndices)
-      .map(idx => matches[idx]?.selectedMovie?.id)
+    const toImport = Array.from(selectedIndices)
+      .map((idx) => matches[idx]?.selectedMovie)
       .filter(Boolean);
 
-    if (approvedTmdbIds.length === 0) return;
-
-    const payload: any = {
-      selectedTmdbIds: approvedTmdbIds,
-      customGenreIds: Array.from(selectedGenreIds),
-    };
-    if (selectedWatchlistId === '__new__' && newWatchlistName.trim()) {
-      payload.newWatchlistName = newWatchlistName.trim();
-    } else if (selectedWatchlistId && selectedWatchlistId !== 'none') {
-      payload.watchlistId = selectedWatchlistId;
-    }
+    if (toImport.length === 0) return;
 
     setCommitting(true);
     try {
-      const res = await api.post('/import/commit', payload);
+      let watchlistIdToUse: string | null = null;
+      if (selectedWatchlistId === '__new__') {
+        const name = newWatchlistName.trim();
+        if (name) {
+          const wlRes = await api.post('/watchlists', { name });
+          watchlistIdToUse = wlRes.data?.data?.id || null;
+        }
+      } else if (selectedWatchlistId !== 'none') {
+        watchlistIdToUse = selectedWatchlistId;
+      }
+
+      const res = await api.post('/import/commit', {
+        movies: toImport,
+        watchlistId: watchlistIdToUse,
+        genreIds: Array.from(selectedGenreIds),
+      });
+
       setImportResult(res.data?.data);
-      // Invalidate queries so library and watchlists refresh automatically
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
-      queryClient.invalidateQueries({ queryKey: ['taste-profile'] });
-      queryClient.invalidateQueries({ queryKey: ['recommendations'] });
-      queryClient.invalidateQueries({ queryKey: ['genres'] });
-
-      // Clear matched once imported
-      setMatches([]);
-      setSelectedIndices(new Set());
-      setSelectedGenreIds(new Set());
-      setNewWatchlistName('');
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+    } catch {
+      // Handled
     } finally {
       setCommitting(false);
+    }
+  };
+
+  // OTT Link Bulk Handlers
+  const handlePreviewOttLinks = async () => {
+    const lines = ottInputText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) return;
+
+    const entries = lines.map(line => {
+      const parts = line.split('|').map(p => p.trim());
+      return {
+        title: parts[0] || '',
+        providerName: parts[1] || 'Streaming Service',
+        directUrl: parts[2] || '',
+      };
+    }).filter(e => e.title.length > 0 && e.directUrl.length > 0);
+
+    if (entries.length === 0) {
+      alert('Please enter at least one line in the format: Movie Title | Provider | Direct URL');
+      return;
+    }
+
+    setOttLoading(true);
+    setOttResult(null);
+    try {
+      const res = await api.post('/sources/bulk-ott-preview', { entries });
+      const data = res.data?.data || [];
+      setOttPreviewItems(data);
+
+      const validSelected = new Set<number>();
+      data.forEach((item: any, idx: number) => {
+        if (item.selectedMovie) validSelected.add(idx);
+      });
+      setSelectedOttIndices(validSelected);
+    } catch (err: any) {
+      alert('Failed to preview OTT links: ' + (err.message || 'Error'));
+    } finally {
+      setOttLoading(false);
+    }
+  };
+
+  const handleToggleOttRow = (idx: number) => {
+    setSelectedOttIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleSelectAllOtt = () => {
+    if (selectedOttIndices.size === ottPreviewItems.length) {
+      setSelectedOttIndices(new Set());
+    } else {
+      const allValid = new Set<number>();
+      ottPreviewItems.forEach((item, idx) => {
+        if (item.selectedMovie) allValid.add(idx);
+      });
+      setSelectedOttIndices(allValid);
+    }
+  };
+
+  const handleSelectOttCandidate = (index: number, userMovieId: string) => {
+    const item = ottPreviewItems[index];
+    const cand = item.candidates.find((c: any) => c.user_movie_id === userMovieId);
+    if (!cand) return;
+
+    const nextItems = [...ottPreviewItems];
+    nextItems[index] = {
+      ...item,
+      selectedMovie: cand,
+      status: 'matched',
+    };
+    setOttPreviewItems(nextItems);
+    setSelectedOttIndices(prev => new Set(prev).add(index));
+  };
+
+  const handleApplyOttLinks = async () => {
+    const updates = Array.from(selectedOttIndices)
+      .map(idx => ottPreviewItems[idx])
+      .filter(item => item && item.selectedMovie)
+      .map(item => ({
+        userMovieId: item.selectedMovie.user_movie_id,
+        providerName: item.providerName,
+        directUrl: item.directUrl,
+        replaceExisting: replaceExistingSources,
+      }));
+
+    if (updates.length === 0) return;
+
+    setOttApplying(true);
+    try {
+      const res = await api.post('/sources/bulk-ott-apply', { updates });
+      setOttResult(res.data?.data);
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+    } catch (err: any) {
+      alert('Failed to apply OTT links: ' + (err.message || 'Error'));
+    } finally {
+      setOttApplying(false);
     }
   };
 
@@ -210,423 +325,496 @@ export const ImportCenterPage: React.FC = () => {
       {/* Header */}
       <Box>
         <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC', mb: 0.5 }}>
-          Bulk Watchlist Import Center
+          Import & Resource Center
         </Typography>
         <Typography variant="body2" sx={{ color: '#94A3B8' }}>
-          Paste lists of movie titles. Review and approve TMDB matches before importing into your personal sanctuary.
+          Bulk import movies to your library or update direct OTT streaming links for existing titles.
         </Typography>
       </Box>
 
-      {/* Input Section */}
-      <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-        <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 1 }}>
-          STEP 1: PASTE TITLES (ONE PER LINE)
-        </Typography>
-        <TextField
-          fullWidth
-          multiline
-          rows={5}
-          placeholder="Interstellar&#10;Inception&#10;Dune&#10;Arrival"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          sx={{ mb: 2 }}
-        />
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SearchIcon />}
-          onClick={handleFindMovies}
-          disabled={loading || !inputText.trim()}
-          sx={{ fontWeight: 700, px: 3 }}
-        >
-          {loading ? 'Matching Titles...' : 'Find & Match Movies on TMDB'}
-        </Button>
-      </Paper>
-
-      {/* Import Result Notification */}
-      {importResult && (
-        <Alert
-          severity="success"
-          icon={<CheckCircleOutlineIcon fontSize="inherit" />}
+      {/* Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, val) => setActiveTab(val)}
           sx={{
-            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-            color: '#10B981',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            borderRadius: 2,
+            '& .MuiTab-root': {
+              color: '#94A3B8',
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': { color: '#38BDF8' },
+            },
+            '& .MuiTabs-indicator': { backgroundColor: '#38BDF8', height: 3 },
           }}
         >
-          Successfully imported {importResult.addedCount} movies into your library!
-          {importResult.watchlistName && (
-            <span>
-              {' '}Also added <strong>{importResult.watchlistAddedCount ?? importResult.addedCount}</strong> films to watchlist <strong>"{importResult.watchlistName}"</strong>.
-            </span>
-          )}
-          {importResult.skippedCount > 0 && ` (${importResult.skippedCount} movies were already in your library)`}
-        </Alert>
-      )}
+          <Tab icon={<MovieIcon sx={{ mr: 1, fontSize: 20 }} />} iconPosition="start" label="Import New Movies" value="import" />
+          <Tab icon={<LinkIcon sx={{ mr: 1, fontSize: 20 }} />} iconPosition="start" label="Update OTT Links" value="ott" />
+        </Tabs>
+      </Box>
 
-      {/* Step 2 Panel (shown after matching) */}
-      {matches.length > 0 && (
-        <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-
-          {/* ─── Genre Pre-Assignment Panel ─── */}
-          <Paper
-            sx={{
-              p: 2.5,
-              mb: 3,
-              backgroundColor: '#0D1320',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              borderRadius: 2,
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-              <Box
-                sx={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <CategoryIcon sx={{ color: '#38BDF8', fontSize: 20 }} />
-              </Box>
-              <Box sx={{ flexGrow: 1 }}>
-                <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-                  Pre-Assign Custom Genres <span style={{ color: '#64748B', fontWeight: 400 }}>(Optional)</span>
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                  All selected genres will be applied to every movie in this import batch
-                </Typography>
-              </Box>
-              {selectedGenreIds.size > 0 && (
-                <Chip
-                  label={`${selectedGenreIds.size} genre${selectedGenreIds.size > 1 ? 's' : ''} selected`}
-                  size="small"
-                  sx={{ backgroundColor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700 }}
-                />
-              )}
-            </Box>
-
-            {/* Predefined genres — read-only reference */}
-            {predefinedGenres.length > 0 && (
-              <>
-                <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', display: 'block', mb: 0.8 }}>
-                  STANDARD GENRES (read-only — assigned automatically via TMDB)
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.7, mb: 2, maxHeight: 80, overflowY: 'auto' }}>
-                  {predefinedGenres.map((pg: any) => (
-                    <Chip
-                      key={pg.id}
-                      label={pg.name}
-                      size="small"
-                      variant="outlined"
-                      sx={{
-                        height: 24,
-                        fontSize: '0.72rem',
-                        color: pg.color || '#94A3B8',
-                        borderColor: `${pg.color || '#64748B'}50`,
-                        opacity: 0.6,
-                        cursor: 'default',
-                        fontWeight: 500,
-                      }}
-                    />
-                  ))}
-                </Box>
-                <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)', mb: 2 }} />
-              </>
-            )}
-
-            {/* Custom genres — selectable */}
-            <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, letterSpacing: '0.06em', display: 'block', mb: 1 }}>
-              YOUR CUSTOM GENRES — click to select
+      {/* TAB 1: MOVIE IMPORT */}
+      {activeTab === 'import' && (
+        <>
+          <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 1 }}>
+              STEP 1: PASTE TITLES (ONE PER LINE)
             </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5, minHeight: 34 }}>
-              {customGenres.map((cg: any) => {
-                const isSelected = selectedGenreIds.has(cg.id);
-                return (
-                  <Chip
-                    key={cg.id}
-                    label={cg.name}
-                    clickable
-                    onClick={() => handleToggleGenre(cg.id)}
-                    variant={isSelected ? 'filled' : 'outlined'}
-                    sx={{
-                      backgroundColor: isSelected ? `${cg.color || '#38BDF8'}30` : 'transparent',
-                      color: isSelected ? '#FFF' : (cg.color || '#38BDF8'),
-                      borderColor: cg.color || '#38BDF8',
-                      fontWeight: 700,
-                      transition: 'all 0.15s ease',
-                      '&:hover': {
-                        backgroundColor: `${cg.color || '#38BDF8'}20`,
-                        transform: 'scale(1.03)',
-                      },
-                    }}
-                  />
-                );
-              })}
-              {customGenres.length === 0 && (
-                <Typography variant="caption" sx={{ color: '#475569', alignSelf: 'center' }}>
-                  No custom genres yet — create one below to start tagging your imports.
-                </Typography>
-              )}
-            </Box>
-
-            {/* Inline genre creator */}
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                size="small"
-                placeholder="Create & auto-select new genre (e.g. Heist, Gangster, Dark Comedy)..."
-                value={newGenreNameInput}
-                onChange={(e) => setNewGenreNameInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newGenreNameInput.trim()) handleCreateGenre();
-                }}
-                sx={{
-                  flexGrow: 1,
-                  input: { color: '#F8FAFC', fontSize: '0.85rem' },
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: 'rgba(56,189,248,0.2)' },
-                    '&:hover fieldset': { borderColor: '#38BDF8' },
-                    '&.Mui-focused fieldset': { borderColor: '#38BDF8' },
-                  },
-                }}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={creatingGenre ? <CircularProgress size={13} /> : <AddIcon />}
-                disabled={!newGenreNameInput.trim() || creatingGenre}
-                onClick={handleCreateGenre}
-                sx={{
-                  color: '#38BDF8',
-                  borderColor: 'rgba(56,189,248,0.4)',
-                  whiteSpace: 'nowrap',
-                  fontWeight: 700,
-                  '&:hover': { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.08)' },
-                }}
-              >
-                {creatingGenre ? 'Creating...' : 'Add & Select'}
-              </Button>
-            </Box>
-          </Paper>
-
-          {/* Watchlist Destination Toolbar */}
-          <Paper
-            sx={{
-              p: 2,
-              mb: 3,
-              backgroundColor: '#111827',
-              border: '1px solid rgba(229, 169, 60, 0.25)',
-              borderRadius: 2,
-              display: 'flex',
-              flexDirection: { xs: 'column', md: 'row' },
-              alignItems: { xs: 'stretch', md: 'center' },
-              justifyContent: 'space-between',
-              gap: 2,
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Box
-                sx={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(229, 169, 60, 0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <PlaylistAddIcon sx={{ color: '#E5A93C' }} />
-              </Box>
-              <Box>
-                <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-                  Add to Watchlist (Optional)
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                  Optionally assign all selected imported films to one of your custom watchlists
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-              <FormControl size="small" sx={{ minWidth: 220 }}>
-                <InputLabel id="import-watchlist-label" sx={{ color: '#94A3B8' }}>Destination Watchlist</InputLabel>
-                <Select
-                  labelId="import-watchlist-label"
-                  value={selectedWatchlistId}
-                  label="Destination Watchlist"
-                  onChange={(e) => setSelectedWatchlistId(e.target.value)}
-                  sx={{
-                    color: '#F8FAFC',
-                    backgroundColor: '#0B0F19',
-                    '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.15)' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
-                  }}
-                >
-                  <MenuItem value="none">
-                    <em>None (Import into library only)</em>
-                  </MenuItem>
-                  <MenuItem value="__new__" sx={{ color: '#38BDF8', fontWeight: 600 }}>
-                    + Create New Watchlist...
-                  </MenuItem>
-                  {watchlists.map((wl) => (
-                    <MenuItem key={wl.id} value={wl.id}>
-                      {wl.name} ({wl.movie_count ?? 0} movies)
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {selectedWatchlistId === '__new__' && (
-                <TextField
-                  size="small"
-                  placeholder="Enter new watchlist name..."
-                  value={newWatchlistName}
-                  onChange={(e) => setNewWatchlistName(e.target.value)}
-                  autoFocus
-                  sx={{
-                    minWidth: 220,
-                    backgroundColor: '#0B0F19',
-                    input: { color: '#F8FAFC' },
-                    '& .MuiOutlinedInput-root': {
-                      '& fieldset': { borderColor: '#38BDF8' },
-                      '&:hover fieldset': { borderColor: '#38BDF8' },
-                    },
-                  }}
-                />
-              )}
-            </Box>
-          </Paper>
-
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 2 }}>
-            <Box>
-              <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700 }}>
-                STEP 2: REVIEW & APPROVE MATCHES
-              </Typography>
-              <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                Bulk import will NEVER automatically add items without your explicit confirmation.
-              </Typography>
-            </Box>
-
+            <TextField
+              fullWidth
+              multiline
+              rows={5}
+              placeholder="Interstellar&#10;Inception&#10;Dune&#10;Arrival"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              sx={{ mb: 2 }}
+            />
             <Button
               variant="contained"
-              color="secondary"
-              startIcon={<AddCircleIcon />}
-              onClick={handleCommitImport}
-              disabled={
-                selectedIndices.size === 0 ||
-                committing ||
-                (selectedWatchlistId === '__new__' && !newWatchlistName.trim())
-              }
+              color="primary"
+              startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SearchIcon />}
+              onClick={handleFindMovies}
+              disabled={loading || !inputText.trim()}
               sx={{ fontWeight: 700, px: 3 }}
             >
-              {committing
-                ? 'Importing...'
-                : selectedWatchlistId === '__new__' && newWatchlistName.trim()
-                ? `Import & Add ${selectedIndices.size} to "${newWatchlistName.trim()}"`
-                : selectedWatchlistId !== 'none' && watchlists.find(w => w.id === selectedWatchlistId)
-                ? `Import & Add ${selectedIndices.size} to "${watchlists.find(w => w.id === selectedWatchlistId)?.name}"`
-                : `Add ${selectedIndices.size} Selected Movies to Library`}
+              {loading ? 'Matching Titles...' : 'Find & Match Movies on TMDB'}
             </Button>
-          </Box>
+          </Paper>
 
-          <Table sx={{ minWidth: 650 }}>
-            <TableHead>
-              <TableRow sx={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    checked={matches.length > 0 && selectedIndices.size === matches.length}
-                    indeterminate={selectedIndices.size > 0 && selectedIndices.size < matches.length}
-                    onChange={handleSelectAll}
-                    sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
+          {importResult && (
+            <Alert
+              severity="success"
+              icon={<CheckCircleOutlineIcon fontSize="inherit" />}
+              sx={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10B981', border: '1px solid rgba(16,185,129,0.2)' }}
+            >
+              Successfully imported {importResult.importedCount} movies!
+            </Alert>
+          )}
+
+          {matches.length > 0 && (
+            <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              {/* Genre Selector */}
+              <Paper sx={{ p: 2, mb: 2.5, backgroundColor: '#111827', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <CategoryIcon sx={{ color: '#38BDF8', fontSize: 18 }} />
+                  <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                    Assign Genre to Imported Movies (Optional)
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, mb: 1.5 }}>
+                  {predefinedGenres.map((g: any) => {
+                    const isSelected = selectedGenreIds.has(g.id);
+                    return (
+                      <Chip
+                        key={g.id}
+                        label={g.name}
+                        size="small"
+                        clickable
+                        onClick={() => {
+                          setSelectedGenreIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(g.id)) next.delete(g.id);
+                            else next.add(g.id);
+                            return next;
+                          });
+                        }}
+                        sx={{
+                          backgroundColor: isSelected ? 'rgba(56,189,248,0.25)' : 'transparent',
+                          color: isSelected ? '#38BDF8' : '#94A3B8',
+                          borderColor: isSelected ? '#38BDF8' : 'rgba(255,255,255,0.15)',
+                          fontWeight: 600,
+                        }}
+                        variant="outlined"
+                      />
+                    );
+                  })}
+                  {customGenres.map((g: any) => {
+                    const isSelected = selectedGenreIds.has(g.id);
+                    return (
+                      <Chip
+                        key={g.id}
+                        label={g.name}
+                        size="small"
+                        clickable
+                        onClick={() => {
+                          setSelectedGenreIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(g.id)) next.delete(g.id);
+                            else next.add(g.id);
+                            return next;
+                          });
+                        }}
+                        sx={{
+                          backgroundColor: isSelected ? `${g.color || '#A855F7'}33` : 'transparent',
+                          color: isSelected ? (g.color || '#A855F7') : '#94A3B8',
+                          borderColor: isSelected ? (g.color || '#A855F7') : 'rgba(255,255,255,0.15)',
+                          fontWeight: 600,
+                        }}
+                        variant="outlined"
+                      />
+                    );
+                  })}
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, maxWidth: 360 }}>
+                  <TextField
+                    size="small"
+                    placeholder="Create custom genre..."
+                    value={newGenreNameInput}
+                    onChange={(e) => setNewGenreNameInput(e.target.value)}
+                    sx={{ flexGrow: 1, backgroundColor: '#0B0F19', input: { color: '#F8FAFC', fontSize: '0.8rem' } }}
                   />
-                </TableCell>
-                <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Your Input</TableCell>
-                <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>TMDB Match & Poster</TableCell>
-                <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Status / Disambiguate</TableCell>
-                <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Confidence</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {matches.map((item, idx) => {
-                const isSelected = selectedIndices.has(idx);
-                const m = item.selectedMovie;
-                return (
-                  <TableRow key={idx} sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={creatingGenre ? <CircularProgress size={13} /> : <AddIcon />}
+                    disabled={!newGenreNameInput.trim() || creatingGenre}
+                    onClick={handleCreateGenre}
+                    sx={{ color: '#38BDF8', borderColor: 'rgba(56,189,248,0.4)', fontWeight: 700 }}
+                  >
+                    Add
+                  </Button>
+                </Box>
+              </Paper>
+
+              {/* Watchlist Destination Toolbar */}
+              <Paper sx={{ p: 2, mb: 3, backgroundColor: '#111827', border: '1px solid rgba(229, 169, 60, 0.25)', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Box sx={{ width: 38, height: 38, borderRadius: '50%', backgroundColor: 'rgba(229, 169, 60, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <PlaylistAddIcon sx={{ color: '#E5A93C' }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                      Add to Watchlist (Optional)
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                      Optionally assign all selected imported films to one of your custom watchlists
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                  <FormControl size="small" sx={{ minWidth: 220 }}>
+                    <InputLabel id="import-watchlist-label" sx={{ color: '#94A3B8' }}>Destination Watchlist</InputLabel>
+                    <Select
+                      labelId="import-watchlist-label"
+                      value={selectedWatchlistId}
+                      label="Destination Watchlist"
+                      onChange={(e) => setSelectedWatchlistId(e.target.value)}
+                      sx={{ color: '#F8FAFC', backgroundColor: '#0B0F19' }}
+                    >
+                      <MenuItem value="none"><em>None (Import into library only)</em></MenuItem>
+                      <MenuItem value="__new__" sx={{ color: '#38BDF8', fontWeight: 600 }}>+ Create New Watchlist...</MenuItem>
+                      {watchlists.map((wl) => (
+                        <MenuItem key={wl.id} value={wl.id}>{wl.name} ({wl.movie_count ?? 0} movies)</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+
+                  {selectedWatchlistId === '__new__' && (
+                    <TextField
+                      size="small"
+                      placeholder="Enter new watchlist name..."
+                      value={newWatchlistName}
+                      onChange={(e) => setNewWatchlistName(e.target.value)}
+                      sx={{ minWidth: 220, backgroundColor: '#0B0F19', input: { color: '#F8FAFC' } }}
+                    />
+                  )}
+                </Box>
+              </Paper>
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700 }}>
+                    STEP 2: REVIEW & APPROVE MATCHES
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                    Bulk import will NEVER automatically add items without your explicit confirmation.
+                  </Typography>
+                </Box>
+
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<AddCircleIcon />}
+                  onClick={handleCommitImport}
+                  disabled={selectedIndices.size === 0 || committing}
+                  sx={{ fontWeight: 700, px: 3 }}
+                >
+                  {committing ? 'Importing...' : `Add ${selectedIndices.size} Selected Movies to Library`}
+                </Button>
+              </Box>
+
+              <Table sx={{ minWidth: 650 }}>
+                <TableHead>
+                  <TableRow sx={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                     <TableCell padding="checkbox">
                       <Checkbox
-                        checked={isSelected}
-                        disabled={!m}
-                        onChange={() => handleToggleRow(idx)}
+                        checked={matches.length > 0 && selectedIndices.size === matches.length}
+                        indeterminate={selectedIndices.size > 0 && selectedIndices.size < matches.length}
+                        onChange={handleSelectAll}
                         sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
                       />
                     </TableCell>
-                    <TableCell sx={{ color: '#F8FAFC', fontWeight: 600 }}>
-                      {item.inputTitle}
-                    </TableCell>
-                    <TableCell>
-                      {m ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                          <Box
-                            component="img"
-                            src={
-                              m.poster_path
-                                ? `https://image.tmdb.org/t/p/w200${m.poster_path}`
-                                : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'
-                            }
-                            alt={m.title}
-                            sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover' }}
-                          />
-                          <Box>
-                            <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>
-                              {m.title}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: '#64748B' }}>
-                              {m.release_date ? m.release_date.substring(0, 4) : 'Unknown Year'}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      ) : (
-                        <Typography variant="caption" sx={{ color: '#EF4444' }}>
-                          No confident match found
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {item.status === 'ambiguous' && item.candidates.length > 1 ? (
-                        <Select
-                          size="small"
-                          value={m?.id || ''}
-                          onChange={(e) => handleDisambiguate(idx, Number(e.target.value))}
-                          sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 180 }}
-                        >
-                          {item.candidates.map((cand) => (
-                            <MenuItem key={cand.id} value={cand.id}>
-                              {cand.title} ({cand.release_date?.substring(0, 4) || '?'})
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      ) : item.status === 'matched' ? (
-                        <Chip label="Matched" size="small" sx={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#10B981', fontWeight: 600 }} />
-                      ) : (
-                        <Chip label="Not Found" size="small" sx={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#EF4444' }} />
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ color: item.confidence >= 80 ? '#10B981' : '#F59E0B', fontWeight: 700 }}>
-                      {item.confidence}%
-                    </TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Your Input</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>TMDB Match & Poster</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Status / Disambiguate</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Confidence</TableCell>
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Paper>
+                </TableHead>
+                <TableBody>
+                  {matches.map((item, idx) => {
+                    const isSelected = selectedIndices.has(idx);
+                    const m = item.selectedMovie;
+                    return (
+                      <TableRow key={idx} sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={isSelected}
+                            disabled={!m}
+                            onChange={() => handleToggleRow(idx)}
+                            sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ color: '#F8FAFC', fontWeight: 600 }}>{item.inputTitle}</TableCell>
+                        <TableCell>
+                          {m ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                              <Box
+                                component="img"
+                                src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
+                                alt={m.title}
+                                sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover' }}
+                              />
+                              <Box>
+                                <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{m.title}</Typography>
+                                <Typography variant="caption" sx={{ color: '#64748B' }}>{m.release_date ? m.release_date.substring(0, 4) : 'Unknown Year'}</Typography>
+                              </Box>
+                            </Box>
+                          ) : (
+                            <Typography variant="caption" sx={{ color: '#EF4444' }}>No confident match found</Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.status === 'ambiguous' && item.candidates.length > 1 ? (
+                            <Select
+                              size="small"
+                              value={m?.id || ''}
+                              onChange={(e) => handleDisambiguate(idx, Number(e.target.value))}
+                              sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 180 }}
+                            >
+                              {item.candidates.map((cand) => (
+                                <MenuItem key={cand.id} value={cand.id}>{cand.title} ({cand.release_date?.substring(0, 4) || '?'})</MenuItem>
+                              ))}
+                            </Select>
+                          ) : item.status === 'matched' ? (
+                            <Chip label="Matched" size="small" sx={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#10B981', fontWeight: 600 }} />
+                          ) : (
+                            <Chip label="Not Found" size="small" sx={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#EF4444' }} />
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ color: item.confidence >= 80 ? '#10B981' : '#F59E0B', fontWeight: 700 }}>
+                          {item.confidence}%
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+        </>
+      )}
+
+      {/* TAB 2: UPDATE OTT LINKS */}
+      {activeTab === 'ott' && (
+        <>
+          <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700, mb: 0.5 }}>
+              PASTE MOVIE OTT LINKS (ONE PER LINE)
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1.5 }}>
+              Format: <code>Movie Title | Provider Name | Direct OTT URL</code>
+            </Typography>
+
+            <TextField
+              fullWidth
+              multiline
+              rows={6}
+              placeholder={`The Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nVikram | Disney+ Hotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nInterstellar | Prime Video | https://www.primevideo.com/detail/0STV48F47G`}
+              value={ottInputText}
+              onChange={(e) => setOttInputText(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={ottLoading ? <CircularProgress size={20} color="inherit" /> : <SearchIcon />}
+              onClick={handlePreviewOttLinks}
+              disabled={ottLoading || !ottInputText.trim()}
+              sx={{ fontWeight: 700, px: 3 }}
+            >
+              {ottLoading ? 'Matching Library Movies...' : 'Match & Preview OTT Links'}
+            </Button>
+          </Paper>
+
+          {/* Success Alert */}
+          {ottResult && (
+            <Alert
+              severity="success"
+              icon={<CheckCircleOutlineIcon fontSize="inherit" />}
+              sx={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10B981', border: '1px solid rgba(16,185,129,0.2)' }}
+            >
+              Successfully updated direct OTT links for {ottResult.updatedCount} movies!
+            </Alert>
+          )}
+
+          {/* OTT Preview Table */}
+          {ottPreviewItems.length > 0 && (
+            <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, flexWrap: 'wrap', gap: 2 }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700 }}>
+                    REVIEW OTT LINK MATCHES ({selectedOttIndices.size} of {ottPreviewItems.length} selected)
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                    Review matched movies before applying changes to your library.
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Checkbox
+                      size="small"
+                      checked={replaceExistingSources}
+                      onChange={(e) => setReplaceExistingSources(e.target.checked)}
+                      sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
+                    />
+                    <Typography variant="body2" sx={{ color: '#CBD5E1', fontSize: '0.85rem' }}>
+                      Replace existing link for same provider
+                    </Typography>
+                  </Box>
+
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    startIcon={<CheckCircleOutlineIcon />}
+                    onClick={handleApplyOttLinks}
+                    disabled={selectedOttIndices.size === 0 || ottApplying}
+                    sx={{ fontWeight: 700, px: 3 }}
+                  >
+                    {ottApplying ? 'Updating...' : `Apply OTT Links (${selectedOttIndices.size})`}
+                  </Button>
+                </Box>
+              </Box>
+
+              <Table sx={{ minWidth: 650 }}>
+                <TableHead>
+                  <TableRow sx={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={ottPreviewItems.length > 0 && selectedOttIndices.size === ottPreviewItems.length}
+                        indeterminate={selectedOttIndices.size > 0 && selectedOttIndices.size < ottPreviewItems.length}
+                        onChange={handleSelectAllOtt}
+                        sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Your Input Title</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Matched Library Movie</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Target Provider</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Direct URL</TableCell>
+                    <TableCell sx={{ color: '#94A3B8', fontWeight: 600 }}>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {ottPreviewItems.map((item, idx) => {
+                    const isSelected = selectedOttIndices.has(idx);
+                    const m = item.selectedMovie;
+                    return (
+                      <TableRow key={idx} sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={isSelected}
+                            disabled={!m}
+                            onChange={() => handleToggleOttRow(idx)}
+                            sx={{ color: '#38BDF8', '&.Mui-checked': { color: '#38BDF8' } }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ color: '#F8FAFC', fontWeight: 600 }}>{item.inputTitle}</TableCell>
+                        <TableCell>
+                          {m ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                              <Box
+                                component="img"
+                                src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
+                                alt={m.title}
+                                sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover' }}
+                              />
+                              <Box>
+                                <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{m.title}</Typography>
+                                <Typography variant="caption" sx={{ color: '#64748B' }}>{m.release_year || 'Library Title'}</Typography>
+                              </Box>
+                            </Box>
+                          ) : (
+                            <Typography variant="caption" sx={{ color: '#EF4444' }}>Not found in library</Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <OttBadge providerName={item.providerName} size="small" />
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 220 }}>
+                          <Tooltip title={item.directUrl}>
+                            <Box
+                              component="a"
+                              href={item.directUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              sx={{
+                                color: '#38BDF8',
+                                fontSize: '0.8rem',
+                                textDecoration: 'none',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                                textOverflow: 'ellipsis',
+                                overflow: 'hidden',
+                                whiteSpace: 'nowrap',
+                                maxWidth: '100%',
+                                '&:hover': { textDecoration: 'underline' },
+                              }}
+                            >
+                              {item.directUrl}
+                              <OpenInNewIcon sx={{ fontSize: 12 }} />
+                            </Box>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell>
+                          {item.status === 'ambiguous' && item.candidates.length > 1 ? (
+                            <Select
+                              size="small"
+                              value={m?.user_movie_id || ''}
+                              onChange={(e) => handleSelectOttCandidate(idx, String(e.target.value))}
+                              sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 160 }}
+                            >
+                              {item.candidates.map((cand: any) => (
+                                <MenuItem key={cand.user_movie_id} value={cand.user_movie_id}>{cand.title}</MenuItem>
+                              ))}
+                            </Select>
+                          ) : item.status === 'matched' ? (
+                            <Chip label="Matched" size="small" sx={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#10B981', fontWeight: 600 }} />
+                          ) : (
+                            <Chip label="Not Found" size="small" sx={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#EF4444' }} />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+        </>
       )}
     </Box>
   );

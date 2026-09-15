@@ -21,6 +21,7 @@ import {
   LinearProgress,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import StarIcon from '@mui/icons-material/Star';
 import FavoriteIcon from '@mui/icons-material/Favorite';
@@ -333,7 +334,36 @@ export const MovieDetailPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Navigation / Back Button */}
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/movies')}
+          sx={{
+            color: '#94A3B8',
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(8px)',
+            px: 2,
+            py: 0.75,
+            borderRadius: 2.5,
+            textTransform: 'none',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              color: '#38BDF8',
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              borderColor: 'rgba(56, 189, 248, 0.4)',
+              transform: 'translateX(-3px)',
+            },
+          }}
+        >
+          Back to My Movies
+        </Button>
+      </Box>
+
       {/* Hero Banner Section */}
       <Box
         sx={{

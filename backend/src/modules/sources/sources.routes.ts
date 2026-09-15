@@ -214,4 +214,30 @@ router.post('/movie/:userMovieId/progress', validate(progressSchema), async (req
   }
 });
 
+router.post('/bulk-ott-preview', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { entries } = req.body;
+    if (!Array.isArray(entries)) {
+      throw new BadRequestError('Entries array is required');
+    }
+    const data = await SourcesService.bulkOttUpdatePreview(req.user!.id, entries);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/bulk-ott-apply', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates)) {
+      throw new BadRequestError('Updates array is required');
+    }
+    const data = await SourcesService.bulkOttUpdateApply(req.user!.id, updates);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
