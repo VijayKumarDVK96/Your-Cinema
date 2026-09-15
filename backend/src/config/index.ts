@@ -37,10 +37,5 @@ export const config = {
     openRouterModel: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-sonnet',
     openRouterBaseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
   },
-
-  googleDrive: {
-    clientId: process.env.GOOGLE_CLIENT_ID || '',
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/sources/google-drive/callback',
-  },
 };
+

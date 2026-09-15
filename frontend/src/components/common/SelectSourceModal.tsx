@@ -17,6 +17,7 @@ import AddLinkIcon from '@mui/icons-material/AddLink';
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo';
 import { UserMovie, MovieSource } from '../../types/index.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
+import { isYouTubeSource } from '../../utils/youtube.js';
 
 interface SelectSourceModalProps {
   open: boolean;
@@ -76,6 +77,7 @@ export const SelectSourceModal: React.FC<SelectSourceModalProps> = ({
               {availableSources.map((src) => {
                 const meta = getOttMeta(src.provider_name, src.provider_icon);
                 const isDrive = src.source_type === 'google_drive';
+                const isYouTube = isYouTubeSource(src);
                 return (
                   <Box
                     key={src.id}
@@ -104,15 +106,15 @@ export const SelectSourceModal: React.FC<SelectSourceModalProps> = ({
                       <Box sx={{ transform: 'scale(1.2)' }}>{meta.icon}</Box>
                       <Box>
                         <Typography variant="subtitle1" sx={{ color: meta.textColor, fontWeight: 700, lineHeight: 1.2 }}>
-                          {isDrive ? 'Google Drive Stream' : `Watch on ${meta.name}`}
+                          {isDrive ? 'Google Drive Stream' : isYouTube ? 'Play on YouTube' : `Watch on ${meta.name}`}
                         </Typography>
                         <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                          {isDrive ? 'Private Cloud Range Proxy' : 'Official OTT Platform'} • {src.quality || '4K UHD'}
+                          {isDrive ? 'Direct Cloud Stream' : isYouTube ? 'In-App Video Stream' : 'Official OTT Platform'} • {src.quality || '4K UHD'}
                         </Typography>
                       </Box>
                     </Box>
                     <IconButton sx={{ color: meta.textColor }}>
-                      {isDrive ? <PlayArrowIcon /> : <OpenInNewIcon />}
+                      {isDrive || isYouTube ? <PlayArrowIcon /> : <OpenInNewIcon />}
                     </IconButton>
                   </Box>
                 );

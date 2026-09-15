@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { UserMovie } from '../../types/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
-import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
+import { isYouTubeSource } from '../../utils/youtube.js';
 
 interface MovieCardProps {
   movie: UserMovie;
@@ -63,16 +63,24 @@ export const MovieCard: React.FC<MovieCardProps> = ({
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (primarySource && isYouTubeSource(primarySource)) {
-      openYouTubeAutoplay(primarySource.external_url || '', movie.title);
-    } else if (ottInfo?.url && primarySource?.source_type === 'ott') {
-      window.open(ottInfo.url, '_blank', 'noopener,noreferrer');
+      openPlayer(movie, primarySource);
     } else if (primarySource?.source_type === 'google_drive') {
       openPlayer(movie, primarySource);
+    } else if (ottInfo?.url && primarySource?.source_type === 'ott') {
+      window.open(ottInfo.url, '_blank', 'noopener,noreferrer');
+    } else if (movie.trailer_url) {
+      openPlayer(movie);
     } else {
       // Navigate to detail page to choose or link sources
       navigate(`/movies/${movie.user_movie_id}`);
     }
   };
+
+  const isResumable = Boolean(
+    movie.playback_position_sec &&
+    movie.playback_position_sec > 0 &&
+    movie.watch_status !== 'watched'
+  );
 
   return (
     <Box
@@ -118,6 +126,32 @@ export const MovieCard: React.FC<MovieCardProps> = ({
           }}
         />
 
+        {/* Continue Watching Progress Bar across bottom of poster */}
+        {isResumable && (
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 4,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              zIndex: 3,
+            }}
+          >
+            <Box
+              sx={{
+                height: '100%',
+                width: `${Math.min(
+                  Math.round(((movie.playback_position_sec || 0) / ((movie.runtime || 120) * 60)) * 100),
+                  98
+                )}%`,
+                backgroundColor: '#38BDF8',
+              }}
+            />
+          </Box>
+        )}
+
         {/* Hover Action Overlay */}
         <Box
           className="card-overlay"
@@ -133,23 +167,30 @@ export const MovieCard: React.FC<MovieCardProps> = ({
             justifyContent: 'center',
             alignItems: 'center',
             p: 2,
+            zIndex: 4,
           }}
         >
           <IconButton
             className="play-btn"
             onClick={handlePlayClick}
             sx={{
-              color: '#E5A93C',
-              backgroundColor: 'rgba(229, 169, 60, 0.15)',
+              color: isResumable ? '#38BDF8' : '#E5A93C',
+              backgroundColor: isResumable ? 'rgba(56, 189, 248, 0.18)' : 'rgba(229, 169, 60, 0.15)',
               mb: 1,
               transition: 'transform 0.2s ease',
-              '&:hover': { backgroundColor: 'rgba(229, 169, 60, 0.3)' },
+              '&:hover': {
+                backgroundColor: isResumable ? 'rgba(56, 189, 248, 0.3)' : 'rgba(229, 169, 60, 0.3)',
+              },
             }}
           >
             <PlayCircleOutlineIcon sx={{ fontSize: 44 }} />
           </IconButton>
           <Typography variant="caption" sx={{ color: '#F8FAFC', fontWeight: 600 }}>
-            Play / Launch
+            {isResumable
+              ? `Resume (${movie.last_played_time_formatted || `${Math.floor((movie.playback_position_sec || 0) / 60)}m`})`
+              : primarySource && isYouTubeSource(primarySource)
+              ? 'Play YouTube'
+              : 'Play / Launch'}
           </Typography>
         </Box>
 

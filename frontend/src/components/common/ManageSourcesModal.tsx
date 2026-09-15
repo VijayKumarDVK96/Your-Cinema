@@ -23,6 +23,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { UserMovie, MovieSource } from '../../types/index.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
+import { extractDriveFileId } from '../../utils/googleDrive.js';
 
 interface ManageSourcesModalProps {
   open: boolean;
@@ -81,8 +82,12 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
       };
 
       if (sourceType === 'google_drive') {
-        if (!externalFileId.trim()) throw new Error('Please enter a Google Drive File ID.');
-        payload.externalFileId = externalFileId.trim();
+        const cleanFileId = extractDriveFileId(externalFileId);
+        if (!cleanFileId) throw new Error('Please enter a valid Google Drive URL or File ID.');
+        payload.externalFileId = cleanFileId;
+        payload.externalUrl = externalFileId.trim().startsWith('http')
+          ? externalFileId.trim()
+          : `https://drive.google.com/file/d/${cleanFileId}/view`;
         payload.providerIcon = 'google_drive';
       } else {
         if (!externalUrl.trim()) throw new Error('Please enter a valid external streaming or search URL.');
@@ -272,12 +277,12 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
 
           {sourceType === 'google_drive' ? (
             <TextField
-              label="Google Drive File ID"
-              placeholder="e.g. 1a2b3c4d5e6f7g8h9"
+              label="Google Drive Link or File ID"
+              placeholder="e.g. https://drive.google.com/file/d/... or File ID"
               value={externalFileId}
               onChange={(e) => setExternalFileId(e.target.value)}
               size="small"
-              helperText="Enables range-request cloud proxy streaming without downloading file to disk"
+              helperText="Paste full Google Drive sharing link or bare File ID"
             />
           ) : (
             <TextField

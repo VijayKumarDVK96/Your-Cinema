@@ -37,7 +37,7 @@ import { FilterBar } from '../../components/common/FilterBar.js';
 import { SkeletonGrid } from '../../components/feedback/SkeletonGrid.js';
 import { EmptyState } from '../../components/feedback/EmptyState.js';
 import { usePlayer } from '../../context/PlayerContext.js';
-import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
+import { isYouTubeSource } from '../../utils/youtube.js';
 
 export const MyMoviesPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -873,23 +873,29 @@ export const MyMoviesPage: React.FC = () => {
                     <Button
                       size="small"
                       variant="contained"
-                      color="primary"
+                      color={movie.playback_position_sec && movie.playback_position_sec > 0 && movie.watch_status !== 'watched' ? 'secondary' : 'primary'}
                       startIcon={<PlayCircleOutlineIcon />}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (primarySource && isYouTubeSource(primarySource)) {
-                          openYouTubeAutoplay(primarySource.external_url || '', movie.title);
-                        } else if (primarySource?.source_type === 'ott' && primarySource.external_url) {
-                          window.open(primarySource.external_url, '_blank', 'noopener,noreferrer');
+                          openPlayer(movie, primarySource);
                         } else if (primarySource?.source_type === 'google_drive') {
                           openPlayer(movie, primarySource);
+                        } else if (primarySource?.source_type === 'ott' && primarySource.external_url) {
+                          window.open(primarySource.external_url, '_blank', 'noopener,noreferrer');
+                        } else if (movie.trailer_url) {
+                          openPlayer(movie);
                         } else {
                           navigate(`/movies/${movie.user_movie_id}`);
                         }
                       }}
                       sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.8, py: 0.5 }}
                     >
-                      {primarySource && isYouTubeSource(primarySource) ? 'YouTube' : 'Play'}
+                      {movie.playback_position_sec && movie.playback_position_sec > 0 && movie.watch_status !== 'watched'
+                        ? `Resume (${movie.last_played_time_formatted || `${Math.floor(movie.playback_position_sec / 60)}m`})`
+                        : primarySource && isYouTubeSource(primarySource)
+                        ? 'Play YouTube'
+                        : 'Play'}
                     </Button>
                   </Box>
                 </Paper>

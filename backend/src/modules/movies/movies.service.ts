@@ -117,8 +117,11 @@ export class MoviesService {
           um.personal_rating,
           um.is_favorite,
           um.personal_notes,
-          um.playback_position_sec,
-          um.last_watched_at,
+          COALESCE(mpp.last_played_position_sec, um.playback_position_sec, 0) AS playback_position_sec,
+          mpp.last_played_time_formatted,
+          COALESCE(mpp.last_played_at, um.last_watched_at) AS last_watched_at,
+          mpp.source_type AS last_played_source_type,
+          mpp.source_id AS last_played_source_id,
           um.added_at,
           COALESCE(um.media_type, m.media_type, 'movie') AS media_type,
           COALESCE(m.number_of_seasons, 1) AS number_of_seasons,
@@ -161,6 +164,7 @@ export class MoviesService {
           ) AS sources
         FROM user_movies um
         JOIN movies m ON um.movie_id = m.id
+        LEFT JOIN movie_playback_progress mpp ON mpp.user_movie_id = um.id AND mpp.user_id = um.user_id
         WHERE ${conditions.join(' AND ')}
         ORDER BY ${sortColumn} ${direction} NULLS LAST
         LIMIT $${pIdx++} OFFSET $${pIdx++}
@@ -195,14 +199,19 @@ export class MoviesService {
       const movieSources = Array.from(inMemoryDb.movieSources.values())
         .filter(s => s.user_movie_id === um.id);
 
+      const prog = inMemoryDb.moviePlaybackProgress.get(um.id);
+
       return {
         user_movie_id: um.id,
         watch_status: um.watch_status,
         personal_rating: um.personal_rating,
         is_favorite: um.is_favorite,
         personal_notes: um.personal_notes,
-        playback_position_sec: um.playback_position_sec,
-        last_watched_at: um.last_watched_at,
+        playback_position_sec: prog ? prog.last_played_position_sec : (um.playback_position_sec || 0),
+        last_played_time_formatted: prog ? prog.last_played_time_formatted : null,
+        last_watched_at: prog ? prog.last_played_at : um.last_watched_at,
+        last_played_source_type: prog ? prog.source_type : null,
+        last_played_source_id: prog ? prog.source_id : null,
         added_at: um.added_at,
         media_type: um.media_type || m.media_type || 'movie',
         number_of_seasons: m.number_of_seasons || 1,
@@ -285,8 +294,11 @@ export class MoviesService {
           um.custom_runtime,
           um.custom_director,
           um.is_customized,
-          um.playback_position_sec,
-          um.last_watched_at,
+          COALESCE(mpp.last_played_position_sec, um.playback_position_sec, 0) AS playback_position_sec,
+          mpp.last_played_time_formatted,
+          COALESCE(mpp.last_played_at, um.last_watched_at) AS last_watched_at,
+          mpp.source_type AS last_played_source_type,
+          mpp.source_id AS last_played_source_id,
           um.added_at,
           COALESCE(um.media_type, m.media_type, 'movie') AS media_type,
           COALESCE(m.number_of_seasons, 1) AS number_of_seasons,
@@ -320,6 +332,7 @@ export class MoviesService {
           m.trailer_url
         FROM user_movies um
         JOIN movies m ON um.movie_id = m.id
+        LEFT JOIN movie_playback_progress mpp ON mpp.user_movie_id = um.id AND mpp.user_id = um.user_id
         WHERE um.id = $1 AND um.user_id = $2
       `;
       const { rows } = await pool.query(sql, [userMovieId, userId]);
@@ -502,8 +515,11 @@ export class MoviesService {
       custom_runtime: um.custom_runtime,
       custom_director: um.custom_director,
       is_customized: um.is_customized,
-      playback_position_sec: um.playback_position_sec,
-      last_watched_at: um.last_watched_at,
+      playback_position_sec: inMemoryDb.moviePlaybackProgress.get(userMovieId)?.last_played_position_sec ?? um.playback_position_sec ?? 0,
+      last_played_time_formatted: inMemoryDb.moviePlaybackProgress.get(userMovieId)?.last_played_time_formatted ?? null,
+      last_watched_at: inMemoryDb.moviePlaybackProgress.get(userMovieId)?.last_played_at ?? um.last_watched_at,
+      last_played_source_type: inMemoryDb.moviePlaybackProgress.get(userMovieId)?.source_type ?? null,
+      last_played_source_id: inMemoryDb.moviePlaybackProgress.get(userMovieId)?.source_id ?? null,
       added_at: um.added_at,
       media_type: um.media_type || m.media_type || 'movie',
       number_of_seasons: m.number_of_seasons || 1,
@@ -721,6 +737,7 @@ export class MoviesService {
     const um = inMemoryDb.userMovies.get(userMovieId);
     if (!um || um.user_id !== userId) throw new NotFoundError('Movie not found in your library.');
     inMemoryDb.userMovies.delete(userMovieId);
+    inMemoryDb.moviePlaybackProgress.delete(userMovieId);
     return { success: true };
   }
 
@@ -773,6 +790,7 @@ export class MoviesService {
 
     for (const um of userMoviesToDelete) {
       inMemoryDb.userMovies.delete(um.id);
+      inMemoryDb.moviePlaybackProgress.delete(um.id);
       for (const [key, val] of inMemoryDb.userMovieTags.entries()) {
         if (val.user_movie_id === um.id) inMemoryDb.userMovieTags.delete(key);
       }

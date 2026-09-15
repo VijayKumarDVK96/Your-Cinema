@@ -18,8 +18,10 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  LinearProgress,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import StarIcon from '@mui/icons-material/Star';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
@@ -58,7 +60,7 @@ import { ManageSourcesModal } from '../../components/common/ManageSourcesModal.j
 import { SelectSourceModal } from '../../components/common/SelectSourceModal.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
-import { isYouTubeSource, openYouTubeAutoplay } from '../../utils/youtube.js';
+import { isYouTubeSource } from '../../utils/youtube.js';
 
 export const MovieDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -267,23 +269,37 @@ export const MovieDetailPage: React.FC = () => {
     }
   }
 
+  const isResumable = Boolean(
+    movie.playback_position_sec &&
+    movie.playback_position_sec > 0 &&
+    movie.watch_status !== 'watched'
+  );
+
   const handlePlayMovie = () => {
     if (hasMultipleSources) {
       setSelectSourceOpen(true);
     } else if (primaryOttSource) {
       if (isYouTubeSource(primaryOttSource)) {
-        openYouTubeAutoplay(primaryOttSource.external_url || '', movie.title);
+        openPlayer(movie, primaryOttSource);
       } else {
         window.open(resolveOttUrl(primaryOttSource), '_blank', 'noopener,noreferrer');
       }
     } else if (fallbackOtt?.url) {
       if (fallbackOtt.name.toLowerCase().includes('youtube')) {
-        openYouTubeAutoplay(fallbackOtt.url, movie.title);
+        openPlayer(movie, {
+          id: 'fallback-yt',
+          user_movie_id: movie.user_movie_id,
+          source_type: 'youtube',
+          provider_name: 'YouTube',
+          external_url: fallbackOtt.url,
+        } as any);
       } else {
         window.open(fallbackOtt.url, '_blank', 'noopener,noreferrer');
       }
     } else if (driveSource) {
       openPlayer(movie, driveSource);
+    } else if (movie.trailer_url) {
+      openPlayer(movie);
     } else {
       setSelectSourceOpen(true);
     }
@@ -291,6 +307,26 @@ export const MovieDetailPage: React.FC = () => {
 
   const handleWatchTrailer = () => {
     openPlayer(movie);
+  };
+
+  const handleStartOver = async () => {
+    try {
+      await api.post(`/sources/movie/${movie.user_movie_id}/progress`, {
+        positionSec: 0,
+        completed: false,
+      });
+      queryClient.invalidateQueries({ queryKey: ['movie', id] });
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+    } catch (e) {}
+
+    const resetMovie = { ...movie, playback_position_sec: 0, watch_status: 'unwatched' as const };
+    const chosen =
+      (movie.sources || []).find((s: any) => s.source_type === 'google_drive' || isYouTubeSource(s)) ||
+      (movie.sources && movie.sources[0]) ||
+      null;
+    openPlayer(resetMovie, chosen || undefined);
   };
 
   return (
@@ -379,7 +415,7 @@ export const MovieDetailPage: React.FC = () => {
                     interactive
                     onClick={() => {
                       if (isYouTubeSource(s)) {
-                        openYouTubeAutoplay(s.external_url || '', movie.title);
+                        openPlayer(movie, s);
                       } else {
                         window.open(resolveOttUrl(s), '_blank', 'noopener,noreferrer');
                       }
@@ -473,20 +509,35 @@ export const MovieDetailPage: React.FC = () => {
               <Stack direction="row" spacing={1.5} flexWrap="wrap" sx={{ mt: 1 }}>
                 <Button
                   variant="contained"
-                  color="primary"
+                  color={isResumable ? 'secondary' : 'primary'}
                   size="large"
-                  startIcon={primaryOttSource || fallbackOtt ? <OpenInNewIcon /> : <PlayArrowIcon />}
+                  startIcon={primaryOttSource && !isYouTubeSource(primaryOttSource) ? <OpenInNewIcon /> : <PlayArrowIcon />}
                   onClick={handlePlayMovie}
                   sx={{ fontWeight: 700, px: 3.5 }}
                 >
-                  {primaryOttSource
-                    ? `Stream on ${primaryOttSource.provider_name}`
+                  {isResumable
+                    ? `Resume Playback (${movie.last_played_time_formatted || `${Math.floor((movie.playback_position_sec || 0) / 60)}m`})`
+                    : primaryOttSource
+                    ? (isYouTubeSource(primaryOttSource) ? 'Play on YouTube' : `Stream on ${primaryOttSource.provider_name}`)
                     : fallbackOtt
-                    ? `Stream on ${fallbackOtt.name}`
+                    ? (fallbackOtt.name.toLowerCase().includes('youtube') ? 'Play on YouTube' : `Stream on ${fallbackOtt.name}`)
                     : driveSource
                     ? (movie.media_type === 'tv' ? 'Play Episode' : 'Play Movie')
                     : (movie.media_type === 'tv' ? 'Stream Series' : 'Stream / Play Movie')}
                 </Button>
+
+                {isResumable && (
+                  <Button
+                    variant="outlined"
+                    color="inherit"
+                    size="large"
+                    startIcon={<RestartAltIcon />}
+                    onClick={handleStartOver}
+                    sx={{ borderColor: 'rgba(255,255,255,0.25)', color: '#F8FAFC', fontWeight: 600, px: 2.5 }}
+                  >
+                    Start Over
+                  </Button>
+                )}
 
                 {movie.trailer_url && (
                   <Button
@@ -614,6 +665,29 @@ export const MovieDetailPage: React.FC = () => {
                   </IconButton>
                 </Tooltip>
               </Stack>
+
+              {/* Continue Watching Progress on Movie Detail */}
+              {isResumable && (
+                <Box sx={{ width: '100%', maxWidth: 480, mt: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(
+                      Math.round(((movie.playback_position_sec || 0) / ((movie.runtime || 120) * 60)) * 100),
+                      98
+                    )}
+                    sx={{
+                      flexGrow: 1,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      '& .MuiLinearProgress-bar': { backgroundColor: '#38BDF8' },
+                    }}
+                  />
+                  <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 600 }}>
+                    {Math.floor((movie.playback_position_sec || 0) / 60)}m / {movie.runtime || 120}m watched
+                  </Typography>
+                </Box>
+              )}
             </Box>
           </Grid>
         </Grid>
@@ -1061,10 +1135,10 @@ export const MovieDetailPage: React.FC = () => {
                         size="small"
                         variant="contained"
                         color="primary"
-                        endIcon={isOtt && src.external_url ? <OpenInNewIcon sx={{ fontSize: '14px !important' }} /> : undefined}
+                        endIcon={isOtt && !isYouTubeSource(src) && src.external_url ? <OpenInNewIcon sx={{ fontSize: '14px !important' }} /> : undefined}
                         onClick={() => {
                           if (isYouTubeSource(src)) {
-                            openYouTubeAutoplay(src.external_url || '', movie.title);
+                            openPlayer(movie, src);
                           } else if (isOtt) {
                             window.open(resolveOttUrl(src), '_blank', 'noopener,noreferrer');
                           } else {
@@ -1072,7 +1146,7 @@ export const MovieDetailPage: React.FC = () => {
                           }
                         }}
                       >
-                        {isOtt ? 'Stream' : 'Play'}
+                        {isOtt && !isYouTubeSource(src) ? 'Stream' : (isResumable ? 'Resume' : 'Play')}
                       </Button>
                     </Box>
                   );
@@ -1252,7 +1326,7 @@ export const MovieDetailPage: React.FC = () => {
         movie={movie}
         onLaunchSource={(src) => {
           if (isYouTubeSource(src)) {
-            openYouTubeAutoplay(src.external_url || '', movie.title);
+            openPlayer(movie, src);
           } else if (src.source_type === 'ott' && src.external_url) {
             window.open(src.external_url, '_blank', 'noopener,noreferrer');
           } else {

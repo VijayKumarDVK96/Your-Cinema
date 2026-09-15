@@ -19,12 +19,14 @@ export class AuthController {
 
   static async login(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await AuthService.login(req.body);
+      const { email, password, rememberMe } = req.body;
+      const result = await AuthService.login({ email, password, rememberMe: Boolean(rememberMe) });
+      const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
       res.cookie('refresh_token', result.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge,
       });
       return res.status(200).json({ success: true, data: result });
     } catch (err) {

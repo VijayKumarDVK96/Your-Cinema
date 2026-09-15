@@ -4,3 +4,4 @@ backend/node_modules
 backend/.env
 backend/.env.production
 backend/dist/*
+.playwright-mcp/

@@ -40,6 +40,10 @@ export const pool = new Pool({
 
 let isPgConnected = false;
 
+export function setPgConnected(val: boolean) {
+  isPgConnected = val;
+}
+
 // Test connectivity on start
 pool.connect()
   .then((client) => {
@@ -66,9 +70,9 @@ class InMemoryStore {
   watchlists: Map<string, any> = new Map();
   watchlistMovies: Map<string, any> = new Map();
   movieSources: Map<string, any> = new Map();
+  moviePlaybackProgress: Map<string, any> = new Map();
   watchHistory: Map<string, any> = new Map();
   userAiSettings: Map<string, any> = new Map();
-  googleDriveAccounts: Map<string, any> = new Map();
 
   constructor() {
     this.seedDefaultData();
@@ -449,6 +453,48 @@ class InMemoryStore {
       created_at: new Date().toISOString(),
     };
     [s1, s2].forEach(s => this.movieSources.set(s.id, s));
+
+    // Seed Movie Playback Progress
+    const prog1 = {
+      id: 'prog-1',
+      user_id: demoUserId,
+      user_movie_id: um1.id,
+      source_id: s1.id,
+      source_type: 'youtube',
+      last_played_position_sec: 10140,
+      last_played_time_formatted: '2h 49m 00s',
+      completed: true,
+      last_played_at: um1.last_watched_at,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const prog2 = {
+      id: 'prog-2',
+      user_id: demoUserId,
+      user_movie_id: um2.id,
+      source_id: null,
+      source_type: null,
+      last_played_position_sec: 8880,
+      last_played_time_formatted: '2h 28m 00s',
+      completed: true,
+      last_played_at: um2.last_watched_at,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const prog3 = {
+      id: 'prog-3',
+      user_id: demoUserId,
+      user_movie_id: um3.id,
+      source_id: s2.id,
+      source_type: 'ott',
+      last_played_position_sec: 4320,
+      last_played_time_formatted: '1h 12m 00s',
+      completed: false,
+      last_played_at: um3.last_watched_at,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    [prog1, prog2, prog3].forEach(p => this.moviePlaybackProgress.set(p.user_movie_id, p));
 
     // Seed Watchlists
     const wl1 = {

@@ -70,6 +70,9 @@ export interface UserMovie {
   custom_director?: string | null;
   is_customized?: boolean;
   playback_position_sec?: number;
+  last_played_time_formatted?: string | null;
+  last_played_source_type?: string | null;
+  last_played_source_id?: string | null;
   last_watched_at?: string | null;
   added_at: string;
   media_type?: 'movie' | 'tv';

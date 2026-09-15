@@ -44,7 +44,7 @@ export class AuthService {
     return { user: { id: userId, email: data.email.toLowerCase(), name: data.name }, ...tokens };
   }
 
-  static async login(data: { email: string; password: string }) {
+  static async login(data: { email: string; password: string; rememberMe?: boolean }) {
     const user = isPgConnected
       ? (await pool.query('SELECT * FROM users WHERE email = $1', [data.email.toLowerCase()])).rows[0]
       : Array.from(inMemoryDb.users.values()).find(u => u.email.toLowerCase() === data.email.toLowerCase());
@@ -63,7 +63,10 @@ export class AuthService {
       throw new UnauthorizedError('Invalid email or password.');
     }
 
-    const tokens = this.generateTokens({ id: user.id, email: user.email, name: user.name });
+    const tokens = this.generateTokens(
+      { id: user.id, email: user.email, name: user.name },
+      Boolean(data.rememberMe)
+    );
     return {
       user: {
         id: user.id,
@@ -77,6 +80,7 @@ export class AuthService {
         exclude_watched_default: user.exclude_watched_default,
       },
       ...tokens,
+      rememberMe: Boolean(data.rememberMe),
     };
   }
 
@@ -172,9 +176,9 @@ export class AuthService {
     return this.getProfile(userId);
   }
 
-  static generateTokens(payload: { id: string; email: string; name: string }) {
-    const accessToken = jwt.sign(payload, config.jwt.secret, { expiresIn: '15m' });
-    const refreshToken = jwt.sign({ id: payload.id }, config.jwt.refreshSecret, { expiresIn: '7d' });
+  static generateTokens(payload: { id: string; email: string; name: string }, rememberMe: boolean = false) {
+    const accessToken = jwt.sign(payload, config.jwt.secret, { expiresIn: rememberMe ? '30d' : '15m' });
+    const refreshToken = jwt.sign({ id: payload.id }, config.jwt.refreshSecret, { expiresIn: rememberMe ? '30d' : '7d' });
     return { accessToken, refreshToken };
   }
 }

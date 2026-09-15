@@ -5,7 +5,7 @@ import { api } from '../api/client.js';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
+  login: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   register: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -34,10 +34,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile();
   }, []);
 
-  const login = async (email: string, pass: string) => {
-    const res = await api.post('/auth/login', { email, password: pass });
+  const login = async (email: string, pass: string, rememberMe: boolean = false) => {
+    const res = await api.post('/auth/login', { email, password: pass, rememberMe });
     if (res.data?.data?.accessToken) {
       localStorage.setItem('yc_token', res.data.data.accessToken);
+      if (rememberMe) {
+        localStorage.setItem('yc_remember_email', email);
+        localStorage.setItem('yc_remember_me', 'true');
+      } else {
+        localStorage.removeItem('yc_remember_email');
+        localStorage.removeItem('yc_remember_me');
+      }
       setUser(res.data.data.user);
     }
   };

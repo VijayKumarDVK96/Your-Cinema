@@ -14,7 +14,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import { useQuery } from '@tanstack/react-query';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
@@ -64,11 +65,37 @@ export const HomePage: React.FC = () => {
 
   const allMovies = moviesData?.movies || [];
   const unwatched = allMovies.filter((m: any) => m.watch_status === 'unwatched');
-  const watching = allMovies.filter((m: any) => m.watch_status === 'watching');
+  const watching = allMovies
+    .filter(
+      (m: any) =>
+        m.watch_status === 'watching' ||
+        (m.playback_position_sec && m.playback_position_sec > 0 && m.watch_status !== 'watched')
+    )
+    .sort((a: any, b: any) => {
+      const dateA = new Date(a.last_watched_at || a.updated_at || a.added_at || 0).getTime();
+      const dateB = new Date(b.last_watched_at || b.updated_at || b.added_at || 0).getTime();
+      return dateB - dateA;
+    });
   const watched = allMovies.filter((m: any) => m.watch_status === 'watched');
 
   // Currently watching candidate for resume hero
   const continueWatchingMovie = watching.length > 0 ? watching[0] : null;
+  const otherWatching = watching.slice(1, 7);
+
+  const queryClient = useQueryClient();
+
+  const handleStartOver = async (movieToReset: any) => {
+    try {
+      await api.post(`/sources/movie/${movieToReset.user_movie_id}/progress`, {
+        positionSec: 0,
+        completed: false,
+      });
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+    } catch (e) {}
+    openPlayer({ ...movieToReset, playback_position_sec: 0, watch_status: 'unwatched' });
+  };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -165,21 +192,55 @@ export const HomePage: React.FC = () => {
                 }}
               />
               <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 600 }}>
-                {Math.floor((continueWatchingMovie.playback_position_sec || 0) / 60)}m watched
+                {continueWatchingMovie.last_played_time_formatted ? `${continueWatchingMovie.last_played_time_formatted} watched` : `${Math.floor((continueWatchingMovie.playback_position_sec || 0) / 60)}m watched`}
               </Typography>
             </Box>
 
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<PlayArrowIcon />}
-              onClick={() => openPlayer(continueWatchingMovie)}
-              sx={{ fontWeight: 700, px: 3, py: 1 }}
-            >
-              Resume Playback
-            </Button>
+            <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<PlayArrowIcon />}
+                onClick={() => openPlayer(continueWatchingMovie)}
+                sx={{ fontWeight: 700, px: 3, py: 1 }}
+              >
+                Resume Playback
+              </Button>
+              <Button
+                variant="outlined"
+                color="inherit"
+                startIcon={<RestartAltIcon />}
+                onClick={() => handleStartOver(continueWatchingMovie)}
+                sx={{ fontWeight: 600, px: 2.2, py: 1, borderColor: 'rgba(255, 255, 255, 0.25)', color: '#F8FAFC' }}
+              >
+                Start Over
+              </Button>
+            </Stack>
           </Box>
         </Paper>
+      )}
+
+      {/* Rail: More In Progress / Continue Watching */}
+      {otherWatching && otherWatching.length > 0 && (
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 700, color: '#F8FAFC' }}>
+                Continue Watching
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#64748B' }}>
+                Pick up where you left off across your active titles
+              </Typography>
+            </Box>
+          </Box>
+          <Grid container spacing={2}>
+            {otherWatching.map((m: any) => (
+              <Grid item xs={6} sm={4} md={3} lg={2} key={m.user_movie_id}>
+                <MovieCard movie={m} />
+              </Grid>
+            ))}
+          </Grid>
+        </Box>
       )}
 
       {/* Rail 1: Recommended From Your Library */}

@@ -6,6 +6,8 @@ import {
   TextField,
   Button,
   Alert,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
 import { useNavigate } from 'react-router-dom';
@@ -14,8 +16,12 @@ import { useAuth } from '../../context/AuthContext.js';
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const savedEmail = localStorage.getItem('yc_remember_email') || '';
+  const savedRemember = localStorage.getItem('yc_remember_me') === 'true' || Boolean(savedEmail);
+
+  const [email, setEmail] = useState(savedEmail);
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(savedRemember);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +30,7 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      await login(email, password);
+      await login(email, password, rememberMe);
       navigate('/');
     } catch (err: any) {
       setError(err.message || 'Login failed.');
@@ -83,6 +89,29 @@ export const LoginPage: React.FC = () => {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', mt: -0.5 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  sx={{
+                    color: 'rgba(229,169,60,0.6)',
+                    '&.Mui-checked': { color: '#E5A93C' },
+                    p: 0.5,
+                    mr: 0.5,
+                  }}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.85rem', userSelect: 'none' }}>
+                  Remember me
+                </Typography>
+              }
+            />
+          </Box>
 
           <Button
             type="submit"

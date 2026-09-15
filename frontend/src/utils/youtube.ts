@@ -2,6 +2,23 @@
  * Utilities for detecting YouTube OTT/sources and launching directly in the YouTube app/browser with autoplay.
  */
 
+export function extractYouTubeId(url?: string | null): string | null {
+  if (!url) return null;
+  const cleanUrl = url.trim();
+  const match = cleanUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+  if (match && match[1]) return match[1];
+  if (/^[\w-]{11}$/.test(cleanUrl)) return cleanUrl;
+  return null;
+}
+
+export function getYouTubeEmbedUrl(urlOrId?: string | null, startSec: number = 0): string | null {
+  const id = extractYouTubeId(urlOrId);
+  if (!id) return null;
+  const start = Math.max(0, Math.floor(startSec));
+  const startParam = start > 0 ? `&start=${start}` : '';
+  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&enablejsapi=1${startParam}`;
+}
+
 export function isYouTubeSource(source?: {
   source_type?: string | null;
   provider_name?: string | null;

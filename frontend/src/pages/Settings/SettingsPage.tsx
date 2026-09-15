@@ -21,7 +21,6 @@ import {
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import AddToDriveIcon from '@mui/icons-material/AddToDrive';
 import TvIcon from '@mui/icons-material/Tv';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -587,29 +586,7 @@ export const SettingsPage: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* 3. Google Drive OAuth Integration */}
-      <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <AddToDriveIcon sx={{ color: '#E5A93C' }} />
-          <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-            Google Drive Connection
-          </Typography>
-        </Box>
-        <Typography variant="body2" sx={{ color: '#94A3B8', mb: 2 }}>
-          Connect your Google Drive to index video files and stream via authenticated range requests without downloading any video files to the server.
-        </Typography>
-
-        <Button
-          variant="outlined"
-          color="primary"
-          startIcon={<AddToDriveIcon />}
-          onClick={() => alert('Redirecting to Google OAuth2 flow (requires configured GOOGLE_CLIENT_ID).')}
-        >
-          Connect Google Drive
-        </Button>
-      </Paper>
-
-      {/* 4. Display & TV Navigation Mode */}
+      {/* 3. Display & TV Navigation Mode */}
       <Paper sx={{ p: 3.5, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <TvIcon sx={{ color: '#38BDF8' }} />
