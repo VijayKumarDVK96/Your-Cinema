@@ -44,12 +44,15 @@ const OTT_OPTIONS = [
   { value: 'Netflix', label: 'Netflix', color: '#E50914' },
   { value: 'Amazon Prime Video', label: 'Prime Video', color: '#00A8E1' },
   { value: 'Disney+ Hotstar', label: 'Disney+ Hotstar', color: '#113CCF' },
+  { value: 'Sun NXT', label: 'Sun NXT', color: '#FF6B00' },
   { value: 'Apple TV+', label: 'Apple TV+', color: '#A3AAAE' },
   { value: 'YouTube', label: 'YouTube', color: '#FF0000' },
   { value: 'Google Drive', label: 'Google Drive', color: '#34A853' },
   { value: 'JioCinema', label: 'JioCinema', color: '#D80075' },
   { value: 'Zee5', label: 'Zee5', color: '#8230C6' },
   { value: 'Sony LIV', label: 'Sony LIV', color: '#00E5FF' },
+  { value: 'Aha', label: 'Aha', color: '#FF5000' },
+  { value: 'Vi Movies & TV', label: 'Vi Movies & TV', color: '#E40046' },
   { value: 'any_ott', label: 'Any Streaming / OTT', color: '#E5A93C' },
 ];
 

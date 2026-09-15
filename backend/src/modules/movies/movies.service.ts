@@ -106,15 +106,31 @@ export class MoviesService {
             WHERE ms.user_movie_id = um.id
           )`);
         } else {
+          const ottLower = ott.toLowerCase();
+          const searchTokens: string[] = [ottLower];
+          if (ottLower.includes('sun')) searchTokens.push('sunnxt', 'sun_nxt', 'sun nxt');
+          else if (ottLower.includes('prime') || ottLower.includes('amazon')) searchTokens.push('prime', 'amazon');
+          else if (ottLower.includes('hotstar') || ottLower.includes('disney')) searchTokens.push('hotstar', 'disney', 'jiohotstar');
+          else if (ottLower.includes('apple')) searchTokens.push('apple', 'appletv');
+          else if (ottLower.includes('jio')) searchTokens.push('jio', 'jiocinema');
+          else if (ottLower.includes('zee')) searchTokens.push('zee5', 'zee');
+          else if (ottLower.includes('sony')) searchTokens.push('sonyliv', 'sony liv');
+          else if (ottLower.includes('vi')) searchTokens.push('vimovies', 'vi movies', 'vodafone');
+          else if (ottLower.includes('drive')) searchTokens.push('drive', 'google_drive');
+          else if (ottLower.includes('aha')) searchTokens.push('aha');
+
+          const clauses: string[] = [];
+          searchTokens.forEach(token => {
+            clauses.push(`LOWER(ms.provider_name) LIKE $${pIdx}`);
+            clauses.push(`LOWER(COALESCE(ms.provider_icon, '')) LIKE $${pIdx}`);
+            params.push(`%${token}%`);
+            pIdx++;
+          });
+
           conditions.push(`EXISTS (
             SELECT 1 FROM movie_sources ms
-            WHERE ms.user_movie_id = um.id AND (
-              LOWER(ms.provider_name) LIKE $${pIdx} OR
-              LOWER(ms.source_type) LIKE $${pIdx}
-            )
+            WHERE ms.user_movie_id = um.id AND (${clauses.join(' OR ')})
           )`);
-          params.push(`%${ott.toLowerCase()}%`);
-          pIdx++;
         }
       }
       if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
@@ -332,13 +348,25 @@ export class MoviesService {
       filtered = filtered.filter(m => (m.runtime || 0) <= runtimeMax);
     }
     if (ott && ott !== 'all') {
+      const ottLower = ott.toLowerCase();
       filtered = filtered.filter(m => {
         const sources = m.sources || [];
         if (ott === 'any_ott') return sources.length > 0;
-        return sources.some((s: any) =>
-          (s.provider_name && s.provider_name.toLowerCase().includes(ott.toLowerCase())) ||
-          (s.source_type && s.source_type.toLowerCase().includes(ott.toLowerCase()))
-        );
+        return sources.some((s: any) => {
+          const pName = (s.provider_name || '').toLowerCase();
+          const pIcon = (s.provider_icon || '').toLowerCase();
+          if (ottLower.includes('sun')) return pName.includes('sun') || pIcon.includes('sun');
+          if (ottLower.includes('prime') || ottLower.includes('amazon')) return pName.includes('prime') || pName.includes('amazon') || pIcon.includes('prime');
+          if (ottLower.includes('hotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('disney') || pIcon.includes('hotstar');
+          if (ottLower.includes('apple')) return pName.includes('apple') || pIcon.includes('apple');
+          if (ottLower.includes('jio')) return pName.includes('jio') || pIcon.includes('jio');
+          if (ottLower.includes('zee')) return pName.includes('zee') || pIcon.includes('zee');
+          if (ottLower.includes('sony')) return pName.includes('sony') || pIcon.includes('sony');
+          if (ottLower.includes('vi')) return pName.includes('vi') || pIcon.includes('vi');
+          if (ottLower.includes('aha')) return pName.includes('aha') || pIcon.includes('aha');
+          if (ottLower.includes('drive')) return pName.includes('drive') || pIcon.includes('drive');
+          return pName.includes(ottLower) || pIcon.includes(ottLower);
+        });
       });
     }
     if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {

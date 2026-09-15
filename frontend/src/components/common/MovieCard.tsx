@@ -15,6 +15,7 @@ import { isYouTubeSource } from '../../utils/youtube.js';
 interface MovieCardProps {
   movie: UserMovie;
   recommendationScore?: number;
+  selectedOtt?: string;
   onToggleFavorite?: (e: React.MouseEvent) => void;
   onToggleWatched?: (e: React.MouseEvent) => void;
 }
@@ -22,6 +23,7 @@ interface MovieCardProps {
 export const MovieCard: React.FC<MovieCardProps> = ({
   movie,
   recommendationScore,
+  selectedOtt,
   onToggleFavorite,
   onToggleWatched,
 }) => {
@@ -34,9 +36,31 @@ export const MovieCard: React.FC<MovieCardProps> = ({
 
   const year = movie.release_date ? movie.release_date.substring(0, 4) : '';
 
-  // Determine primary streaming provider or inferred OTT provider
-  const primarySource = (movie.sources || []).find((s: any) => s.source_type === 'ott' || s.source_type === 'google_drive') ||
-    (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
+  // Determine primary streaming provider or active filter OTT provider
+  let primarySource = null;
+  if (selectedOtt && selectedOtt !== 'all' && selectedOtt !== 'any_ott') {
+    const ottLower = selectedOtt.toLowerCase();
+    primarySource = (movie.sources || []).find((s: any) => {
+      const pName = (s.provider_name || '').toLowerCase();
+      const pIcon = (s.provider_icon || '').toLowerCase();
+      if (ottLower.includes('sun')) return pName.includes('sun') || pIcon.includes('sun');
+      if (ottLower.includes('prime') || ottLower.includes('amazon')) return pName.includes('prime') || pName.includes('amazon') || pIcon.includes('prime');
+      if (ottLower.includes('hotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('disney') || pIcon.includes('hotstar');
+      if (ottLower.includes('apple')) return pName.includes('apple') || pIcon.includes('apple');
+      if (ottLower.includes('jio')) return pName.includes('jio') || pIcon.includes('jio');
+      if (ottLower.includes('zee')) return pName.includes('zee') || pIcon.includes('zee');
+      if (ottLower.includes('sony')) return pName.includes('sony') || pIcon.includes('sony');
+      if (ottLower.includes('vi')) return pName.includes('vi') || pIcon.includes('vi');
+      if (ottLower.includes('aha')) return pName.includes('aha') || pIcon.includes('aha');
+      if (ottLower.includes('drive')) return pName.includes('drive') || pIcon.includes('drive');
+      return pName.includes(ottLower) || pIcon.includes(ottLower);
+    });
+  }
+
+  if (!primarySource) {
+    primarySource = (movie.sources || []).find((s: any) => s.source_type === 'ott' || s.source_type === 'google_drive') ||
+      (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
+  }
 
   const tLower = (movie.title || '').toLowerCase();
   let ottInfo: { name: string; icon?: string; url?: string } | null = null;

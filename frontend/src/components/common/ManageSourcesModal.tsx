@@ -36,10 +36,13 @@ const POPULAR_PROVIDERS = [
   { name: 'Netflix', icon: 'netflix', type: 'ott' as const },
   { name: 'Amazon Prime Video', icon: 'prime', type: 'ott' as const },
   { name: 'Disney+ Hotstar', icon: 'hotstar', type: 'ott' as const },
+  { name: 'Sun NXT', icon: 'sunnxt', type: 'ott' as const },
   { name: 'Apple TV+', icon: 'appletv', type: 'ott' as const },
   { name: 'JioCinema', icon: 'jiocinema', type: 'ott' as const },
   { name: 'Zee5', icon: 'zee5', type: 'ott' as const },
   { name: 'Sony LIV', icon: 'sonyliv', type: 'ott' as const },
+  { name: 'Aha', icon: 'aha', type: 'ott' as const },
+  { name: 'Vi Movies & TV', icon: 'vimovies', type: 'ott' as const },
   { name: 'Google Drive', icon: 'google_drive', type: 'google_drive' as const },
   { name: 'YouTube', icon: 'youtube', type: 'youtube' as const },
 ];

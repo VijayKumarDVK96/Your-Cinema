@@ -193,3 +193,29 @@ CREATE INDEX IF NOT EXISTS idx_watchlists_user_id ON watchlists(user_id, display
 CREATE INDEX IF NOT EXISTS idx_watchlist_movies_lookup ON watchlist_movies(watchlist_id, sort_order ASC);
 CREATE INDEX IF NOT EXISTS idx_movie_sources_user_movie ON movie_sources(user_movie_id);
 CREATE INDEX IF NOT EXISTS idx_watch_history_user_date ON watch_history(user_id, watched_date DESC);
+
+-- Seed default demo user
+INSERT INTO users (
+    id,
+    email,
+    password_hash,
+    name,
+    avatar_url,
+    preferred_languages,
+    favorite_genres,
+    preferred_runtime_min,
+    preferred_runtime_max,
+    exclude_watched_default
+) VALUES (
+    'a0000000-0000-0000-0000-000000000001',
+    'demo@yourcinema.com',
+    '$2a$10$w8T0i9P1kLp9qG2v.e2Q.OtA/1P1yv9C1kE9lZ8zZ9o9oZ9o9oZ9o',
+    'Cinema Enthusiast',
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200',
+    ARRAY['en', 'ta'],
+    ARRAY[878, 53, 18],
+    90,
+    165,
+    TRUE
+) ON CONFLICT (id) DO NOTHING;
+

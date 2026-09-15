@@ -96,6 +96,13 @@ const ViMoviesIcon = () => (
   </svg>
 );
 
+const AhaIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="24" height="24" rx="4" fill="#FF5000" />
+    <text x="12" y="16" fill="#FFFFFF" fontSize="10" fontWeight="900" textAnchor="middle" fontFamily="sans-serif">aha</text>
+  </svg>
+);
+
 const DefaultOttIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="24" height="24" rx="4" fill="#1E293B" stroke="#64748B" strokeWidth="1" />
@@ -225,6 +232,18 @@ export const getOttMeta = (providerName: string = '', iconOrUrl?: string): OttMe
       borderColor: 'rgba(228, 0, 70, 0.5)',
       icon: <ViMoviesIcon />,
       getDefaultSearchUrl: (title) => `https://www.vijungle.com/search?q=${encodeURIComponent(title)}`,
+    };
+  }
+
+  if (nameLower.includes('aha') || iconLower.includes('aha')) {
+    return {
+      key: 'aha',
+      name: 'Aha',
+      bgColor: '#FF5000',
+      textColor: '#FFFFFF',
+      borderColor: 'rgba(255, 80, 0, 0.5)',
+      icon: <AhaIcon />,
+      getDefaultSearchUrl: (title) => `https://www.aha.video/search?q=${encodeURIComponent(title)}`,
     };
   }
 

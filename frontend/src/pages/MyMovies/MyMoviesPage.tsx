@@ -823,7 +823,7 @@ export const MyMoviesPage: React.FC = () => {
                         />
                       </Box>
                     )}
-                    <MovieCard movie={movie} />
+                    <MovieCard movie={movie} selectedOtt={ott} />
                   </Box>
                 </Grid>
               );

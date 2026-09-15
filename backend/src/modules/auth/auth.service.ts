@@ -45,9 +45,32 @@ export class AuthService {
   }
 
   static async login(data: { email: string; password: string; rememberMe?: boolean }) {
-    const user = isPgConnected
+    let user = isPgConnected
       ? (await pool.query('SELECT * FROM users WHERE email = $1', [data.email.toLowerCase()])).rows[0]
       : Array.from(inMemoryDb.users.values()).find(u => u.email.toLowerCase() === data.email.toLowerCase());
+
+    if (!user && data.email.toLowerCase() === 'demo@yourcinema.com') {
+      if (isPgConnected) {
+        await pool.query(
+          `INSERT INTO users (id, email, password_hash, name, avatar_url, preferred_languages, favorite_genres, preferred_runtime_min, preferred_runtime_max, exclude_watched_default)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            'a0000000-0000-0000-0000-000000000001',
+            'demo@yourcinema.com',
+            '$2a$10$w8T0i9P1kLp9qG2v.e2Q.OtA/1P1yv9C1kE9lZ8zZ9o9oZ9o9oZ9o',
+            'Cinema Enthusiast',
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200',
+            ['en', 'ta'],
+            [878, 53, 18],
+            90,
+            165,
+            true,
+          ]
+        );
+        user = (await pool.query('SELECT * FROM users WHERE email = $1', [data.email.toLowerCase()])).rows[0];
+      }
+    }
 
     if (!user) {
       throw new UnauthorizedError('Invalid email or password.');
@@ -119,9 +142,46 @@ export class AuthService {
   }
 
   static async getProfile(userId: string) {
-    const user = isPgConnected
+    let user = isPgConnected
       ? (await pool.query('SELECT id, email, name, avatar_url, preferred_languages, favorite_genres, preferred_runtime_min, preferred_runtime_max, exclude_watched_default FROM users WHERE id = $1', [userId])).rows[0]
       : inMemoryDb.users.get(userId);
+
+    if (!user && userId === 'a0000000-0000-0000-0000-000000000001') {
+      if (isPgConnected) {
+        await pool.query(
+          `INSERT INTO users (id, email, password_hash, name, avatar_url, preferred_languages, favorite_genres, preferred_runtime_min, preferred_runtime_max, exclude_watched_default)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            'a0000000-0000-0000-0000-000000000001',
+            'demo@yourcinema.com',
+            '$2a$10$w8T0i9P1kLp9qG2v.e2Q.OtA/1P1yv9C1kE9lZ8zZ9o9oZ9o9oZ9o',
+            'Cinema Enthusiast',
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200',
+            ['en', 'ta'],
+            [878, 53, 18],
+            90,
+            165,
+            true,
+          ]
+        );
+        user = (await pool.query('SELECT id, email, name, avatar_url, preferred_languages, favorite_genres, preferred_runtime_min, preferred_runtime_max, exclude_watched_default FROM users WHERE id = $1', [userId])).rows[0];
+      } else {
+        const demoUser = {
+          id: 'a0000000-0000-0000-0000-000000000001',
+          email: 'demo@yourcinema.com',
+          name: 'Cinema Enthusiast',
+          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200',
+          preferred_languages: ['en', 'ta'],
+          favorite_genres: [878, 53, 18],
+          preferred_runtime_min: 90,
+          preferred_runtime_max: 165,
+          exclude_watched_default: true,
+        };
+        inMemoryDb.users.set(demoUser.id, demoUser);
+        user = demoUser;
+      }
+    }
 
     if (!user) {
       throw new NotFoundError('User profile not found.');
