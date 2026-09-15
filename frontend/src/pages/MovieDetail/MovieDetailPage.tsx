@@ -90,18 +90,9 @@ export const MovieDetailPage: React.FC = () => {
     },
   });
 
-  // Single genre select — detach all current, then attach chosen
+  // Single genre select — attach chosen genre (backend replaces existing genre atomically)
   const selectGenreMutation = useMutation({
     mutationFn: async (genreId: string) => {
-      // Detach all existing predefined genres
-      for (const g of (movie.genres || [])) {
-        await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: String(g.name || g.id) });
-      }
-      // Detach all existing custom genres
-      for (const cg of (movie.custom_genres || [])) {
-        await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: cg.id });
-      }
-      // Attach the selected one
       await api.post('/genres/attach', { userMovieId: movie.user_movie_id, genreId });
     },
     onSuccess: () => {
@@ -114,8 +105,8 @@ export const MovieDetailPage: React.FC = () => {
 
   // Detach (remove) the single active genre
   const detachGenreMutation = useMutation({
-    mutationFn: async (genreId: string) => {
-      await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId });
+    mutationFn: async (genreId?: string) => {
+      await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: genreId || '' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['movie', id] });
@@ -130,13 +121,6 @@ export const MovieDetailPage: React.FC = () => {
       const res = await api.post('/genres', data);
       const created = res.data?.data;
       if (created?.id) {
-        // Detach all existing genres first
-        for (const g of (movie.genres || [])) {
-          await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: String(g.name || g.id) });
-        }
-        for (const cg of (movie.custom_genres || [])) {
-          await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: cg.id });
-        }
         await api.post('/genres/attach', { userMovieId: movie.user_movie_id, genreId: created.id });
       }
     },
@@ -549,8 +533,8 @@ export const MovieDetailPage: React.FC = () => {
                 />
               </Box>
 
-              {/* Action Buttons */}
-              <Stack direction="row" spacing={1.5} flexWrap="wrap" sx={{ mt: 1 }}>
+              {/* Action Buttons — Primary row */}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1, alignItems: 'center' }}>
                 <Button
                   variant="contained"
                   color={isResumable ? 'secondary' : 'primary'}
@@ -601,17 +585,7 @@ export const MovieDetailPage: React.FC = () => {
                   startIcon={<CheckCircleIcon />}
                   onClick={() => watchMutation.mutate()}
                 >
-                  {movie.watch_status === 'watched' ? 'Watched' : 'Mark Watched'}
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  startIcon={<AddLinkIcon />}
-                  onClick={() => setManageSourcesOpen(true)}
-                  sx={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38BDF8', fontWeight: 600 }}
-                >
-                  Edit OTT / Streaming Links
+                  {movie.watch_status === 'watched' ? 'Watched ✓' : 'Mark Watched'}
                 </Button>
 
                 <Button
@@ -622,73 +596,64 @@ export const MovieDetailPage: React.FC = () => {
                 >
                   Rate & Log
                 </Button>
+              </Box>
 
-                <Tooltip title={movie.is_favorite ? 'Remove from favorites' : 'Mark favorite'}>
+              {/* Action Buttons — Secondary utility row */}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5, alignItems: 'center' }}>
+                <Tooltip title={movie.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
                   <IconButton
                     onClick={() => favMutation.mutate()}
+                    size="small"
                     sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '10px',
-                      backgroundColor: movie.is_favorite ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: '8px',
+                      backgroundColor: movie.is_favorite ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.04)',
                       border: movie.is_favorite ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: movie.is_favorite ? '#EF4444' : '#94A3B8',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': {
-                        backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                        borderColor: 'rgba(239, 68, 68, 0.5)',
-                        color: '#EF4444',
-                        transform: 'translateY(-1px)',
-                      },
+                      color: movie.is_favorite ? '#EF4444' : '#64748B',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: 'rgba(239, 68, 68, 0.5)', color: '#EF4444' },
                     }}
                   >
-                    {movie.is_favorite ? <FavoriteIcon sx={{ fontSize: 20 }} /> : <FavoriteBorderIcon sx={{ fontSize: 20 }} />}
+                    {movie.is_favorite ? <FavoriteIcon sx={{ fontSize: 18 }} /> : <FavoriteBorderIcon sx={{ fontSize: 18 }} />}
                   </IconButton>
                 </Tooltip>
 
-                <Tooltip title="Edit movie details">
+                <Tooltip title="Edit movie details & overrides">
                   <IconButton
                     onClick={() => setEditModalOpen(true)}
+                    size="small"
                     sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '10px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: '#94A3B8',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': {
-                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                        borderColor: 'rgba(255, 255, 255, 0.22)',
-                        color: '#F8FAFC',
-                        transform: 'translateY(-1px)',
-                      },
+                      color: '#64748B',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)', borderColor: 'rgba(255,255,255,0.22)', color: '#F8FAFC' },
                     }}
                   >
-                    <EditIcon sx={{ fontSize: 20 }} />
+                    <EditIcon sx={{ fontSize: 18 }} />
                   </IconButton>
                 </Tooltip>
 
-                <Tooltip title="Refresh from TMDB">
+                <Tooltip title="Refresh metadata from TMDB">
                   <IconButton
                     onClick={() => setRefreshModalOpen(true)}
+                    size="small"
                     sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '10px',
+                      width: 36,
+                      height: 36,
+                      borderRadius: '8px',
                       backgroundColor: 'rgba(56, 189, 248, 0.06)',
-                      border: '1px solid rgba(56, 189, 248, 0.22)',
+                      border: '1px solid rgba(56, 189, 248, 0.2)',
                       color: '#38BDF8',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': {
-                        backgroundColor: 'rgba(56, 189, 248, 0.16)',
-                        borderColor: 'rgba(56, 189, 248, 0.5)',
-                        color: '#7DD3FC',
-                        transform: 'translateY(-1px)',
-                      },
+                      transition: 'all 0.2s ease',
+                      '&:hover': { backgroundColor: 'rgba(56, 189, 248, 0.16)', borderColor: 'rgba(56, 189, 248, 0.5)', color: '#7DD3FC' },
                     }}
                   >
-                    <SyncIcon sx={{ fontSize: 20 }} />
+                    <SyncIcon sx={{ fontSize: 18 }} />
                   </IconButton>
                 </Tooltip>
 
@@ -699,26 +664,22 @@ export const MovieDetailPage: React.FC = () => {
                         deleteMutation.mutate();
                       }
                     }}
+                    size="small"
                     sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '10px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: '#94A3B8',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': {
-                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                        borderColor: 'rgba(239, 68, 68, 0.35)',
-                        color: '#EF4444',
-                        transform: 'translateY(-1px)',
-                      },
+                      color: '#64748B',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#EF4444' },
                     }}
                   >
-                    <DeleteOutlineIcon sx={{ fontSize: 20 }} />
+                    <DeleteOutlineIcon sx={{ fontSize: 18 }} />
                   </IconButton>
                 </Tooltip>
-              </Stack>
+              </Box>
 
               {/* Continue Watching Progress on Movie Detail */}
               {isResumable && (
@@ -1412,26 +1373,29 @@ export const MovieDetailPage: React.FC = () => {
             Pick one genre for <strong>"{movie?.title}"</strong>. This replaces the current genre.
           </Typography>
 
-          {/* Predefined genres from TMDB metadata */}
-          {(movie?.genres || []).length > 0 && (
+          {/* Predefined genres */}
+          {(genresData?.predefined || []).length > 0 && (
             <Box sx={{ mb: 2.5 }}>
               <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
-                From Movie Metadata
+                Predefined Genres (Select One)
               </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {(movie?.genres || []).map((g: any) => {
-                  const isActive = (movie?.custom_genres || []).length === 0 && (movie?.genres || [])[0]?.name === g.name;
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, maxHeight: 130, overflowY: 'auto', pr: 0.5 }}>
+                {(genresData?.predefined || []).map((pg: any) => {
+                  const currentName = ((movie?.custom_genres || [])[0]?.name || (movie?.genres || [])[0]?.name || '').toLowerCase();
+                  const isActive = currentName === pg.name.toLowerCase();
                   return (
                     <Chip
-                      key={g.id || g.name}
-                      label={g.name}
-                      onClick={() => selectGenreMutation.mutate(String(g.name || g.id))}
+                      key={pg.id || pg.name}
+                      label={pg.name}
+                      size="small"
+                      onClick={() => selectGenreMutation.mutate(pg.name)}
                       disabled={selectGenreMutation.isPending}
                       sx={{
-                        backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
-                        color: isActive ? '#F8FAFC' : '#94A3B8',
-                        border: isActive ? '1.5px solid rgba(255,255,255,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                        backgroundColor: isActive ? `${pg.color || '#38BDF8'}33` : 'rgba(255,255,255,0.05)',
+                        color: isActive ? '#F8FAFC' : (pg.color || '#94A3B8'),
+                        border: isActive ? `1.5px solid ${pg.color || '#38BDF8'}` : '1px solid rgba(255,255,255,0.1)',
                         fontWeight: isActive ? 700 : 500,
+                        fontSize: '0.75rem',
                         cursor: 'pointer',
                         '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' },
                       }}
@@ -1446,15 +1410,17 @@ export const MovieDetailPage: React.FC = () => {
           {genresData?.custom && genresData.custom.length > 0 && (
             <Box sx={{ mb: 2.5 }}>
               <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
-                Your Custom Genres
+                Your Custom Genres (Select One)
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {genresData.custom.map((cg: any) => {
-                  const isActive = (movie?.custom_genres || []).some((mCg: any) => mCg.id === cg.id);
+                  const currentName = ((movie?.custom_genres || [])[0]?.name || (movie?.genres || [])[0]?.name || '').toLowerCase();
+                  const isActive = currentName === cg.name.toLowerCase();
                   return (
                     <Chip
                       key={cg.id}
                       label={cg.name}
+                      size="small"
                       onClick={() => selectGenreMutation.mutate(cg.id)}
                       disabled={selectGenreMutation.isPending}
                       sx={{

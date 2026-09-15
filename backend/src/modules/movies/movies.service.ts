@@ -2,9 +2,54 @@ import { v4 as uuidv4 } from 'uuid';
 import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 import { TmdbService } from '../tmdb/tmdb.service.js';
 import { WatchlistsService } from '../watchlists/watchlists.service.js';
-import { GenresService } from '../genres/genres.service.js';
+import { GenresService, PREDEFINED_GENRES } from '../genres/genres.service.js';
 import { TagsService } from '../tags/tags.service.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
+
+export function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGenresList?: any[]) {
+  const excluded = Array.isArray(row.excluded_genres) ? row.excluded_genres : [];
+  const rawGenres = Array.isArray(row.genres) ? row.genres : [];
+  const filteredGenres = rawGenres.filter(
+    (g: any) => !excluded.some((ex: string) => ex.toLowerCase() === (g.name || '').toLowerCase() || ex === String(g.id))
+  );
+
+  let finalGenres: any[] = [];
+  let finalCustomGenres: any[] = customGenresList || (customGenreObj ? [customGenreObj] : []);
+
+  if (row.assigned_genre === '') {
+    // Explicitly removed
+    finalGenres = [];
+    finalCustomGenres = [];
+  } else if (row.assigned_genre) {
+    const pg = PREDEFINED_GENRES.find(p => p.name.toLowerCase() === row.assigned_genre.toLowerCase());
+    if (pg) {
+      finalGenres = [{ id: pg.id, name: pg.name, color: pg.color, is_predefined: true }];
+      finalCustomGenres = [];
+    } else {
+      const cg = (customGenresList || []).find(c => c.name.toLowerCase() === row.assigned_genre.toLowerCase())
+        || (customGenreObj && customGenreObj.name.toLowerCase() === row.assigned_genre.toLowerCase() ? customGenreObj : null);
+      if (cg) {
+        finalGenres = [cg];
+        finalCustomGenres = [cg];
+      } else {
+        finalGenres = [{ id: row.assigned_genre, name: row.assigned_genre, color: '#38BDF8', is_predefined: true }];
+      }
+    }
+  } else if (finalCustomGenres.length > 0) {
+    finalGenres = [finalCustomGenres[0]];
+  } else if (filteredGenres.length > 0) {
+    const first = filteredGenres[0];
+    const pg = PREDEFINED_GENRES.find(p => p.name.toLowerCase() === (first.name || '').toLowerCase() || String(p.tmdb_id) === String(first.id));
+    finalGenres = [{
+      id: pg?.id || first.id || first.name,
+      name: first.name,
+      color: pg?.color || '#38BDF8',
+      is_predefined: true,
+    }];
+  }
+
+  return { genres: finalGenres, custom_genres: finalCustomGenres };
+}
 
 export interface MovieFilters {
   status?: 'all' | 'unwatched' | 'watching' | 'watched';
@@ -135,22 +180,34 @@ export class MoviesService {
       }
       if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
         const gidStr = String(genreId).trim();
+        const pgMatch = PREDEFINED_GENRES.find(
+          pg => pg.id === gidStr || String(pg.tmdb_id) === gidStr || pg.name.toLowerCase() === gidStr.toLowerCase()
+        );
+        const matchName = pgMatch ? pgMatch.name : gidStr;
+
         conditions.push(`(
-          EXISTS (
-            SELECT 1 FROM jsonb_array_elements(m.genres) g
-            WHERE (g->>'id' = $${pIdx} OR LOWER(g->>'name') = LOWER($${pIdx}))
-              AND NOT (LOWER(g->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
-              AND NOT (g->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
-          )
-          OR EXISTS (
-            SELECT 1 FROM user_movie_custom_genres umcg
-            JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
-            WHERE umcg.user_movie_id = um.id AND (
-              cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+          LOWER(um.assigned_genre) = LOWER($${pIdx})
+          OR (
+            um.assigned_genre IS NULL AND (
+              EXISTS (
+                SELECT 1 FROM user_movie_custom_genres umcg
+                JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+                WHERE umcg.user_movie_id = um.id AND (
+                  cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+                )
+              )
+              OR (
+                NOT EXISTS (SELECT 1 FROM user_movie_custom_genres WHERE user_movie_id = um.id)
+                AND (
+                  (m.genres->0->>'id' = $${pIdx} OR LOWER(m.genres->0->>'name') = LOWER($${pIdx}))
+                  AND NOT (LOWER(m.genres->0->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+                  AND NOT (m.genres->0->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+                )
+              )
             )
           )
         )`);
-        params.push(gidStr);
+        params.push(matchName);
         pIdx++;
       }
       if (tagId && String(tagId).trim() !== '') {
@@ -184,6 +241,14 @@ export class MoviesService {
           um.personal_rating,
           um.is_favorite,
           um.personal_notes,
+          um.assigned_genre,
+          (
+            SELECT json_build_object('id', cg.id, 'name', cg.name, 'color', cg.color, 'description', cg.description, 'is_predefined', false)
+            FROM custom_genres cg
+            JOIN user_movie_custom_genres umcg ON cg.id = umcg.custom_genre_id
+            WHERE umcg.user_movie_id = um.id
+            LIMIT 1
+          ) AS custom_genre,
           COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
           COALESCE(mpp.last_played_position_sec, um.playback_position_sec, 0) AS playback_position_sec,
           mpp.last_played_time_formatted,
@@ -241,14 +306,11 @@ export class MoviesService {
       params.push(limit, offset);
       const { rows } = await pool.query(sql, params);
       const cleanedRows = rows.map(r => {
-        const excluded = Array.isArray(r.excluded_genres) ? r.excluded_genres : [];
-        const rawGenres = Array.isArray(r.genres) ? r.genres : [];
-        const filteredGenres = rawGenres.filter(
-          (g: any) => !excluded.some((ex: string) => ex.toLowerCase() === (g.name || '').toLowerCase() || ex === String(g.id))
-        );
+        const { genres, custom_genres } = resolveMovieSingleGenre(r, r.custom_genre);
         return {
           ...r,
-          genres: filteredGenres,
+          genres,
+          custom_genres,
         };
       });
       return { movies: cleanedRows, total: cleanedRows.length, page, limit };
@@ -392,6 +454,7 @@ export class MoviesService {
           um.personal_rating,
           um.is_favorite,
           um.personal_notes,
+          um.assigned_genre,
           COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
           um.custom_title,
           um.custom_overview,
@@ -449,6 +512,7 @@ export class MoviesService {
       
 
 
+
       const tags = (await pool.query(`
         SELECT t.id, t.name, t.color
         FROM tags t
@@ -494,15 +558,11 @@ export class MoviesService {
         customGenres = [];
       }
 
-      const excluded = Array.isArray(item.excluded_genres) ? item.excluded_genres : [];
-      const rawGenres = Array.isArray(item.genres) ? item.genres : [];
-      const filteredGenres = rawGenres.filter(
-        (g: any) => !excluded.some((ex: string) => ex.toLowerCase() === (g.name || '').toLowerCase() || ex === String(g.id))
-      );
+      const { genres: resolvedGenres, custom_genres: resolvedCustomGenres } = resolveMovieSingleGenre(item, undefined, customGenres);
 
       return {
         ...item,
-        genres: filteredGenres,
+        genres: resolvedGenres,
         title: item.custom_title || item.tmdb_title,
         overview: item.custom_overview || item.tmdb_overview,
         poster_path: item.custom_poster_url || item.tmdb_poster_path,
@@ -513,7 +573,7 @@ export class MoviesService {
         crew_members: crew,
         sources,
         tags,
-        custom_genres: customGenres,
+        custom_genres: resolvedCustomGenres,
       };
     }
 

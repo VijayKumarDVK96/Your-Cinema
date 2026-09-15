@@ -203,7 +203,7 @@ export const MyMoviesPage: React.FC = () => {
     onSuccess: (newGenre) => {
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       if (newGenre?.id) {
-        setSelectedBulkGenreIds(prev => new Set(prev).add(newGenre.id));
+        setSelectedBulkGenreIds(new Set([newGenre.id]));
       }
       setNewGenreNameInput('');
     },
@@ -611,15 +611,20 @@ export const MyMoviesPage: React.FC = () => {
 
           {/* Genres Section */}
           <Box>
-            <Typography variant="subtitle2" sx={{ color: bulkGenreMode === 'remove' ? '#EF4444' : '#38BDF8', fontWeight: 700, mb: 1.2 }}>
-              {bulkGenreMode === 'remove' ? 'SELECT GENRES TO REMOVE' : 'SELECT GENRES TO APPLY'}
+            <Typography variant="subtitle2" sx={{ color: bulkGenreMode === 'remove' ? '#EF4444' : '#38BDF8', fontWeight: 700, mb: 0.5 }}>
+              {bulkGenreMode === 'remove' ? 'SELECT GENRES TO REMOVE' : 'SELECT GENRE TO APPLY'}
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1.5 }}>
+              {bulkGenreMode === 'remove'
+                ? 'Select genres to detach from selected titles.'
+                : 'Each movie has only one genre. Selecting a new genre replaces the existing genre.'}
             </Typography>
 
-            {/* Predefined Genres — now fully interactive & removable */}
+            {/* Predefined Genres — single selection in apply mode */}
             {(genresData?.predefined || []).length > 0 && (
               <>
                 <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.8, display: 'block' }}>
-                  {bulkGenreMode === 'remove' ? 'PREDEFINED GENRES (click to mark for removal)' : 'PREDEFINED GENRES (click to apply)'}
+                  {bulkGenreMode === 'remove' ? 'PREDEFINED GENRES (click to mark for removal)' : 'PREDEFINED GENRES (select one)'}
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, mb: 2, maxHeight: 120, overflowY: 'auto', pr: 0.5 }}>
                   {(genresData?.predefined || []).map((pg: any) => {
@@ -642,10 +647,15 @@ export const MyMoviesPage: React.FC = () => {
                         clickable
                         onClick={() => {
                           setSelectedBulkGenreIds(prev => {
-                            const next = new Set(prev);
-                            if (next.has(pg.name)) next.delete(pg.name);
-                            else next.add(pg.name);
-                            return next;
+                            if (bulkGenreMode === 'remove') {
+                              const next = new Set(prev);
+                              if (next.has(pg.name)) next.delete(pg.name);
+                              else next.add(pg.name);
+                              return next;
+                            } else {
+                              if (prev.has(pg.name)) return new Set();
+                              return new Set([pg.name]);
+                            }
                           });
                         }}
                         variant={isSelected ? 'filled' : 'outlined'}
@@ -666,7 +676,7 @@ export const MyMoviesPage: React.FC = () => {
 
             {/* Custom Genres — selectable */}
             <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.8, display: 'block' }}>
-              {bulkGenreMode === 'remove' ? 'YOUR CUSTOM GENRES (click to remove)' : 'YOUR CUSTOM GENRES (click to apply)'}
+              {bulkGenreMode === 'remove' ? 'YOUR CUSTOM GENRES (click to remove)' : 'YOUR CUSTOM GENRES (select one)'}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
               {((genresData?.custom) || []).map((cg: any) => {
@@ -686,10 +696,15 @@ export const MyMoviesPage: React.FC = () => {
                     clickable
                     onClick={() => {
                       setSelectedBulkGenreIds(prev => {
-                        const next = new Set(prev);
-                        if (next.has(cg.id)) next.delete(cg.id);
-                        else next.add(cg.id);
-                        return next;
+                        if (bulkGenreMode === 'remove') {
+                          const next = new Set(prev);
+                          if (next.has(cg.id)) next.delete(cg.id);
+                          else next.add(cg.id);
+                          return next;
+                        } else {
+                          if (prev.has(cg.id)) return new Set();
+                          return new Set([cg.id]);
+                        }
                       });
                     }}
                     variant={isSelected ? 'filled' : 'outlined'}
@@ -909,14 +924,26 @@ export const MyMoviesPage: React.FC = () => {
 
                     {/* Genres and Tags */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, flexWrap: 'wrap' }}>
-                      {(movie.genres || []).slice(0, 3).map((g: any) => (
-                        <Chip
-                          key={g.id || g.name}
-                          label={g.name}
-                          size="small"
-                          sx={{ height: 20, fontSize: '0.68rem', backgroundColor: 'rgba(255,255,255,0.05)', color: '#CBD5E1' }}
-                        />
-                      ))}
+                      {(() => {
+                        const g = (movie.genres || [])[0];
+                        if (!g) return null;
+                        return (
+                          <Chip
+                            key={g.id || g.name}
+                            label={g.name}
+                            size="small"
+                            sx={{
+                              height: 20,
+                              fontSize: '0.68rem',
+                              backgroundColor: `${g.color || '#38BDF8'}18`,
+                              color: g.color || '#38BDF8',
+                              borderColor: `${g.color || '#38BDF8'}40`,
+                              fontWeight: 600,
+                            }}
+                            variant="outlined"
+                          />
+                        );
+                      })()}
                       {(movie.tags || []).slice(0, 2).map((t: any) => (
                         <Chip
                           key={t.id || t.name}
