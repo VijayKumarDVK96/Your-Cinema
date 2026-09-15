@@ -79,6 +79,23 @@ const YouTubeIcon = () => (
   </svg>
 );
 
+const SunNxtIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="24" height="24" rx="4" fill="#FF6B00" />
+    <circle cx="12" cy="9" r="4" fill="#FFD700" />
+    <path d="M12 2V4M12 14V16M4 9H6M18 9H20M5.6 4.6L7 6M19.4 4.6L18 6M5.6 13.4L7 12M19.4 13.4L18 12" stroke="#FFD700" strokeWidth="1.5" strokeLinecap="round" />
+    <text x="12" y="22" fill="#FFFFFF" fontSize="5" fontWeight="900" textAnchor="middle" fontFamily="sans-serif">SUN NXT</text>
+  </svg>
+);
+
+const ViMoviesIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="24" height="24" rx="4" fill="#E40046" />
+    <text x="12" y="10" fill="#FFFFFF" fontSize="5" fontWeight="900" textAnchor="middle" fontFamily="sans-serif">Vi</text>
+    <text x="12" y="18" fill="#FFCD00" fontSize="4" fontWeight="700" textAnchor="middle" fontFamily="sans-serif">MOVIES</text>
+  </svg>
+);
+
 const DefaultOttIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="24" height="24" rx="4" fill="#1E293B" stroke="#64748B" strokeWidth="1" />
@@ -184,6 +201,30 @@ export const getOttMeta = (providerName: string = '', iconOrUrl?: string): OttMe
       borderColor: 'rgba(15, 157, 88, 0.4)',
       icon: <DriveIcon />,
       getDefaultSearchUrl: () => '#',
+    };
+  }
+
+  if (nameLower.includes('sun nxt') || nameLower.includes('sunnxt') || iconLower.includes('sun_nxt') || iconLower.includes('sunnxt')) {
+    return {
+      key: 'sunnxt',
+      name: 'Sun NXT',
+      bgColor: '#FF6B00',
+      textColor: '#FFFFFF',
+      borderColor: 'rgba(255, 107, 0, 0.5)',
+      icon: <SunNxtIcon />,
+      getDefaultSearchUrl: (title) => `https://www.sunnxt.com/search?q=${encodeURIComponent(title)}`,
+    };
+  }
+
+  if (nameLower.includes('vi movies') || nameLower.includes('vi movie') || nameLower.includes('vodafone') || iconLower.includes('vi_movies') || iconLower.includes('vimovies')) {
+    return {
+      key: 'vimovies',
+      name: 'Vi Movies & TV',
+      bgColor: '#E40046',
+      textColor: '#FFCD00',
+      borderColor: 'rgba(228, 0, 70, 0.5)',
+      icon: <ViMoviesIcon />,
+      getDefaultSearchUrl: (title) => `https://www.vijungle.com/search?q=${encodeURIComponent(title)}`,
     };
   }
 

@@ -34,32 +34,64 @@ export const PREDEFINED_GENRES = [
 
 export class GenresService {
   static async listGenres(userId: string) {
-    // 1. Calculate predefined genre movie counts for this user
-    let userMovieGenres: { id?: number; name?: string }[] = [];
+    // 1. Calculate predefined genre movie counts using the effective single active genre per movie.
+    //    Active genre = custom genre if set (skips predefined count), else first non-excluded TMDB genre.
+    let activeGenreNames: string[] = [];
     if (isPgConnected) {
       try {
         const { rows } = await pool.query(`
-          SELECT m.genres FROM user_movies um
+          SELECT
+            um.id AS user_movie_id,
+            m.genres AS tmdb_genres,
+            COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
+            (
+              SELECT cg.name
+              FROM user_movie_custom_genres umcg
+              JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+              WHERE umcg.user_movie_id = um.id
+              LIMIT 1
+            ) AS custom_genre_name
+          FROM user_movies um
           JOIN movies m ON um.movie_id = m.id
           WHERE um.user_id = $1
         `, [userId]);
-        userMovieGenres = rows.flatMap(r => Array.isArray(r.genres) ? r.genres : []);
+
+        for (const row of rows) {
+          if (row.custom_genre_name) {
+            // Custom genre is active — not counted in predefined genre totals
+            continue;
+          }
+          const tmdbGenres: { id?: number; name?: string }[] = Array.isArray(row.tmdb_genres) ? row.tmdb_genres : [];
+          const excluded: string[] = row.excluded_genres || [];
+          const active = tmdbGenres.find(g =>
+            !excluded.includes(String(g.id)) &&
+            !excluded.includes(g.name || '') &&
+            !excluded.includes((g.name || '').toLowerCase())
+          );
+          if (active?.name) activeGenreNames.push(active.name.toLowerCase());
+        }
       } catch {
         // Continue
       }
     } else {
-      userMovieGenres = Array.from(inMemoryDb.userMovies.values())
-        .filter(um => um.user_id === userId)
-        .flatMap(um => {
-          const m = inMemoryDb.movies.get(um.movie_id);
-          return m && Array.isArray(m.genres) ? m.genres : [];
-        });
+      for (const um of Array.from(inMemoryDb.userMovies.values()).filter(u => u.user_id === userId)) {
+        const hasCustom = Array.from((inMemoryDb as any).userMovieCustomGenres?.values?.() || [])
+          .some((umcg: any) => umcg.user_movie_id === um.id);
+        if (hasCustom) continue;
+        const m = inMemoryDb.movies.get(um.movie_id);
+        if (!m || !Array.isArray(m.genres)) continue;
+        const excluded: string[] = (um as any).excluded_genres || [];
+        const active = (m.genres as any[]).find(g =>
+          !excluded.includes(String(g.id)) &&
+          !excluded.includes(g.name || '') &&
+          !excluded.includes((g.name || '').toLowerCase())
+        );
+        if (active?.name) activeGenreNames.push((active.name as string).toLowerCase());
+      }
     }
 
     const predefined = PREDEFINED_GENRES.map(pg => {
-      const count = userMovieGenres.filter(
-        g => g.id === pg.tmdb_id || g.name?.toLowerCase() === pg.name.toLowerCase()
-      ).length;
+      const count = activeGenreNames.filter(n => n === pg.name.toLowerCase()).length;
       return { ...pg, movie_count: count };
     });
 

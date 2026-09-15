@@ -633,6 +633,10 @@ export class TmdbService {
               else if (pLower.includes('jio')) iconType = 'jiocinema';
               else if (pLower.includes('zee')) iconType = 'zee5';
               else if (pLower.includes('sony')) iconType = 'sonyliv';
+              else if (pLower.includes('sun nxt') || pLower.includes('sunnxt')) iconType = 'sunnxt';
+              else if (pLower.includes('vi movies') || pLower.includes('vi movie') || pLower.includes('vodafone')) iconType = 'vimovies';
+              else if (pLower.includes('mubi')) iconType = 'mubi';
+              else if (pLower.includes('aha')) iconType = 'aha';
 
               list.push({
                 providerName: p.provider_name,
