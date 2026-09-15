@@ -419,25 +419,7 @@ export class MoviesService {
       const item = rows[0];
       let sources = (await pool.query('SELECT * FROM movie_sources WHERE user_movie_id = $1', [userMovieId])).rows;
       
-      // Auto-detect and populate OTT providers if none are currently linked
-      if (sources.length === 0 && item.tmdb_id) {
-        try {
-          const detected = await TmdbService.getWatchProviders(item.tmdb_id, item.custom_title || item.tmdb_title, item.original_title);
-          for (const prov of detected) {
-            const srcId = uuidv4();
-            const insRes = await pool.query(`
-              INSERT INTO movie_sources (
-                id, user_movie_id, source_type, provider_name, provider_icon,
-                external_url, quality
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-              RETURNING *
-            `, [srcId, userMovieId, prov.sourceType || 'ott', prov.providerName, prov.providerIcon, prov.externalUrl, prov.quality || '4K UHD']);
-            sources.push(insRes.rows[0]);
-          }
-        } catch {
-          // Continue gracefully
-        }
-      }
+
 
       const tags = (await pool.query(`
         SELECT t.id, t.name, t.color
@@ -514,30 +496,7 @@ export class MoviesService {
 
     let sources = Array.from(inMemoryDb.movieSources.values()).filter(s => s.user_movie_id === userMovieId);
     
-    // Auto-detect and populate OTT providers for in-memory if empty
-    if (sources.length === 0 && m.tmdb_id) {
-      try {
-        const detected = await TmdbService.getWatchProviders(m.tmdb_id, um.custom_title || m.title, m.original_title);
-        for (const prov of detected) {
-          const newSource = {
-            id: `src-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-            user_movie_id: userMovieId,
-            source_type: prov.sourceType as any,
-            provider_name: prov.providerName,
-            provider_icon: prov.providerIcon,
-            external_url: prov.externalUrl,
-            external_file_id: null,
-            file_name: null,
-            quality: prov.quality || '4K UHD',
-            created_at: new Date().toISOString(),
-          };
-          inMemoryDb.movieSources.set(newSource.id, newSource);
-          sources.push(newSource);
-        }
-      } catch {
-        // Continue gracefully
-      }
-    }
+
 
     const tags = Array.from(inMemoryDb.userMovieTags.values())
       .filter(umt => umt.user_movie_id === userMovieId)

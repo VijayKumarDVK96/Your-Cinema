@@ -90,19 +90,29 @@ export const MovieDetailPage: React.FC = () => {
     },
   });
 
-  // Attach custom genre mutation
-  const attachGenreMutation = useMutation({
+  // Single genre select — detach all current, then attach chosen
+  const selectGenreMutation = useMutation({
     mutationFn: async (genreId: string) => {
+      // Detach all existing predefined genres
+      for (const g of (movie.genres || [])) {
+        await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: String(g.name || g.id) });
+      }
+      // Detach all existing custom genres
+      for (const cg of (movie.custom_genres || [])) {
+        await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: cg.id });
+      }
+      // Attach the selected one
       await api.post('/genres/attach', { userMovieId: movie.user_movie_id, genreId });
     },
     onSuccess: () => {
+      setGenreDialogOpen(false);
       queryClient.invalidateQueries({ queryKey: ['movie', id] });
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
     },
   });
 
-  // Detach custom genre mutation
+  // Detach (remove) the single active genre
   const detachGenreMutation = useMutation({
     mutationFn: async (genreId: string) => {
       await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId });
@@ -114,22 +124,31 @@ export const MovieDetailPage: React.FC = () => {
     },
   });
 
-  // Create new custom genre and attach mutation
-  const createAndAttachGenreMutation = useMutation({
+  // Create new custom genre and select it (replaces current)
+  const createAndSelectGenreMutation = useMutation({
     mutationFn: async (data: { name: string; color: string }) => {
       const res = await api.post('/genres', data);
       const created = res.data?.data;
       if (created?.id) {
+        // Detach all existing genres first
+        for (const g of (movie.genres || [])) {
+          await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: String(g.name || g.id) });
+        }
+        for (const cg of (movie.custom_genres || [])) {
+          await api.post('/genres/detach', { userMovieId: movie.user_movie_id, genreId: cg.id });
+        }
         await api.post('/genres/attach', { userMovieId: movie.user_movie_id, genreId: created.id });
       }
     },
     onSuccess: () => {
       setNewGenreName('');
+      setGenreDialogOpen(false);
       queryClient.invalidateQueries({ queryKey: ['movie', id] });
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
     },
   });
+
 
   // Fetch Movie Details
   const { data: movie, isLoading, error } = useQuery({
@@ -466,46 +485,57 @@ export const MovieDetailPage: React.FC = () => {
                 )}
               </Box>
 
-              {/* Genres & Tags */}
+              {/* Single Genre Chip */}
               <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.8 }}>
-                {(movie.genres || []).map((g: any) => (
-                  <Chip
-                    key={g.id || g.name}
-                    label={g.name}
-                    size="small"
-                    onDelete={() => detachGenreMutation.mutate(String(g.name || g.id))}
-                    sx={{
-                      backgroundColor: 'rgba(255,255,255,0.06)',
-                      color: '#E2E8F0',
-                      '& .MuiChip-deleteIcon': {
-                        color: 'rgba(255,255,255,0.35)',
-                        fontSize: '15px',
-                        '&:hover': { color: '#EF4444' },
-                      },
-                    }}
-                  />
-                ))}
-                {(movie.custom_genres || []).map((cg: any) => (
-                  <Chip
-                    key={cg.id}
-                    icon={<AutoAwesomeIcon sx={{ fontSize: '13px !important', color: `${cg.color || '#38BDF8'} !important` }} />}
-                    label={cg.name}
-                    size="small"
-                    onDelete={() => detachGenreMutation.mutate(cg.id)}
-                    sx={{
-                      backgroundColor: `${cg.color || '#38BDF8'}22`,
-                      color: cg.color || '#38BDF8',
-                      border: `1px solid ${cg.color || '#38BDF8'}55`,
-                      fontWeight: 600,
-                    }}
-                  />
-                ))}
+                {(() => {
+                  // Prefer custom genre if set
+                  const activeCustom = (movie.custom_genres || [])[0];
+                  if (activeCustom) {
+                    return (
+                      <Chip
+                        key={activeCustom.id}
+                        icon={<AutoAwesomeIcon sx={{ fontSize: '13px !important', color: `${activeCustom.color || '#38BDF8'} !important` }} />}
+                        label={activeCustom.name}
+                        size="small"
+                        onDelete={() => detachGenreMutation.mutate(activeCustom.id)}
+                        sx={{
+                          backgroundColor: `${activeCustom.color || '#38BDF8'}22`,
+                          color: activeCustom.color || '#38BDF8',
+                          border: `1px solid ${activeCustom.color || '#38BDF8'}55`,
+                          fontWeight: 600,
+                        }}
+                      />
+                    );
+                  }
+                  // Otherwise show first predefined genre
+                  const activePredefined = (movie.genres || [])[0];
+                  if (activePredefined) {
+                    return (
+                      <Chip
+                        key={activePredefined.id || activePredefined.name}
+                        label={activePredefined.name}
+                        size="small"
+                        onDelete={() => detachGenreMutation.mutate(String(activePredefined.name || activePredefined.id))}
+                        sx={{
+                          backgroundColor: 'rgba(255,255,255,0.06)',
+                          color: '#E2E8F0',
+                          '& .MuiChip-deleteIcon': {
+                            color: 'rgba(255,255,255,0.35)',
+                            fontSize: '15px',
+                            '&:hover': { color: '#EF4444' },
+                          },
+                        }}
+                      />
+                    );
+                  }
+                  return null;
+                })()}
                 {(movie.tags || []).map((t: any) => (
                   <Chip key={t.id} label={`#${t.name}`} size="small" sx={{ backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C' }} />
                 ))}
                 <Chip
                   icon={<AddIcon sx={{ fontSize: '14px !important', color: '#38BDF8 !important' }} />}
-                  label="Custom Genre"
+                  label={((movie.custom_genres || []).length > 0 || (movie.genres || []).length > 0) ? 'Change Genre' : 'Set Genre'}
                   size="small"
                   onClick={() => setGenreDialogOpen(true)}
                   sx={{
@@ -1351,7 +1381,7 @@ export const MovieDetailPage: React.FC = () => {
         onManageSources={() => setManageSourcesOpen(true)}
       />
 
-      {/* Custom Genre Assignment & Creation Dialog */}
+      {/* Genre Selection Dialog — single genre per movie */}
       <Dialog
         open={genreDialogOpen}
         onClose={() => setGenreDialogOpen(false)}
@@ -1365,42 +1395,65 @@ export const MovieDetailPage: React.FC = () => {
         }}
       >
         <DialogTitle sx={{ color: '#F8FAFC', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CategoryIcon sx={{ color: '#38BDF8' }} /> Manage Movie Genres
+          <CategoryIcon sx={{ color: '#38BDF8' }} /> Select Genre
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ color: '#94A3B8', mb: 2 }}>
-            Assign or remove custom genres for <strong>"{movie?.title}"</strong>:
+            Pick one genre for <strong>"{movie?.title}"</strong>. This replaces the current genre.
           </Typography>
 
-          {/* Toggleable user custom genres */}
-          {genresData?.custom && genresData.custom.length > 0 && (
-            <Box sx={{ mb: 3 }}>
+          {/* Predefined genres from TMDB metadata */}
+          {(movie?.genres || []).length > 0 && (
+            <Box sx={{ mb: 2.5 }}>
               <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
-                Your Custom Genres (Click to Toggle)
+                From Movie Metadata
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {(movie?.genres || []).map((g: any) => {
+                  const isActive = (movie?.custom_genres || []).length === 0 && (movie?.genres || [])[0]?.name === g.name;
+                  return (
+                    <Chip
+                      key={g.id || g.name}
+                      label={g.name}
+                      onClick={() => selectGenreMutation.mutate(String(g.name || g.id))}
+                      disabled={selectGenreMutation.isPending}
+                      sx={{
+                        backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: isActive ? '#F8FAFC' : '#94A3B8',
+                        border: isActive ? '1.5px solid rgba(255,255,255,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: 'pointer',
+                        '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' },
+                      }}
+                    />
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
+          {/* User custom genres */}
+          {genresData?.custom && genresData.custom.length > 0 && (
+            <Box sx={{ mb: 2.5 }}>
+              <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
+                Your Custom Genres
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {genresData.custom.map((cg: any) => {
-                  const isAttached = (movie?.custom_genres || []).some((mCg: any) => mCg.id === cg.id);
+                  const isActive = (movie?.custom_genres || []).some((mCg: any) => mCg.id === cg.id);
                   return (
                     <Chip
                       key={cg.id}
                       label={cg.name}
-                      onClick={() => {
-                        if (isAttached) {
-                          detachGenreMutation.mutate(cg.id);
-                        } else {
-                          attachGenreMutation.mutate(cg.id);
-                        }
-                      }}
+                      onClick={() => selectGenreMutation.mutate(cg.id)}
+                      disabled={selectGenreMutation.isPending}
                       sx={{
-                        backgroundColor: isAttached ? `${cg.color || '#38BDF8'}33` : 'rgba(255, 255, 255, 0.05)',
-                        color: isAttached ? (cg.color || '#38BDF8') : '#94A3B8',
-                        border: isAttached ? `1.5px solid ${cg.color || '#38BDF8'}` : '1px solid rgba(255, 255, 255, 0.1)',
-                        fontWeight: isAttached ? 700 : 500,
+                        backgroundColor: isActive ? `${cg.color || '#38BDF8'}33` : 'rgba(255, 255, 255, 0.05)',
+                        color: isActive ? (cg.color || '#38BDF8') : '#94A3B8',
+                        border: isActive ? `1.5px solid ${cg.color || '#38BDF8'}` : '1px solid rgba(255, 255, 255, 0.1)',
+                        fontWeight: isActive ? 700 : 500,
                         cursor: 'pointer',
-                        '&:hover': {
-                          backgroundColor: `${cg.color || '#38BDF8'}44`,
-                        },
+                        '&:hover': { backgroundColor: `${cg.color || '#38BDF8'}22` },
                       }}
                     />
                   );
@@ -1411,9 +1464,9 @@ export const MovieDetailPage: React.FC = () => {
 
           <Divider sx={{ my: 2, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
 
-          {/* Create new custom genre on the fly */}
+          {/* Create new custom genre */}
           <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
-            + Create New Custom Genre
+            + Create New Genre
           </Typography>
           <TextField
             fullWidth
@@ -1433,7 +1486,7 @@ export const MovieDetailPage: React.FC = () => {
           />
 
           <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1 }}>
-            Theme Color Preset:
+            Theme Color:
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
             {['#38BDF8', '#EC4899', '#8B5CF6', '#E5A93C', '#10B981', '#F43F5E', '#06B6D4', '#EAB308'].map((c) => (
@@ -1456,18 +1509,18 @@ export const MovieDetailPage: React.FC = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setGenreDialogOpen(false)} sx={{ color: '#94A3B8' }}>
-            Done
+            Cancel
           </Button>
           <Button
             variant="contained"
             color="primary"
-            disabled={!newGenreName.trim() || createAndAttachGenreMutation.isPending}
+            disabled={!newGenreName.trim() || createAndSelectGenreMutation.isPending}
             onClick={() => {
-              createAndAttachGenreMutation.mutate({ name: newGenreName.trim(), color: newGenreColor });
+              createAndSelectGenreMutation.mutate({ name: newGenreName.trim(), color: newGenreColor });
             }}
             sx={{ fontWeight: 700 }}
           >
-            Create & Attach
+            Create & Set
           </Button>
         </DialogActions>
       </Dialog>
