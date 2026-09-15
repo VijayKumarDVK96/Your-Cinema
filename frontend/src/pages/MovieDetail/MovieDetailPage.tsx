@@ -606,6 +606,16 @@ export const MovieDetailPage: React.FC = () => {
 
                 <Button
                   variant="outlined"
+                  color="primary"
+                  startIcon={<AddLinkIcon />}
+                  onClick={() => setManageSourcesOpen(true)}
+                  sx={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38BDF8', fontWeight: 600 }}
+                >
+                  Edit OTT / Streaming Links
+                </Button>
+
+                <Button
+                  variant="outlined"
                   color="secondary"
                   startIcon={<StarIcon />}
                   onClick={() => setRatingModalOpen(true)}

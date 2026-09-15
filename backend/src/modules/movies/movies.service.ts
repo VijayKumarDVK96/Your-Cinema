@@ -742,44 +742,56 @@ export class MoviesService {
     custom_backdrop_url: string | null;
     custom_runtime: number | null;
     custom_director: string | null;
+    trailer_url: string | null;
     playback_position_sec: number;
     current_season: number;
     current_episode: number;
   }>) {
+    const { trailer_url, ...umUpdates } = updates;
+
     if (isPgConnected) {
+      if (trailer_url !== undefined) {
+        await pool.query(
+          `UPDATE movies SET trailer_url = $1 WHERE id = (SELECT movie_id FROM user_movies WHERE id = $2 AND user_id = $3)`,
+          [trailer_url, userMovieId, userId]
+        );
+      }
+
       const fields: string[] = [];
       const values: any[] = [];
       let idx = 1;
 
-      Object.entries(updates).forEach(([key, val]) => {
+      Object.entries(umUpdates).forEach(([key, val]) => {
         if (val !== undefined) {
           fields.push(`${key} = $${idx++}`);
           values.push(val);
         }
       });
 
-      // If user customized any textual or artwork field, mark is_customized = true
-      const hasContentCustomization = [
-        'custom_title', 'custom_overview', 'custom_poster_url',
-        'custom_backdrop_url', 'custom_runtime', 'custom_director'
-      ].some(k => k in updates && (updates as any)[k] !== null);
+      if (fields.length > 0) {
+        // If user customized any textual or artwork field, mark is_customized = true
+        const hasContentCustomization = [
+          'custom_title', 'custom_overview', 'custom_poster_url',
+          'custom_backdrop_url', 'custom_runtime', 'custom_director'
+        ].some(k => k in umUpdates && (umUpdates as any)[k] !== null);
 
-      if (hasContentCustomization) {
-        fields.push(`is_customized = true`);
+        if (hasContentCustomization) {
+          fields.push(`is_customized = true`);
+        }
+
+        // If marked watched, update last_watched_at
+        if (umUpdates.watch_status === 'watched') {
+          fields.push(`last_watched_at = NOW()`);
+        }
+
+        fields.push(`updated_at = NOW()`);
+        values.push(userMovieId, userId);
+
+        await pool.query(
+          `UPDATE user_movies SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`,
+          values
+        );
       }
-
-      // If marked watched, update last_watched_at
-      if (updates.watch_status === 'watched') {
-        fields.push(`last_watched_at = NOW()`);
-      }
-
-      fields.push(`updated_at = NOW()`);
-      values.push(userMovieId, userId);
-
-      await pool.query(
-        `UPDATE user_movies SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`,
-        values
-      );
 
       return this.getMovieById(userId, userMovieId);
     }
@@ -787,12 +799,20 @@ export class MoviesService {
     const um = inMemoryDb.userMovies.get(userMovieId);
     if (!um || um.user_id !== userId) throw new NotFoundError('Movie not found in your library.');
 
-    Object.assign(um, updates, { updated_at: new Date().toISOString() });
-    if (updates.watch_status === 'watched') {
+    if (trailer_url !== undefined) {
+      const m = inMemoryDb.movies.get(um.movie_id);
+      if (m) {
+        m.trailer_url = trailer_url;
+        inMemoryDb.movies.set(m.id, m);
+      }
+    }
+
+    Object.assign(um, umUpdates, { updated_at: new Date().toISOString() });
+    if (umUpdates.watch_status === 'watched') {
       um.last_watched_at = new Date().toISOString();
     }
     const hasCustom = ['custom_title', 'custom_overview', 'custom_poster_url', 'custom_backdrop_url', 'custom_runtime', 'custom_director']
-      .some(k => (updates as any)[k] !== undefined && (updates as any)[k] !== null);
+      .some(k => (umUpdates as any)[k] !== undefined && (umUpdates as any)[k] !== null);
     if (hasCustom) um.is_customized = true;
 
     inMemoryDb.userMovies.set(userMovieId, um);

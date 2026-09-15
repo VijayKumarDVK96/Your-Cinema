@@ -27,6 +27,7 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
   const [runtime, setRuntime] = useState<number | string>(movie.runtime || '');
   const [customPosterUrl, setCustomPosterUrl] = useState(movie.custom_poster_url || '');
   const [customBackdropUrl, setCustomBackdropUrl] = useState(movie.custom_backdrop_url || '');
+  const [trailerUrl, setTrailerUrl] = useState(movie.trailer_url || '');
   const [watchStatus, setWatchStatus] = useState(movie.watch_status || 'unwatched');
   const [saving, setSaving] = useState(false);
 
@@ -40,6 +41,7 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
         custom_runtime: runtime ? Number(runtime) : null,
         custom_poster_url: customPosterUrl.trim() || null,
         custom_backdrop_url: customBackdropUrl.trim() || null,
+        trailer_url: trailerUrl.trim() || null,
         watch_status: watchStatus,
       });
       onUpdated();
@@ -129,6 +131,16 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
               placeholder="https://..."
               value={customBackdropUrl}
               onChange={(e) => setCustomBackdropUrl(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Official Trailer URL (YouTube)"
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={trailerUrl}
+              onChange={(e) => setTrailerUrl(e.target.value)}
+              helperText="Link or update the official YouTube trailer for this title"
             />
           </Grid>
         </Grid>

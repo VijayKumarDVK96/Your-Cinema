@@ -293,29 +293,97 @@ export const SettingsPage: React.FC = () => {
           if (res.data?.data?.id) tagIdMap[tag.id] = res.data.data.id;
         } catch { /* tag may already exist */ }
       }
-      // Import movies
+      // Import movies with all customizations, OTT/Drive sources & continue watching progress
       let importedCount = 0;
       for (const movie of (payload.movies || [])) {
         try {
           const tmdbId = movie.tmdb_id || movie.id;
           const mediaType = movie.media_type || 'movie';
           if (!tmdbId) continue;
-          await api.post('/movies', {
-            tmdb_id: tmdbId,
-            media_type: mediaType,
-            watch_status: movie.watch_status,
-            personal_rating: movie.personal_rating,
-            is_favorite: movie.is_favorite,
-            personal_notes: movie.personal_notes,
-          });
+
+          let userMovieId: string | null = null;
+          try {
+            const addRes = await api.post('/movies', {
+              tmdb_id: tmdbId,
+              media_type: mediaType,
+              watch_status: movie.watch_status,
+              personal_rating: movie.personal_rating,
+              is_favorite: movie.is_favorite,
+              personal_notes: movie.personal_notes,
+            });
+            userMovieId = addRes.data?.data?.user_movie_id || addRes.data?.data?.id;
+          } catch {
+            // Already in library, fetch movie list to match userMovieId
+            const listRes = await api.get('/movies?limit=9999');
+            const found = (listRes.data?.data?.movies || []).find((m: any) => m.tmdb_id === tmdbId);
+            if (found) userMovieId = found.user_movie_id;
+          }
+
+          if (userMovieId) {
+            // 1. Restore custom overrides and trailer
+            await api.patch(`/movies/${userMovieId}`, {
+              custom_title: movie.custom_title || null,
+              custom_overview: movie.custom_overview || null,
+              custom_director: movie.custom_director || null,
+              custom_runtime: movie.custom_runtime || null,
+              custom_poster_url: movie.custom_poster_url || null,
+              custom_backdrop_url: movie.custom_backdrop_url || null,
+              trailer_url: movie.trailer_url || null,
+              watch_status: movie.watch_status || 'unwatched',
+              personal_rating: movie.personal_rating ?? null,
+              is_favorite: Boolean(movie.is_favorite),
+              personal_notes: movie.personal_notes || null,
+              current_season: movie.current_season || 1,
+              current_episode: movie.current_episode || 1,
+            });
+
+            // 2. Restore playback progress (continue watching)
+            if (movie.playback_position_sec && movie.playback_position_sec > 0) {
+              await api.post(`/sources/movie/${userMovieId}/progress`, {
+                positionSec: movie.playback_position_sec,
+                completed: movie.watch_status === 'watched',
+              });
+            }
+
+            // 3. Restore OTT / Google Drive / YouTube streaming sources
+            if (Array.isArray(movie.sources)) {
+              for (const src of movie.sources) {
+                try {
+                  await api.post('/sources', {
+                    userMovieId,
+                    sourceType: src.source_type,
+                    providerName: src.provider_name,
+                    providerIcon: src.provider_icon,
+                    externalUrl: src.external_url,
+                    externalFileId: src.external_file_id,
+                    fileName: src.file_name,
+                    quality: src.quality || '4K UHD',
+                  });
+                } catch {
+                  // Source may already exist
+                }
+              }
+            }
+
+            // 4. Attach Custom Genres if mapped
+            if (Array.isArray(movie.custom_genres)) {
+              for (const cg of movie.custom_genres) {
+                const targetId = genreIdMap[cg.id] || cg.id;
+                try {
+                  await api.post('/genres/attach', { userMovieId, customGenreId: targetId });
+                } catch {}
+              }
+            }
+          }
+
           importedCount++;
-        } catch { /* may already exist */ }
+        } catch { /* ignore individual movie error */ }
       }
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       queryClient.invalidateQueries({ queryKey: ['tags'] });
-      setImportMsg({ type: 'success', text: `Import complete! ${importedCount} movies restored.` });
+      setImportMsg({ type: 'success', text: `Full sanctuary restore complete! ${importedCount} titles with OTT links and progress restored.` });
     } catch (err: any) {
       setImportMsg({ type: 'error', text: err.message || 'Import failed. Please check the file format.' });
     } finally {
