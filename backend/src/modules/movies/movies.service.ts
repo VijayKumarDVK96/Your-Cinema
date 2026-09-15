@@ -8,8 +8,9 @@ import { NotFoundError, BadRequestError } from '../../utils/errors.js';
 
 export interface MovieFilters {
   status?: 'all' | 'unwatched' | 'watching' | 'watched';
-  genreId?: number;
+  genreId?: number | string;
   tagId?: string;
+  ott?: string;
   language?: string;
   yearMin?: number;
   yearMax?: number;
@@ -31,6 +32,7 @@ export class MoviesService {
       status = 'all',
       genreId,
       tagId,
+      ott,
       language,
       yearMin,
       yearMax,
@@ -97,6 +99,55 @@ export class MoviesService {
         params.push(queryTerm);
         pIdx++;
       }
+      if (ott && ott !== 'all') {
+        if (ott === 'any_ott') {
+          conditions.push(`EXISTS (
+            SELECT 1 FROM movie_sources ms
+            WHERE ms.user_movie_id = um.id
+          )`);
+        } else {
+          conditions.push(`EXISTS (
+            SELECT 1 FROM movie_sources ms
+            WHERE ms.user_movie_id = um.id AND (
+              LOWER(ms.provider_name) LIKE $${pIdx} OR
+              LOWER(ms.source_type) LIKE $${pIdx}
+            )
+          )`);
+          params.push(`%${ott.toLowerCase()}%`);
+          pIdx++;
+        }
+      }
+      if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
+        const gidStr = String(genreId).trim();
+        conditions.push(`(
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(m.genres) g
+            WHERE (g->>'id' = $${pIdx} OR LOWER(g->>'name') = LOWER($${pIdx}))
+              AND NOT (LOWER(g->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+              AND NOT (g->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+          )
+          OR EXISTS (
+            SELECT 1 FROM user_movie_custom_genres umcg
+            JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+            WHERE umcg.user_movie_id = um.id AND (
+              cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+            )
+          )
+        )`);
+        params.push(gidStr);
+        pIdx++;
+      }
+      if (tagId && String(tagId).trim() !== '') {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM user_movie_tags umt
+          WHERE umt.user_movie_id = um.id AND (
+            umt.tag_id::text = $${pIdx} OR
+            umt.tag_id::text IN (SELECT id::text FROM tags WHERE user_id = $1 AND LOWER(name) = LOWER($${pIdx}))
+          )
+        )`);
+        params.push(String(tagId).trim());
+        pIdx++;
+      }
 
       const sortMap: Record<string, string> = {
         added_at: 'um.added_at',
@@ -117,6 +168,7 @@ export class MoviesService {
           um.personal_rating,
           um.is_favorite,
           um.personal_notes,
+          COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
           COALESCE(mpp.last_played_position_sec, um.playback_position_sec, 0) AS playback_position_sec,
           mpp.last_played_time_formatted,
           COALESCE(mpp.last_played_at, um.last_watched_at) AS last_watched_at,
@@ -172,7 +224,18 @@ export class MoviesService {
 
       params.push(limit, offset);
       const { rows } = await pool.query(sql, params);
-      return { movies: rows, total: rows.length, page, limit };
+      const cleanedRows = rows.map(r => {
+        const excluded = Array.isArray(r.excluded_genres) ? r.excluded_genres : [];
+        const rawGenres = Array.isArray(r.genres) ? r.genres : [];
+        const filteredGenres = rawGenres.filter(
+          (g: any) => !excluded.some((ex: string) => ex.toLowerCase() === (g.name || '').toLowerCase() || ex === String(g.id))
+        );
+        return {
+          ...r,
+          genres: filteredGenres,
+        };
+      });
+      return { movies: cleanedRows, total: cleanedRows.length, page, limit };
     }
 
     // In-Memory resilient fallback query
@@ -268,11 +331,25 @@ export class MoviesService {
     if (runtimeMax) {
       filtered = filtered.filter(m => (m.runtime || 0) <= runtimeMax);
     }
-    if (genreId) {
-      filtered = filtered.filter(m => m.genres.some((g: any) => g.id === genreId));
+    if (ott && ott !== 'all') {
+      filtered = filtered.filter(m => {
+        const sources = m.sources || [];
+        if (ott === 'any_ott') return sources.length > 0;
+        return sources.some((s: any) =>
+          (s.provider_name && s.provider_name.toLowerCase().includes(ott.toLowerCase())) ||
+          (s.source_type && s.source_type.toLowerCase().includes(ott.toLowerCase()))
+        );
+      });
+    }
+    if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
+      const gidStr = String(genreId).trim().toLowerCase();
+      filtered = filtered.filter(m =>
+        (m.genres || []).some((g: any) => String(g.id) === gidStr || (g.name && g.name.toLowerCase() === gidStr)) ||
+        ((m as any).custom_genres || []).some((cg: any) => String(cg.id) === gidStr || (cg.name && cg.name.toLowerCase() === gidStr))
+      );
     }
     if (tagId) {
-      filtered = filtered.filter(m => m.tags.some((t: any) => t.id === tagId));
+      filtered = filtered.filter(m => (m.tags || []).some((t: any) => String(t.id) === String(tagId) || (t.name && t.name.toLowerCase() === String(tagId).toLowerCase())));
     }
 
     return { movies: filtered, total: filtered.length, page, limit };
@@ -287,6 +364,7 @@ export class MoviesService {
           um.personal_rating,
           um.is_favorite,
           um.personal_notes,
+          COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
           um.custom_title,
           um.custom_overview,
           um.custom_poster_url,
@@ -406,8 +484,15 @@ export class MoviesService {
         customGenres = [];
       }
 
+      const excluded = Array.isArray(item.excluded_genres) ? item.excluded_genres : [];
+      const rawGenres = Array.isArray(item.genres) ? item.genres : [];
+      const filteredGenres = rawGenres.filter(
+        (g: any) => !excluded.some((ex: string) => ex.toLowerCase() === (g.name || '').toLowerCase() || ex === String(g.id))
+      );
+
       return {
         ...item,
+        genres: filteredGenres,
         title: item.custom_title || item.tmdb_title,
         overview: item.custom_overview || item.tmdb_overview,
         poster_path: item.custom_poster_url || item.tmdb_poster_path,
@@ -882,8 +967,9 @@ export class MoviesService {
     genreIds?: string[];
     watchlistId?: string;
     newWatchlistName?: string;
+    mode?: 'add' | 'remove';
   }) {
-    const { movieIds, action, tagId, tagIds, genreId, genreIds, watchlistId, newWatchlistName } = data;
+    const { movieIds, action, tagId, tagIds, genreId, genreIds, watchlistId, newWatchlistName, mode = 'add' } = data;
     if (!movieIds || movieIds.length === 0) {
       throw new BadRequestError('No movies selected for bulk action.');
     }
@@ -925,15 +1011,29 @@ export class MoviesService {
         await GenresService.detachGenreFromMovie(id, genreId);
       }
     } else if (action === 'edit_tags_genres') {
+      const isRemove = mode === 'remove';
       for (const id of movieIds) {
-        if (tagIds && tagIds.length > 0) {
-          for (const tid of tagIds) {
-            await TagsService.attachTagToMovie(id, tid);
+        if (isRemove) {
+          if (tagIds && tagIds.length > 0) {
+            for (const tid of tagIds) {
+              await TagsService.detachTagFromMovie(id, tid);
+            }
           }
-        }
-        if (genreIds && genreIds.length > 0) {
-          for (const gid of genreIds) {
-            await GenresService.attachGenreToMovie(id, gid);
+          if (genreIds && genreIds.length > 0) {
+            for (const gid of genreIds) {
+              await GenresService.detachGenreFromMovie(id, gid);
+            }
+          }
+        } else {
+          if (tagIds && tagIds.length > 0) {
+            for (const tid of tagIds) {
+              await TagsService.attachTagToMovie(id, tid);
+            }
+          }
+          if (genreIds && genreIds.length > 0) {
+            for (const gid of genreIds) {
+              await GenresService.attachGenreToMovie(id, gid);
+            }
           }
         }
       }

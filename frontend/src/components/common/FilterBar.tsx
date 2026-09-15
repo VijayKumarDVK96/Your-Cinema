@@ -27,6 +27,8 @@ interface FilterBarProps {
   onGenreChange: (genreId?: string | number) => void;
   selectedLanguage?: string;
   onLanguageChange: (language?: string) => void;
+  selectedOtt?: string;
+  onOttChange: (ott?: string) => void;
   selectedTag?: string;
   onTagChange: (tagId?: string) => void;
   isFavorite?: boolean;
@@ -37,6 +39,19 @@ interface FilterBarProps {
   availableGenres?: { predefined: Genre[]; custom: Genre[]; all: Genre[] } | Genre[];
   onReset: () => void;
 }
+
+const OTT_OPTIONS = [
+  { value: 'Netflix', label: 'Netflix', color: '#E50914' },
+  { value: 'Amazon Prime Video', label: 'Prime Video', color: '#00A8E1' },
+  { value: 'Disney+ Hotstar', label: 'Disney+ Hotstar', color: '#113CCF' },
+  { value: 'Apple TV+', label: 'Apple TV+', color: '#A3AAAE' },
+  { value: 'YouTube', label: 'YouTube', color: '#FF0000' },
+  { value: 'Google Drive', label: 'Google Drive', color: '#34A853' },
+  { value: 'JioCinema', label: 'JioCinema', color: '#D80075' },
+  { value: 'Zee5', label: 'Zee5', color: '#8230C6' },
+  { value: 'Sony LIV', label: 'Sony LIV', color: '#00E5FF' },
+  { value: 'any_ott', label: 'Any Streaming / OTT', color: '#E5A93C' },
+];
 
 const GENRE_OPTIONS = [
   { id: 28, name: 'Action' },
@@ -67,6 +82,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onStatusChange,
   selectedGenre,
   onGenreChange,
+  selectedOtt,
+  onOttChange,
   selectedMediaType = 'all',
   onMediaTypeChange,
   selectedLanguage,
@@ -285,6 +302,34 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <MenuItem value=""><em>All Languages</em></MenuItem>
             {LANGUAGE_OPTIONS.map((lang) => (
               <MenuItem key={lang.code} value={lang.code}>{lang.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {/* OTT / Streaming Platform dropdown */}
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel sx={{ color: '#94A3B8' }}>OTT Platform</InputLabel>
+          <Select
+            value={selectedOtt || ''}
+            label="OTT Platform"
+            onChange={(e) => onOttChange(e.target.value || undefined)}
+            sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
+          >
+            <MenuItem value=""><em>All Streaming</em></MenuItem>
+            {OTT_OPTIONS.map((ott) => (
+              <MenuItem key={ott.value} value={ott.value}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: ott.color,
+                    }}
+                  />
+                  <span>{ott.label}</span>
+                </Box>
+              </MenuItem>
             ))}
           </Select>
         </FormControl>

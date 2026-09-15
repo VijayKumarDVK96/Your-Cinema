@@ -8,8 +8,9 @@ export class MoviesController {
       const userId = req.user!.id;
       const filters = {
         status: req.query.status as any,
-        genreId: req.query.genreId ? parseInt(req.query.genreId as string, 10) : undefined,
+        genreId: req.query.genreId as string | undefined,
         tagId: req.query.tagId as string,
+        ott: (req.query.ott || req.query.ottProvider) as string | undefined,
         language: req.query.language as string,
         yearMin: req.query.yearMin ? parseInt(req.query.yearMin as string, 10) : undefined,
         yearMax: req.query.yearMax ? parseInt(req.query.yearMax as string, 10) : undefined,

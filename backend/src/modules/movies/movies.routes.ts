@@ -43,6 +43,7 @@ const bulkSchema = z.object({
   genreIds: z.array(z.string()).optional(),
   watchlistId: z.string().optional(),
   newWatchlistName: z.string().optional(),
+  mode: z.enum(['add', 'remove']).optional(),
 });
 
 router.use(authenticate);

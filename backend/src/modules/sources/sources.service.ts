@@ -98,15 +98,22 @@ export class SourcesService {
 
   static async deleteSource(userId: string, sourceId: string) {
     if (isPgConnected) {
-      const result = await pool.query('DELETE FROM movie_sources WHERE id = $1', [sourceId]);
-      if (result.rowCount === 0) throw new NotFoundError('Source not found');
-      return { success: true };
+      // Verify ownership: source must belong to a user_movie owned by this user
+      const result = await pool.query(
+        `DELETE FROM movie_sources
+         WHERE id = $1
+           AND user_movie_id IN (SELECT id FROM user_movies WHERE user_id = $2)
+         RETURNING id`,
+        [sourceId, userId]
+      );
+      if ((result.rowCount ?? 0) === 0) throw new NotFoundError('Source not found or access denied');
+      return { success: true, deletedId: sourceId };
     }
 
     const source = inMemoryDb.movieSources.get(sourceId);
     if (!source) throw new NotFoundError('Source not found');
     inMemoryDb.movieSources.delete(sourceId);
-    return { success: true };
+    return { success: true, deletedId: sourceId };
   }
 
   static async getPlaybackProgress(userId: string, userMovieId: string) {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -57,6 +57,7 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
   const [externalFileId, setExternalFileId] = useState<string>('');
   const [quality, setQuality] = useState<string>('4K UHD');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   // Auto-fill URL when provider changes
   const handleSelectPreset = (preset: typeof POPULAR_PROVIDERS[0]) => {
@@ -109,17 +110,25 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
     },
   });
 
-  // Delete source mutation
-  const deleteMutation = useMutation({
-    mutationFn: async (sourceId: string) => {
+  // Delete source — per-source loading state prevents double-clicks & race conditions
+  const handleDeleteSource = useCallback(async (sourceId: string) => {
+    if (deletingIds.has(sourceId)) return; // already in-flight
+    setDeletingIds(prev => new Set(prev).add(sourceId));
+    try {
       await api.delete(`/sources/${sourceId}`);
-    },
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['movie', movie.user_movie_id] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       if (onSourcesChanged) onSourcesChanged();
-    },
-  });
+    } catch (err: any) {
+      setErrorMsg(err.response?.data?.message || err.message || 'Failed to delete source');
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(sourceId);
+        return next;
+      });
+    }
+  }, [deletingIds, movie.user_movie_id, onSourcesChanged, queryClient]);
 
   // Auto-detect mutation
   const detectMutation = useMutation({
@@ -214,8 +223,13 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
                   </Box>
                   <IconButton
                     size="small"
-                    onClick={() => deleteMutation.mutate(s.id)}
-                    sx={{ color: '#64748B', '&:hover': { color: '#EF4444' } }}
+                    onClick={() => handleDeleteSource(s.id)}
+                    disabled={deletingIds.has(s.id)}
+                    sx={{
+                      color: deletingIds.has(s.id) ? '#475569' : '#64748B',
+                      '&:hover': { color: '#EF4444' },
+                      transition: 'color 0.15s',
+                    }}
                   >
                     <DeleteOutlineIcon fontSize="small" />
                   </IconButton>

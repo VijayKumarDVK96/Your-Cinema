@@ -17,6 +17,8 @@ import {
   DialogActions,
   TextField,
   ListItemIcon,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import GridViewIcon from '@mui/icons-material/GridView';
 import ViewListIcon from '@mui/icons-material/ViewList';
@@ -50,6 +52,7 @@ export const MyMoviesPage: React.FC = () => {
   const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>('all');
   const [genreId, setGenreId] = useState<string | number | undefined>(undefined);
   const [language, setLanguage] = useState<string | undefined>(undefined);
+  const [ott, setOtt] = useState<string | undefined>(undefined);
   const [tagId, setTagId] = useState<string | undefined>(undefined);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<string>('added_at');
@@ -63,6 +66,7 @@ export const MyMoviesPage: React.FC = () => {
 
   // Bulk Edit Tags & Genres state
   const [bulkTagsGenresOpen, setBulkTagsGenresOpen] = useState(false);
+  const [bulkGenreMode, setBulkGenreMode] = useState<'add' | 'remove'>('add');
   const [selectedBulkTagIds, setSelectedBulkTagIds] = useState<Set<string>>(new Set());
   const [selectedBulkGenreIds, setSelectedBulkGenreIds] = useState<Set<string>>(new Set());
   const [newTagNameInput, setNewTagNameInput] = useState('');
@@ -72,13 +76,14 @@ export const MyMoviesPage: React.FC = () => {
 
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, tagId, isFavorite, sortBy, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, isFavorite, sortBy, search: searchTerm }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
       if (mediaType !== 'all') params.append('mediaType', mediaType);
       if (genreId !== undefined && genreId !== null) params.append('genreId', genreId.toString());
       if (language) params.append('language', language);
+      if (ott) params.append('ott', ott);
       if (tagId) params.append('tagId', tagId);
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
@@ -161,6 +166,7 @@ export const MyMoviesPage: React.FC = () => {
         action: 'edit_tags_genres',
         tagIds: Array.from(selectedBulkTagIds),
         genreIds: Array.from(selectedBulkGenreIds),
+        mode: bulkGenreMode,
       });
     },
     onSuccess: () => {
@@ -484,15 +490,62 @@ export const MyMoviesPage: React.FC = () => {
         <DialogTitle sx={{ color: '#F8FAFC', fontWeight: 800, pb: 1 }}>
           Edit Tags & Genres ({selectedIds.size} {selectedIds.size === 1 ? 'title' : 'titles'} selected)
         </DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1.5 }}>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+          {/* Add / Remove Mode Switcher */}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ToggleButtonGroup
+              value={bulkGenreMode}
+              exclusive
+              onChange={(_: React.MouseEvent<HTMLElement>, val: any) => {
+                if (val) {
+                  setBulkGenreMode(val);
+                  setSelectedBulkTagIds(new Set());
+                  setSelectedBulkGenreIds(new Set());
+                }
+              }}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                borderRadius: 2,
+                p: 0.5,
+                '& .MuiToggleButton-root': {
+                  border: 'none',
+                  px: 2.5,
+                  py: 0.7,
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  color: '#94A3B8',
+                  borderRadius: 1.5,
+                  textTransform: 'none',
+                  '&.Mui-selected': {
+                    backgroundColor: bulkGenreMode === 'remove' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.2)',
+                    color: bulkGenreMode === 'remove' ? '#EF4444' : '#38BDF8',
+                    border: bulkGenreMode === 'remove' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(56, 189, 248, 0.4)',
+                  },
+                },
+              }}
+            >
+              <ToggleButton value="add">➕ Apply / Add to Titles</ToggleButton>
+              <ToggleButton value="remove">➖ Remove from Titles</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
           {/* Tags Section */}
           <Box>
-            <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 1.2 }}>
-              SELECT TAGS TO APPLY
+            <Typography variant="subtitle2" sx={{ color: bulkGenreMode === 'remove' ? '#EF4444' : '#E5A93C', fontWeight: 700, mb: 1.2 }}>
+              {bulkGenreMode === 'remove' ? 'SELECT TAGS TO REMOVE' : 'SELECT TAGS TO APPLY'}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
               {(tagsData || []).map((tag: any) => {
                 const isSelected = selectedBulkTagIds.has(tag.id);
+                const chipBg = isSelected
+                  ? (bulkGenreMode === 'remove' ? 'rgba(239, 68, 68, 0.25)' : `${tag.color || '#E5A93C'}33`)
+                  : 'transparent';
+                const chipColor = isSelected
+                  ? (bulkGenreMode === 'remove' ? '#EF4444' : '#FFF')
+                  : (tag.color || '#E5A93C');
+                const chipBorder = isSelected && bulkGenreMode === 'remove' ? '#EF4444' : (tag.color || '#E5A93C');
+
                 return (
                   <Chip
                     key={tag.id}
@@ -508,9 +561,9 @@ export const MyMoviesPage: React.FC = () => {
                     }}
                     variant={isSelected ? 'filled' : 'outlined'}
                     sx={{
-                      backgroundColor: isSelected ? `${tag.color || '#E5A93C'}33` : 'transparent',
-                      color: isSelected ? '#FFF' : (tag.color || '#E5A93C'),
-                      borderColor: tag.color || '#E5A93C',
+                      backgroundColor: chipBg,
+                      color: chipColor,
+                      borderColor: chipBorder,
                       fontWeight: 600,
                     }}
                   />
@@ -518,84 +571,114 @@ export const MyMoviesPage: React.FC = () => {
               })}
               {(tagsData || []).length === 0 && (
                 <Typography variant="caption" sx={{ color: '#64748B' }}>
-                  No tags created yet. Add one below!
+                  No tags created yet.
                 </Typography>
               )}
             </Box>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <TextField
-                size="small"
-                fullWidth
-                placeholder="Create new tag (e.g. Mind Bending)..."
-                value={newTagNameInput}
-                onChange={(e) => setNewTagNameInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newTagNameInput.trim()) {
-                    createTagMutation.mutate(newTagNameInput.trim());
-                  }
-                }}
-                sx={{
-                  input: { color: '#F8FAFC', fontSize: '0.875rem' },
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
-                    '&:hover fieldset': { borderColor: '#E5A93C' },
-                  },
-                }}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={!newTagNameInput.trim() || createTagMutation.isPending}
-                onClick={() => createTagMutation.mutate(newTagNameInput.trim())}
-                sx={{ color: '#E5A93C', borderColor: 'rgba(229,169,60,0.5)', whiteSpace: 'nowrap' }}
-              >
-                Add Tag
-              </Button>
-            </Box>
+            {bulkGenreMode === 'add' && (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Create new tag (e.g. Mind Bending)..."
+                  value={newTagNameInput}
+                  onChange={(e) => setNewTagNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newTagNameInput.trim()) {
+                      createTagMutation.mutate(newTagNameInput.trim());
+                    }
+                  }}
+                  sx={{
+                    input: { color: '#F8FAFC', fontSize: '0.875rem' },
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
+                      '&:hover fieldset': { borderColor: '#E5A93C' },
+                    },
+                  }}
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={!newTagNameInput.trim() || createTagMutation.isPending}
+                  onClick={() => createTagMutation.mutate(newTagNameInput.trim())}
+                  sx={{ color: '#E5A93C', borderColor: 'rgba(229,169,60,0.5)', whiteSpace: 'nowrap' }}
+                >
+                  Add Tag
+                </Button>
+              </Box>
+            )}
           </Box>
 
           {/* Genres Section */}
           <Box>
-            <Typography variant="subtitle2" sx={{ color: '#38BDF8', fontWeight: 700, mb: 1.2 }}>
-              SELECT CUSTOM GENRES TO APPLY
+            <Typography variant="subtitle2" sx={{ color: bulkGenreMode === 'remove' ? '#EF4444' : '#38BDF8', fontWeight: 700, mb: 1.2 }}>
+              {bulkGenreMode === 'remove' ? 'SELECT GENRES TO REMOVE' : 'SELECT GENRES TO APPLY'}
             </Typography>
 
-            {/* Predefined Genres — read-only reference */}
+            {/* Predefined Genres — now fully interactive & removable */}
             {(genresData?.predefined || []).length > 0 && (
               <>
-                <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600, mb: 0.8, display: 'block' }}>
-                  TMDB PREDEFINED GENRES (read-only — already linked via TMDB data)
+                <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.8, display: 'block' }}>
+                  {bulkGenreMode === 'remove' ? 'PREDEFINED GENRES (click to mark for removal)' : 'PREDEFINED GENRES (click to apply)'}
                 </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, mb: 1.5, maxHeight: 90, overflowY: 'auto', pr: 0.5 }}>
-                  {(genresData?.predefined || []).map((pg: any) => (
-                    <Chip
-                      key={pg.id}
-                      label={pg.name}
-                      size="small"
-                      sx={{
-                        backgroundColor: 'transparent',
-                        color: pg.color || '#94A3B8',
-                        borderColor: `${pg.color || '#64748B'}55`,
-                        fontWeight: 500,
-                        fontSize: '0.72rem',
-                        height: 24,
-                        opacity: 0.7,
-                        cursor: 'default',
-                      }}
-                      variant="outlined"
-                    />
-                  ))}
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8, mb: 2, maxHeight: 120, overflowY: 'auto', pr: 0.5 }}>
+                  {(genresData?.predefined || []).map((pg: any) => {
+                    const isSelected = selectedBulkGenreIds.has(pg.name);
+                    const chipBg = isSelected
+                      ? (bulkGenreMode === 'remove' ? 'rgba(239, 68, 68, 0.25)' : `${pg.color || '#38BDF8'}33`)
+                      : 'transparent';
+                    const chipColor = isSelected
+                      ? (bulkGenreMode === 'remove' ? '#EF4444' : '#FFF')
+                      : (pg.color || '#94A3B8');
+                    const chipBorder = isSelected && bulkGenreMode === 'remove'
+                      ? '#EF4444'
+                      : (isSelected ? (pg.color || '#38BDF8') : `${pg.color || '#64748B'}55`);
+
+                    return (
+                      <Chip
+                        key={pg.id || pg.name}
+                        label={pg.name}
+                        size="small"
+                        clickable
+                        onClick={() => {
+                          setSelectedBulkGenreIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(pg.name)) next.delete(pg.name);
+                            else next.add(pg.name);
+                            return next;
+                          });
+                        }}
+                        variant={isSelected ? 'filled' : 'outlined'}
+                        sx={{
+                          backgroundColor: chipBg,
+                          color: chipColor,
+                          borderColor: chipBorder,
+                          fontWeight: isSelected ? 700 : 500,
+                          fontSize: '0.75rem',
+                          height: 26,
+                        }}
+                      />
+                    );
+                  })}
                 </Box>
               </>
             )}
 
             {/* Custom Genres — selectable */}
-            <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600, mb: 0.8, display: 'block' }}>
-              YOUR CUSTOM GENRES (selectable)
+            <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.8, display: 'block' }}>
+              {bulkGenreMode === 'remove' ? 'YOUR CUSTOM GENRES (click to remove)' : 'YOUR CUSTOM GENRES (click to apply)'}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
               {((genresData?.custom) || []).map((cg: any) => {
                 const isSelected = selectedBulkGenreIds.has(cg.id);
+                const chipBg = isSelected
+                  ? (bulkGenreMode === 'remove' ? 'rgba(239, 68, 68, 0.25)' : `${cg.color || '#38BDF8'}33`)
+                  : 'transparent';
+                const chipColor = isSelected
+                  ? (bulkGenreMode === 'remove' ? '#EF4444' : '#FFF')
+                  : (cg.color || '#38BDF8');
+                const chipBorder = isSelected && bulkGenreMode === 'remove' ? '#EF4444' : (cg.color || '#38BDF8');
+
                 return (
                   <Chip
                     key={cg.id}
@@ -611,9 +694,9 @@ export const MyMoviesPage: React.FC = () => {
                     }}
                     variant={isSelected ? 'filled' : 'outlined'}
                     sx={{
-                      backgroundColor: isSelected ? `${cg.color || '#38BDF8'}33` : 'transparent',
-                      color: isSelected ? '#FFF' : (cg.color || '#38BDF8'),
-                      borderColor: cg.color || '#38BDF8',
+                      backgroundColor: chipBg,
+                      color: chipColor,
+                      borderColor: chipBorder,
                       fontWeight: 600,
                     }}
                   />
@@ -621,41 +704,43 @@ export const MyMoviesPage: React.FC = () => {
               })}
               {((genresData?.custom) || []).length === 0 && (
                 <Typography variant="caption" sx={{ color: '#64748B' }}>
-                  No custom genres yet. Create them in Settings → Custom Genres, then assign here.
+                  No custom genres created yet.
                 </Typography>
               )}
             </Box>
 
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <TextField
-                size="small"
-                fullWidth
-                placeholder="Create new custom genre (e.g. Cyberpunk)..."
-                value={newGenreNameInput}
-                onChange={(e) => setNewGenreNameInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newGenreNameInput.trim()) {
-                    createGenreMutation.mutate(newGenreNameInput.trim());
-                  }
-                }}
-                sx={{
-                  input: { color: '#F8FAFC', fontSize: '0.875rem' },
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
-                    '&:hover fieldset': { borderColor: '#38BDF8' },
-                  },
-                }}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={!newGenreNameInput.trim() || createGenreMutation.isPending}
-                onClick={() => createGenreMutation.mutate(newGenreNameInput.trim())}
-                sx={{ color: '#38BDF8', borderColor: 'rgba(56,189,248,0.5)', whiteSpace: 'nowrap' }}
-              >
-                Add Genre
-              </Button>
-            </Box>
+            {bulkGenreMode === 'add' && (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Create new custom genre (e.g. Cyberpunk)..."
+                  value={newGenreNameInput}
+                  onChange={(e) => setNewGenreNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newGenreNameInput.trim()) {
+                      createGenreMutation.mutate(newGenreNameInput.trim());
+                    }
+                  }}
+                  sx={{
+                    input: { color: '#F8FAFC', fontSize: '0.875rem' },
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
+                      '&:hover fieldset': { borderColor: '#38BDF8' },
+                    },
+                  }}
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={!newGenreNameInput.trim() || createGenreMutation.isPending}
+                  onClick={() => createGenreMutation.mutate(newGenreNameInput.trim())}
+                  sx={{ color: '#38BDF8', borderColor: 'rgba(56,189,248,0.5)', whiteSpace: 'nowrap' }}
+                >
+                  Add Genre
+                </Button>
+              </Box>
+            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -664,7 +749,7 @@ export const MyMoviesPage: React.FC = () => {
           </Button>
           <Button
             variant="contained"
-            color="primary"
+            color={bulkGenreMode === 'remove' ? 'error' : 'primary'}
             disabled={
               (selectedBulkTagIds.size === 0 && selectedBulkGenreIds.size === 0) ||
               bulkTagsGenresMutation.isPending
@@ -672,7 +757,9 @@ export const MyMoviesPage: React.FC = () => {
             onClick={() => bulkTagsGenresMutation.mutate()}
             sx={{ fontWeight: 700 }}
           >
-            {bulkTagsGenresMutation.isPending ? 'Applying...' : `Apply to ${selectedIds.size} Titles`}
+            {bulkTagsGenresMutation.isPending
+              ? (bulkGenreMode === 'remove' ? 'Removing...' : 'Applying...')
+              : `${bulkGenreMode === 'remove' ? 'Remove from' : 'Apply to'} ${selectedIds.size} ${selectedIds.size === 1 ? 'Title' : 'Titles'}`}
           </Button>
         </DialogActions>
       </Dialog>
@@ -685,6 +772,8 @@ export const MyMoviesPage: React.FC = () => {
         onMediaTypeChange={setMediaType}
         selectedGenre={genreId}
         onGenreChange={setGenreId}
+        selectedOtt={ott}
+        onOttChange={setOtt}
         selectedLanguage={language}
         onLanguageChange={setLanguage}
         selectedTag={tagId}
@@ -699,6 +788,7 @@ export const MyMoviesPage: React.FC = () => {
           setStatus('all');
           setMediaType('all');
           setGenreId(undefined);
+          setOtt(undefined);
           setLanguage(undefined);
           setTagId(undefined);
           setIsFavorite(false);

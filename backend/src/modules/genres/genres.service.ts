@@ -284,31 +284,133 @@ export class GenresService {
   }
 
   static async attachGenreToMovie(userMovieId: string, genreId: string) {
+    const pgMatch = PREDEFINED_GENRES.find(
+      pg => pg.id === genreId || String(pg.tmdb_id) === String(genreId) || pg.name.toLowerCase() === genreId.toLowerCase()
+    );
+
     if (isPgConnected) {
-      await pool.query(`
-        INSERT INTO user_movie_custom_genres (user_movie_id, custom_genre_id)
-        VALUES ($1, $2)
-        ON CONFLICT DO NOTHING
-      `, [userMovieId, genreId]);
+      if (pgMatch) {
+        // Predefined genre: restore by removing from excluded_genres
+        await pool.query(`
+          UPDATE user_movies
+          SET excluded_genres = array_remove(array_remove(COALESCE(excluded_genres, ARRAY[]::TEXT[]), $1), $2)
+          WHERE id = $3
+        `, [pgMatch.name, String(pgMatch.tmdb_id || pgMatch.id), userMovieId]);
+        return { success: true };
+      }
+
+      // Check if matching any canonical genre name in movies table
+      const { rows } = await pool.query(`
+        SELECT m.genres FROM user_movies um
+        JOIN movies m ON um.movie_id = m.id
+        WHERE um.id = $1
+      `, [userMovieId]);
+
+      if (rows[0] && Array.isArray(rows[0].genres)) {
+        const matched = rows[0].genres.find(
+          (g: any) => String(g.id) === genreId || (g.name && g.name.toLowerCase() === genreId.toLowerCase())
+        );
+        if (matched) {
+          await pool.query(`
+            UPDATE user_movies
+            SET excluded_genres = array_remove(array_remove(COALESCE(excluded_genres, ARRAY[]::TEXT[]), $1), $2)
+            WHERE id = $3
+          `, [matched.name, String(matched.id), userMovieId]);
+          return { success: true };
+        }
+      }
+
+      // Custom genre: insert into junction table
+      try {
+        await pool.query(`
+          INSERT INTO user_movie_custom_genres (user_movie_id, custom_genre_id)
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+        `, [userMovieId, genreId]);
+      } catch {
+        // In case genreId was not a valid UUID (e.g. non-uuid custom name)
+      }
       return { success: true };
     }
 
-    const key = `${userMovieId}-${genreId}`;
-    inMemoryDb.userMovieCustomGenres.set(key, { user_movie_id: userMovieId, custom_genre_id: genreId });
+    const um = inMemoryDb.userMovies.get(userMovieId);
+    if (um) {
+      if (pgMatch) {
+        um.excluded_genres = (um.excluded_genres || []).filter(
+          (ex: string) => ex.toLowerCase() !== pgMatch.name.toLowerCase() && ex !== String(pgMatch.tmdb_id)
+        );
+      } else {
+        const key = `${userMovieId}-${genreId}`;
+        inMemoryDb.userMovieCustomGenres.set(key, { user_movie_id: userMovieId, custom_genre_id: genreId });
+      }
+    }
     return { success: true };
   }
 
   static async detachGenreFromMovie(userMovieId: string, genreId: string) {
+    const pgMatch = PREDEFINED_GENRES.find(
+      pg => pg.id === genreId || String(pg.tmdb_id) === String(genreId) || pg.name.toLowerCase() === genreId.toLowerCase()
+    );
+
     if (isPgConnected) {
-      await pool.query(`
-        DELETE FROM user_movie_custom_genres
-        WHERE user_movie_id = $1 AND custom_genre_id = $2
-      `, [userMovieId, genreId]);
+      if (pgMatch) {
+        // Predefined genre removal: add to excluded_genres
+        await pool.query(`
+          UPDATE user_movies
+          SET excluded_genres = array_append(
+            array_remove(array_remove(COALESCE(excluded_genres, ARRAY[]::TEXT[]), $1), $2),
+            $1
+          )
+          WHERE id = $3
+        `, [pgMatch.name, String(pgMatch.tmdb_id || pgMatch.id), userMovieId]);
+        return { success: true };
+      }
+
+      // Check if it's a name matching canonical genres in movies table
+      const { rows } = await pool.query(`
+        SELECT m.genres FROM user_movies um
+        JOIN movies m ON um.movie_id = m.id
+        WHERE um.id = $1
+      `, [userMovieId]);
+
+      if (rows[0] && Array.isArray(rows[0].genres)) {
+        const matched = rows[0].genres.find(
+          (g: any) => String(g.id) === genreId || (g.name && g.name.toLowerCase() === genreId.toLowerCase())
+        );
+        if (matched) {
+          await pool.query(`
+            UPDATE user_movies
+            SET excluded_genres = array_append(
+              array_remove(array_remove(COALESCE(excluded_genres, ARRAY[]::TEXT[]), $1), $2),
+              $1
+            )
+            WHERE id = $3
+          `, [matched.name, String(matched.id), userMovieId]);
+          return { success: true };
+        }
+      }
+
+      // Otherwise attempt custom genre removal from junction table
+      try {
+        await pool.query(`
+          DELETE FROM user_movie_custom_genres
+          WHERE user_movie_id = $1 AND custom_genre_id = $2
+        `, [userMovieId, genreId]);
+      } catch {
+        // If genreId wasn't a UUID
+      }
       return { success: true };
     }
 
-    const key = `${userMovieId}-${genreId}`;
-    inMemoryDb.userMovieCustomGenres.delete(key);
+    const um = inMemoryDb.userMovies.get(userMovieId);
+    if (um) {
+      if (pgMatch) {
+        um.excluded_genres = [...(um.excluded_genres || []), pgMatch.name];
+      } else {
+        const key = `${userMovieId}-${genreId}`;
+        inMemoryDb.userMovieCustomGenres.delete(key);
+      }
+    }
     return { success: true };
   }
 }

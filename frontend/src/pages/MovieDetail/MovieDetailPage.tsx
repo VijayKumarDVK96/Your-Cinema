@@ -469,7 +469,21 @@ export const MovieDetailPage: React.FC = () => {
               {/* Genres & Tags */}
               <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.8 }}>
                 {(movie.genres || []).map((g: any) => (
-                  <Chip key={g.id || g.name} label={g.name} size="small" sx={{ backgroundColor: 'rgba(255,255,255,0.06)', color: '#E2E8F0' }} />
+                  <Chip
+                    key={g.id || g.name}
+                    label={g.name}
+                    size="small"
+                    onDelete={() => detachGenreMutation.mutate(String(g.name || g.id))}
+                    sx={{
+                      backgroundColor: 'rgba(255,255,255,0.06)',
+                      color: '#E2E8F0',
+                      '& .MuiChip-deleteIcon': {
+                        color: 'rgba(255,255,255,0.35)',
+                        fontSize: '15px',
+                        '&:hover': { color: '#EF4444' },
+                      },
+                    }}
+                  />
                 ))}
                 {(movie.custom_genres || []).map((cg: any) => (
                   <Chip
