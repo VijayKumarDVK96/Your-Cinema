@@ -117,12 +117,49 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
     enabled: !!debouncedTerm && category === 'tmdb',
   });
 
-  const matchingMovies = libraryData?.movies || [];
+  // Helper to prioritize titles starting with the search prefix, then word boundaries, then in-between matches
+  const rankByPrefixPriority = <T extends { title?: string; name?: string; custom_title?: string }>(items: T[], query: string): T[] => {
+    if (!query || !items.length) return items;
+    const q = query.trim().toLowerCase();
+
+    return [...items].sort((a, b) => {
+      const titleA = (a.custom_title || a.title || a.name || '').toLowerCase();
+      const titleB = (b.custom_title || b.title || b.name || '').toLowerCase();
+
+      // Priority 0: Exact start of title (e.g. "Arrambam" or "Arrival" for "ar")
+      const startsA = titleA.startsWith(q);
+      const startsB = titleB.startsWith(q);
+      if (startsA && !startsB) return -1;
+      if (!startsA && startsB) return 1;
+
+      // Priority 1: Word boundary start (e.g. "The Arrival" or "Spider-Man: Far From Home")
+      const wordA = titleA.includes(' ' + q) || titleA.includes('-' + q) || titleA.includes(':' + q) || titleA.includes('(' + q);
+      const wordB = titleB.includes(' ' + q) || titleB.includes('-' + q) || titleB.includes(':' + q) || titleB.includes('(' + q);
+      if (wordA && !wordB) return -1;
+      if (!wordA && wordB) return 1;
+
+      // Priority 2: Substring position (earlier index in title has priority)
+      const idxA = titleA.indexOf(q);
+      const idxB = titleB.indexOf(q);
+      if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+        return idxA - idxB;
+      }
+      if (idxA !== -1 && idxB === -1) return -1;
+      if (idxA === -1 && idxB !== -1) return 1;
+
+      return 0;
+    });
+  };
+
+  const rawMovies = libraryData?.movies || [];
+  const matchingMovies = rankByPrefixPriority(rawMovies, debouncedTerm);
   const allWatchlists = Array.isArray(watchlistsData) ? watchlistsData : (watchlistsData?.watchlists || []);
-  const matchingWatchlists = (category === 'all' || category === 'watchlist') && debouncedTerm
-    ? allWatchlists.filter((w: any) => (w.name || '').toLowerCase().includes(debouncedTerm.toLowerCase())).slice(0, 4)
+  const rawWatchlists = (category === 'all' || category === 'watchlist') && debouncedTerm
+    ? allWatchlists.filter((w: any) => (w.name || '').toLowerCase().includes(debouncedTerm.toLowerCase()))
     : [];
-  const matchingTmdb = tmdbData?.results?.slice(0, 6) || [];
+  const matchingWatchlists = rankByPrefixPriority(rawWatchlists, debouncedTerm).slice(0, 4);
+  const rawTmdb = tmdbData?.results || [];
+  const matchingTmdb = rankByPrefixPriority(rawTmdb, debouncedTerm).slice(0, 6);
 
   const totalResultsCount =
     category === 'tmdb'
@@ -169,7 +206,7 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
         if (category === 'tmdb') {
           const item = matchingTmdb[selectedIndex];
           if (item && onOpenAddModalWithQuery) {
-            onOpenAddModalWithQuery(item.title || item.name);
+            onOpenAddModalWithQuery(item.title || item.name || '');
             setIsOpen(false);
           }
         } else if (selectedIndex < matchingMovies.length) {

@@ -10,6 +10,8 @@ import {
   Stack,
   Tooltip,
   TextField,
+  ButtonGroup,
+  Slider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -18,6 +20,10 @@ import MovieIcon from '@mui/icons-material/Movie';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import BookmarkIcon from '@mui/icons-material/Bookmark';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import GraphicEqIcon from '@mui/icons-material/GraphicEq';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { api } from '../../api/client.js';
@@ -29,6 +35,7 @@ declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady: any;
+    webkitAudioContext: typeof AudioContext;
   }
 }
 
@@ -83,7 +90,54 @@ export const UniversalPlayer: React.FC = () => {
   const [playerKey, setPlayerKey] = useState<number>(0);
   const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
   const [timeInputValue, setTimeInputValue] = useState<string>('');
-  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>('stream');
+  
+  // Default to 'stream' (Direct HTML5) so video resumes playback automatically at the exact saved position
+  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>(() => {
+    try {
+      const saved = localStorage.getItem('yourcinema_drive_mode');
+      if (saved === 'stream' || saved === 'iframe') return saved;
+    } catch {}
+    return 'stream';
+  });
+
+  const [audioBoost, setAudioBoost] = useState<number>(100);
+  const [showBoostMenu, setShowBoostMenu] = useState<boolean>(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const mediaSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+
+  const handleSetDriveMode = (mode: 'stream' | 'iframe') => {
+    setDriveMode(mode);
+    try {
+      localStorage.setItem('yourcinema_drive_mode', mode);
+    } catch {}
+  };
+
+  const handleApplyAudioGain = (gainPercent: number) => {
+    try {
+      if (!videoRef.current) return;
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtxRef.current = new AudioContextClass();
+          gainNodeRef.current = audioCtxRef.current.createGain();
+          mediaSourceNodeRef.current = audioCtxRef.current.createMediaElementSource(videoRef.current);
+          mediaSourceNodeRef.current.connect(gainNodeRef.current);
+          gainNodeRef.current.connect(audioCtxRef.current.destination);
+        }
+      }
+      if (audioCtxRef.current?.state === 'suspended') {
+        audioCtxRef.current.resume();
+      }
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.value = gainPercent / 100;
+      }
+      setAudioBoost(gainPercent);
+    } catch (e) {
+      // AudioContext connection might fail if user hasn't interacted or cross-origin restrictions apply
+    }
+  };
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const ytPlayerRef = useRef<any>(null);
 
@@ -116,28 +170,43 @@ export const UniversalPlayer: React.FC = () => {
     };
   }, [isOpen, activeMovie?.user_movie_id]);
 
-  // Sync state when activeMovie opens or changes
-  useEffect(() => {
-    if (activeMovie) {
-      const pos = activeMovie.playback_position_sec || 0;
-      setCurrentSec(pos);
-      currentSecRef.current = pos;
-    }
-  }, [activeMovie, isOpen]);
+  const isDrive = activeSource?.source_type === 'google_drive';
+  const isYouTube =
+    activeSource?.source_type === 'youtube' ||
+    isYouTubeSource(activeSource) ||
+    (!activeSource && Boolean(activeMovie?.trailer_url));
+  const isOtt = activeSource?.source_type === 'ott' && !isYouTube;
+  const ottMeta = isOtt && activeSource ? getOttMeta(activeSource.provider_name, activeSource.provider_icon) : null;
 
-  useEffect(() => {
-    currentSecRef.current = currentSec;
-  }, [currentSec]);
+  // Google Drive URLs
+  const driveFileId = isDrive
+    ? extractDriveFileId(activeSource?.external_file_id || activeSource?.external_url)
+    : '';
+  const drivePreviewUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
+  const driveEmbedSrc = drivePreviewUrl ? `${drivePreviewUrl}?autoplay=1` : '';
+  const driveViewUrl = driveFileId ? getDriveViewUrl(driveFileId) : null;
 
-  // Load YouTube IFrame API script once
+  // Robust seek effect to resume HTML5 video at the exact saved position
   useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+    if (!isOpen || !isDrive || driveMode !== 'stream') return;
+    const target = currentSecRef.current || initialSec;
+    if (target > 0) {
+      const timers = [150, 400, 800, 1500].map((delay) =>
+        setTimeout(() => {
+          if (videoRef.current && videoRef.current.readyState >= 1) {
+            try {
+              if (Math.abs(videoRef.current.currentTime - target) > 2) {
+                videoRef.current.currentTime = target;
+              }
+            } catch (e) {}
+          }
+        }, delay)
+      );
+      return () => {
+        timers.forEach(clearTimeout);
+      };
     }
-  }, []);
+  }, [isOpen, isDrive, driveMode, activeMovie?.user_movie_id, playerKey]);
 
   // Save playback progress to backend
   const saveProgress = useCallback(
@@ -161,22 +230,6 @@ export const UniversalPlayer: React.FC = () => {
     },
     [activeMovie, activeSource, queryClient]
   );
-
-  const isDrive = activeSource?.source_type === 'google_drive';
-  const isYouTube =
-    activeSource?.source_type === 'youtube' ||
-    isYouTubeSource(activeSource) ||
-    (!activeSource && Boolean(activeMovie?.trailer_url));
-  const isOtt = activeSource?.source_type === 'ott' && !isYouTube;
-  const ottMeta = isOtt && activeSource ? getOttMeta(activeSource.provider_name, activeSource.provider_icon) : null;
-
-  // Google Drive URLs
-  const driveFileId = isDrive
-    ? extractDriveFileId(activeSource?.external_file_id || activeSource?.external_url)
-    : '';
-  const drivePreviewUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
-  const driveEmbedSrc = drivePreviewUrl ? `${drivePreviewUrl}?autoplay=1` : '';
-  const driveViewUrl = driveFileId ? getDriveViewUrl(driveFileId) : null;
 
   // Mount YouTube IFrame API Player for accurate forward/rewind scrubbing tracking
   const ytRawUrl = activeSource?.external_url || activeMovie?.trailer_url || '';
@@ -579,23 +632,73 @@ export const UniversalPlayer: React.FC = () => {
             </Tooltip>
 
             {isDrive && driveFileId && (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => setDriveMode((m) => (m === 'stream' ? 'iframe' : 'stream'))}
-                sx={{
-                  color: '#94A3B8',
-                  borderColor: 'rgba(255, 255, 255, 0.2)',
-                  fontSize: '11px',
-                  textTransform: 'none',
-                  py: 0.2,
-                  px: 1.2,
-                  fontWeight: 600,
-                  '&:hover': { color: '#FFF', borderColor: 'rgba(255, 255, 255, 0.4)' },
-                }}
-              >
-                {driveMode === 'stream' ? 'Switch to Drive Preview' : 'Switch to Direct Stream'}
-              </Button>
+              <ButtonGroup size="small" variant="outlined" sx={{ backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 1.5 }}>
+                <Tooltip title="Uses Google Drive cloud-transcoding (plays AC3/EAC3/MKV audio with audible stereo sound)">
+                  <Button
+                    onClick={() => handleSetDriveMode('iframe')}
+                    startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important' }} />}
+                    sx={{
+                      fontSize: '11px',
+                      textTransform: 'none',
+                      fontWeight: driveMode === 'iframe' ? 700 : 500,
+                      backgroundColor: driveMode === 'iframe' ? 'rgba(15, 157, 88, 0.25)' : 'transparent',
+                      color: driveMode === 'iframe' ? '#34D399' : '#94A3B8',
+                      borderColor: driveMode === 'iframe' ? '#059669' : 'rgba(255,255,255,0.15)',
+                      '&:hover': {
+                        backgroundColor: driveMode === 'iframe' ? 'rgba(15, 157, 88, 0.35)' : 'rgba(255,255,255,0.06)',
+                        color: '#FFF',
+                      },
+                    }}
+                  >
+                    Drive Preview (Audio)
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Direct HTML5 raw video stream (supports range seek, but AC3 audio may be silent in browser)">
+                  <Button
+                    onClick={() => handleSetDriveMode('stream')}
+                    startIcon={<GraphicEqIcon sx={{ fontSize: '13px !important' }} />}
+                    sx={{
+                      fontSize: '11px',
+                      textTransform: 'none',
+                      fontWeight: driveMode === 'stream' ? 700 : 500,
+                      backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      color: driveMode === 'stream' ? '#38BDF8' : '#94A3B8',
+                      borderColor: driveMode === 'stream' ? '#0284C7' : 'rgba(255,255,255,0.15)',
+                      '&:hover': {
+                        backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255,255,255,0.06)',
+                        color: '#FFF',
+                      },
+                    }}
+                  >
+                    Direct Stream
+                  </Button>
+                </Tooltip>
+              </ButtonGroup>
+            )}
+
+            {isDrive && driveMode === 'stream' && (
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                <Tooltip title="Boost HTML5 audio volume">
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => {
+                      const next = audioBoost === 100 ? 150 : audioBoost === 150 ? 200 : audioBoost === 200 ? 300 : 100;
+                      handleApplyAudioGain(next);
+                    }}
+                    startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important', color: audioBoost > 100 ? '#F59E0B' : '#94A3B8' }} />}
+                    sx={{
+                      fontSize: '11px',
+                      color: audioBoost > 100 ? '#F59E0B' : '#94A3B8',
+                      textTransform: 'none',
+                      py: 0.2,
+                      px: 0.8,
+                    }}
+                  >
+                    Boost {audioBoost}%
+                  </Button>
+                </Tooltip>
+              </Box>
             )}
 
             {isDrive && driveViewUrl && (
@@ -631,6 +734,48 @@ export const UniversalPlayer: React.FC = () => {
         </Box>
       )}
 
+      {/* Audio Helper Banner for Direct Stream */}
+      {isDrive && driveFileId && driveMode === 'stream' && (
+        <Box
+          sx={{
+            px: 2,
+            py: 0.8,
+            backgroundColor: 'rgba(234, 179, 8, 0.12)',
+            borderBottom: '1px solid rgba(234, 179, 8, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 1,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <VolumeOffIcon sx={{ fontSize: 16, color: '#FBBF24' }} />
+            <Typography variant="caption" sx={{ color: '#FDE047', fontWeight: 500 }}>
+              Audio not audible? Browsers cannot decode MKV/AC3 multi-channel audio directly. Switch to Drive Preview for cloud-transcoded sound.
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() => handleSetDriveMode('iframe')}
+            startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important' }} />}
+            sx={{
+              backgroundColor: '#D97706',
+              color: '#FFF',
+              fontSize: '11px',
+              py: 0.2,
+              px: 1.2,
+              textTransform: 'none',
+              fontWeight: 700,
+              '&:hover': { backgroundColor: '#B45309' },
+            }}
+          >
+            Switch to Drive Preview (with Audio)
+          </Button>
+        </Box>
+      )}
+
       <DialogContent sx={{ p: 0, backgroundColor: '#000', position: 'relative', minHeight: '480px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {/* Case 1a: Google Drive Direct Video Stream with Range Seeking & Resume */}
         {isDrive && driveFileId && driveMode === 'stream' && (
@@ -649,13 +794,25 @@ export const UniversalPlayer: React.FC = () => {
               onLoadedMetadata={() => {
                 const target = currentSecRef.current || initialSec;
                 if (target > 0 && videoRef.current) {
-                  videoRef.current.currentTime = target;
+                  try {
+                    videoRef.current.currentTime = target;
+                  } catch (e) {}
                 }
               }}
               onCanPlay={() => {
                 const target = currentSecRef.current || initialSec;
-                if (target > 0 && videoRef.current && Math.abs(videoRef.current.currentTime - target) > 3) {
-                  videoRef.current.currentTime = target;
+                if (target > 0 && videoRef.current && Math.abs(videoRef.current.currentTime - target) > 1.5) {
+                  try {
+                    videoRef.current.currentTime = target;
+                  } catch (e) {}
+                }
+              }}
+              onPlay={() => {
+                const target = currentSecRef.current || initialSec;
+                if (target > 0 && videoRef.current && Math.abs(videoRef.current.currentTime - target) > 1.5) {
+                  try {
+                    videoRef.current.currentTime = target;
+                  } catch (e) {}
                 }
               }}
               onTimeUpdate={() => {
@@ -676,7 +833,7 @@ export const UniversalPlayer: React.FC = () => {
                 saveProgress(runtimeSec, true);
               }}
               onError={() => {
-                setDriveMode('iframe');
+                handleSetDriveMode('iframe');
               }}
             />
           </Box>
@@ -684,7 +841,7 @@ export const UniversalPlayer: React.FC = () => {
 
         {/* Case 1b: Google Drive Fallback Preview Iframe */}
         {isDrive && driveFileId && driveMode === 'iframe' && driveEmbedSrc && (
-          <Box sx={{ width: '100%', height: '540px' }} key={`drive-iframe-${playerKey}`}>
+          <Box sx={{ width: '100%', height: '540px', backgroundColor: '#000' }} key={`drive-iframe-${playerKey}`}>
             <iframe
               src={driveEmbedSrc}
               title={`${activeMovie.title} Google Drive Stream`}

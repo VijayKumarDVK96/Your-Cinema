@@ -215,15 +215,33 @@ export class MoviesService {
         conditions.push(`COALESCE(um.custom_runtime, m.runtime) <= $${pIdx++}`);
         params.push(runtimeMax);
       }
+      let searchOrderClause = '';
       if (search && search.trim()) {
-        const queryTerm = `%${search.trim().toLowerCase()}%`;
+        const queryTerm = search.trim().toLowerCase();
+        const pAny = `%${queryTerm}%`;
+        const pStart = `${queryTerm}%`;
+        const pWord = `% ${queryTerm}%`;
+
         conditions.push(`(
           LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pIdx} OR
           LOWER(COALESCE(um.custom_director, m.director, '')) LIKE $${pIdx} OR
           LOWER(COALESCE(m.overview, '')) LIKE $${pIdx}
         )`);
-        params.push(queryTerm);
-        pIdx++;
+        params.push(pAny);
+        const pAnyIdx = pIdx++;
+
+        params.push(pStart, pWord);
+        const pStartIdx = pIdx++;
+        const pWordIdx = pIdx++;
+
+        searchOrderClause = `
+          CASE
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pStartIdx} THEN 0
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pWordIdx} THEN 1
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pAnyIdx} THEN 2
+            ELSE 3
+          END ASC,
+        `;
       }
       if (ott && ott !== 'all') {
         if (ott === 'unassigned' || ott === 'no_ott' || ott === 'none') {
@@ -387,7 +405,7 @@ export class MoviesService {
         JOIN movies m ON um.movie_id = m.id
         LEFT JOIN movie_playback_progress mpp ON mpp.user_movie_id = um.id AND mpp.user_id = um.user_id
         WHERE ${conditions.join(' AND ')}
-        ORDER BY ${sortColumn} ${direction} NULLS LAST
+        ORDER BY ${searchOrderClause} ${sortColumn} ${direction} NULLS LAST
         LIMIT $${pIdx++} OFFSET $${pIdx++}
       `;
 
@@ -431,39 +449,29 @@ export class MoviesService {
     }
     if (personalRating) {
       if (personalRating === 'rated') {
-        userMoviesList = userMoviesList.filter(um => um.personal_rating !== null && um.personal_rating !== undefined && Number(um.personal_rating) > 0);
+        userMoviesList = userMoviesList.filter(um => um.personal_rating !== null && um.personal_rating > 0);
       } else if (personalRating === 'unrated') {
-        userMoviesList = userMoviesList.filter(um => um.personal_rating === null || um.personal_rating === undefined || Number(um.personal_rating) === 0);
+        userMoviesList = userMoviesList.filter(um => um.personal_rating === null || um.personal_rating === 0);
       } else if (!isNaN(parseFloat(personalRating))) {
-        const minVal = parseFloat(personalRating);
-        userMoviesList = userMoviesList.filter(um => (Number(um.personal_rating) || 0) >= minVal);
+        userMoviesList = userMoviesList.filter(um => (um.personal_rating || 0) >= parseFloat(personalRating));
       }
     }
 
     const resolved = userMoviesList.map(um => {
-      const m = inMemoryDb.movies.get(um.movie_id) || {};
+      const m = inMemoryDb.movies.get(um.movie_id) || Array.from(inMemoryDb.movies.values()).find(x => x.id === um.movie_id) || {};
       const movieTags = Array.from(inMemoryDb.userMovieTags.values())
-        .filter(umt => umt.user_movie_id === um.id)
-        .map(umt => inMemoryDb.tags.get(umt.tag_id))
+        .filter((umt: any) => umt.user_movie_id === um.id)
+        .map((umt: any) => inMemoryDb.tags.get(umt.tag_id))
         .filter(Boolean);
 
       const movieSources = Array.from(inMemoryDb.movieSources.values())
-        .filter(s => s.user_movie_id === um.id);
+        .filter((ms: any) => ms.user_movie_id === um.id);
 
       const prog = inMemoryDb.moviePlaybackProgress.get(um.id);
 
       return {
+        ...um,
         user_movie_id: um.id,
-        watch_status: um.watch_status,
-        personal_rating: um.personal_rating,
-        is_favorite: um.is_favorite,
-        personal_notes: um.personal_notes,
-        playback_position_sec: prog ? prog.last_played_position_sec : (um.playback_position_sec || 0),
-        last_played_time_formatted: prog ? prog.last_played_time_formatted : null,
-        last_watched_at: prog ? prog.last_played_at : um.last_watched_at,
-        last_played_source_type: prog ? prog.source_type : null,
-        last_played_source_id: prog ? prog.source_id : null,
-        added_at: um.added_at,
         media_type: um.media_type || m.media_type || 'movie',
         number_of_seasons: m.number_of_seasons || 1,
         number_of_episodes: m.number_of_episodes || 1,
@@ -472,6 +480,10 @@ export class MoviesService {
         series_status: m.series_status,
         created_by: m.created_by || [],
         seasons: m.seasons || [],
+        playback_position_sec: prog ? prog.last_played_position_sec : (um.playback_position_sec || 0),
+        last_played_time_formatted: prog ? prog.last_played_time_formatted : undefined,
+        last_played_source_type: prog ? prog.source_type : undefined,
+        last_played_source_id: prog ? prog.source_id : undefined,
         title: um.custom_title || m.title,
         overview: um.custom_overview || m.overview,
         poster_path: um.custom_poster_url || m.poster_path,
@@ -499,7 +511,7 @@ export class MoviesService {
     if (search && search.trim()) {
       const q = search.trim().toLowerCase();
       filtered = filtered.filter(m =>
-        m.title.toLowerCase().includes(q) ||
+        (m.title || '').toLowerCase().includes(q) ||
         (m.director && m.director.toLowerCase().includes(q)) ||
         (m.overview && m.overview.toLowerCase().includes(q))
       );
@@ -554,6 +566,17 @@ export class MoviesService {
     }
 
     filtered.sort((a, b) => {
+      // First, if search is active, prioritize prefix matches
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const titleA = (a.title || '').toLowerCase();
+        const titleB = (b.title || '').toLowerCase();
+
+        const rankA = titleA.startsWith(q) ? 0 : (titleA.includes(' ' + q) || titleA.includes('-' + q) || titleA.includes(':' + q)) ? 1 : titleA.includes(q) ? 2 : 3;
+        const rankB = titleB.startsWith(q) ? 0 : (titleB.includes(' ' + q) || titleB.includes('-' + q) || titleB.includes(':' + q)) ? 1 : titleB.includes(q) ? 2 : 3;
+        if (rankA !== rankB) return rankA - rankB;
+      }
+
       let valA: any;
       let valB: any;
 
