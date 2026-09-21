@@ -31,6 +31,8 @@ interface FilterBarProps {
   onOttChange: (ott?: string) => void;
   selectedTag?: string;
   onTagChange: (tagId?: string) => void;
+  selectedPersonalRating?: string;
+  onPersonalRatingChange: (rating?: string) => void;
   isFavorite?: boolean;
   onFavoriteToggle: () => void;
   sortBy: string;
@@ -93,6 +95,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onLanguageChange,
   selectedTag,
   onTagChange,
+  selectedPersonalRating,
+  onPersonalRatingChange,
   isFavorite,
   onFavoriteToggle,
   sortBy,
@@ -355,8 +359,30 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </FormControl>
         )}
 
-        {/* Sort selector */}
+        {/* My Rating filter dropdown */}
         <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel sx={{ color: '#94A3B8' }}>My Rating</InputLabel>
+          <Select
+            value={selectedPersonalRating || ''}
+            label="My Rating"
+            onChange={(e) => onPersonalRatingChange(e.target.value || undefined)}
+            sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
+          >
+            <MenuItem value=""><em>All Ratings</em></MenuItem>
+            <MenuItem value="rated">Rated Only</MenuItem>
+            <MenuItem value="unrated">Unrated Only</MenuItem>
+            <MenuItem value="4.5">⭐ 4.5 & Above</MenuItem>
+            <MenuItem value="4.0">⭐ 4.0 & Above</MenuItem>
+            <MenuItem value="3.5">⭐ 3.5 & Above</MenuItem>
+            <MenuItem value="3.0">⭐ 3.0 & Above</MenuItem>
+            <MenuItem value="2.5">⭐ 2.5 & Above</MenuItem>
+            <MenuItem value="2.0">⭐ 2.0 & Above</MenuItem>
+            <MenuItem value="1.0">⭐ 1.0 & Above</MenuItem>
+          </Select>
+        </FormControl>
+
+        {/* Sort selector */}
+        <FormControl size="small" sx={{ minWidth: 170 }}>
           <InputLabel sx={{ color: '#94A3B8' }}>Sort By</InputLabel>
           <Select
             value={sortBy}
@@ -365,7 +391,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
           >
             <MenuItem value="added_at">Recently Added</MenuItem>
-            <MenuItem value="rating">Highest Rated</MenuItem>
+            <MenuItem value="my_rating">Highest My Rated</MenuItem>
+            <MenuItem value="tmdb_rating">Highest TMDB Rated</MenuItem>
             <MenuItem value="release_date">Release Date</MenuItem>
             <MenuItem value="title">Movie Title</MenuItem>
             <MenuItem value="runtime">Runtime</MenuItem>

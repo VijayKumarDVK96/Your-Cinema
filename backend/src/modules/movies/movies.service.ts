@@ -62,10 +62,11 @@ export interface MovieFilters {
   runtimeMin?: number;
   runtimeMax?: number;
   ratingMin?: number;
+  personalRating?: string;
   isFavorite?: boolean;
   mediaType?: 'all' | 'movie' | 'tv';
   search?: string;
-  sortBy?: 'added_at' | 'release_date' | 'rating' | 'runtime' | 'title';
+  sortBy?: 'added_at' | 'release_date' | 'rating' | 'my_rating' | 'tmdb_rating' | 'runtime' | 'title';
   sortOrder?: 'asc' | 'desc';
   page?: number;
   limit?: number;
@@ -84,6 +85,7 @@ export class MoviesService {
       runtimeMin,
       runtimeMax,
       ratingMin,
+      personalRating,
       isFavorite,
       mediaType = 'all',
       search,
@@ -113,6 +115,16 @@ export class MoviesService {
       if (ratingMin) {
         conditions.push(`um.personal_rating >= $${pIdx++}`);
         params.push(ratingMin);
+      }
+      if (personalRating) {
+        if (personalRating === 'rated') {
+          conditions.push(`um.personal_rating IS NOT NULL AND um.personal_rating > 0`);
+        } else if (personalRating === 'unrated') {
+          conditions.push(`(um.personal_rating IS NULL OR um.personal_rating = 0)`);
+        } else if (!isNaN(parseFloat(personalRating))) {
+          conditions.push(`um.personal_rating >= $${pIdx++}`);
+          params.push(parseFloat(personalRating));
+        }
       }
       if (language) {
         conditions.push(`COALESCE(m.original_language, '') = $${pIdx++}`);
@@ -226,6 +238,8 @@ export class MoviesService {
         added_at: 'um.added_at',
         release_date: 'm.release_date',
         rating: 'um.personal_rating',
+        my_rating: 'um.personal_rating',
+        tmdb_rating: 'm.vote_average',
         runtime: 'COALESCE(um.custom_runtime, m.runtime)',
         title: 'COALESCE(um.custom_title, m.title)',
       };
@@ -328,6 +342,16 @@ export class MoviesService {
     }
     if (ratingMin) {
       userMoviesList = userMoviesList.filter(um => (um.personal_rating || 0) >= ratingMin);
+    }
+    if (personalRating) {
+      if (personalRating === 'rated') {
+        userMoviesList = userMoviesList.filter(um => um.personal_rating !== null && um.personal_rating !== undefined && Number(um.personal_rating) > 0);
+      } else if (personalRating === 'unrated') {
+        userMoviesList = userMoviesList.filter(um => um.personal_rating === null || um.personal_rating === undefined || Number(um.personal_rating) === 0);
+      } else if (!isNaN(parseFloat(personalRating))) {
+        const minVal = parseFloat(personalRating);
+        userMoviesList = userMoviesList.filter(um => (Number(um.personal_rating) || 0) >= minVal);
+      }
     }
 
     const resolved = userMoviesList.map(um => {
@@ -441,6 +465,35 @@ export class MoviesService {
     if (tagId) {
       filtered = filtered.filter(m => (m.tags || []).some((t: any) => String(t.id) === String(tagId) || (t.name && t.name.toLowerCase() === String(tagId).toLowerCase())));
     }
+
+    filtered.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortBy === 'my_rating' || sortBy === 'rating') {
+        valA = a.personal_rating ?? -1;
+        valB = b.personal_rating ?? -1;
+      } else if (sortBy === 'tmdb_rating') {
+        valA = a.vote_average ?? -1;
+        valB = b.vote_average ?? -1;
+      } else if (sortBy === 'release_date') {
+        valA = a.release_date || '';
+        valB = b.release_date || '';
+      } else if (sortBy === 'title') {
+        valA = (a.title || '').toLowerCase();
+        valB = (b.title || '').toLowerCase();
+      } else if (sortBy === 'runtime') {
+        valA = a.runtime || 0;
+        valB = b.runtime || 0;
+      } else {
+        valA = a.added_at || '';
+        valB = b.added_at || '';
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
 
     return { movies: filtered, total: filtered.length, page, limit };
   }
@@ -695,8 +748,22 @@ export class MoviesService {
     };
   }
 
-  static async addMovie(userId: string, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
+  static async addMovie(
+    userId: string,
+    tmdbId: number,
+    mediaType: 'movie' | 'tv' = 'movie',
+    initialData?: {
+      watch_status?: 'unwatched' | 'watching' | 'watched';
+      personal_rating?: number | null;
+      is_favorite?: boolean;
+    }
+  ) {
     let canonicalMovie: any;
+
+    const initialStatus = initialData?.watch_status || 'unwatched';
+    const initialRating = initialData?.personal_rating ?? null;
+    const initialFav = initialData?.is_favorite ?? false;
+    const initialLastWatched = initialStatus === 'watched' ? new Date().toISOString() : null;
 
     if (isPgConnected) {
       const existingMovie = (await pool.query('SELECT * FROM movies WHERE tmdb_id = $1', [tmdbId])).rows[0];
@@ -734,14 +801,21 @@ export class MoviesService {
       )).rows[0];
 
       if (alreadyInLibrary) {
-        throw new BadRequestError('This item is already in your personal library.');
+        if (initialData) {
+          await this.updateMovie(userId, alreadyInLibrary.id, {
+            watch_status: initialData.watch_status,
+            personal_rating: initialData.personal_rating,
+            is_favorite: initialData.is_favorite,
+          });
+        }
+        return this.getMovieById(userId, alreadyInLibrary.id);
       }
 
       const userMovieId = uuidv4();
       await pool.query(`
-        INSERT INTO user_movies (id, user_id, movie_id, watch_status, media_type, current_season, current_episode)
-        VALUES ($1, $2, $3, 'unwatched', $4, 1, 1)
-      `, [userMovieId, userId, canonicalMovie.id, canonicalMovie.media_type || mediaType]);
+        INSERT INTO user_movies (id, user_id, movie_id, watch_status, personal_rating, is_favorite, last_watched_at, media_type, current_season, current_episode)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 1)
+      `, [userMovieId, userId, canonicalMovie.id, initialStatus, initialRating, initialFav, initialLastWatched, canonicalMovie.media_type || mediaType]);
 
       return this.getMovieById(userId, userMovieId);
     }
@@ -759,7 +833,14 @@ export class MoviesService {
       .find(um => um.user_id === userId && um.movie_id === canonicalMovie.id);
 
     if (duplicate) {
-      throw new BadRequestError('This item is already in your personal library.');
+      if (initialData) {
+        await this.updateMovie(userId, duplicate.id, {
+          watch_status: initialData.watch_status,
+          personal_rating: initialData.personal_rating,
+          is_favorite: initialData.is_favorite,
+        });
+      }
+      return this.getMovieById(userId, duplicate.id);
     }
 
     const newUmId = `um-${Date.now()}`;
@@ -770,9 +851,9 @@ export class MoviesService {
       media_type: canonicalMovie.media_type || mediaType,
       current_season: 1,
       current_episode: 1,
-      watch_status: 'unwatched',
-      personal_rating: null,
-      is_favorite: false,
+      watch_status: initialStatus,
+      personal_rating: initialRating,
+      is_favorite: initialFav,
       personal_notes: null,
       custom_title: null,
       custom_overview: null,
@@ -782,7 +863,7 @@ export class MoviesService {
       custom_director: null,
       is_customized: false,
       playback_position_sec: 0,
-      last_watched_at: null,
+      last_watched_at: initialLastWatched,
       added_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

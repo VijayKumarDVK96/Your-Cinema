@@ -54,6 +54,7 @@ export const MyMoviesPage: React.FC = () => {
   const [language, setLanguage] = useState<string | undefined>(undefined);
   const [ott, setOtt] = useState<string | undefined>(undefined);
   const [tagId, setTagId] = useState<string | undefined>(undefined);
+  const [personalRating, setPersonalRating] = useState<string | undefined>(undefined);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<string>('added_at');
 
@@ -76,7 +77,7 @@ export const MyMoviesPage: React.FC = () => {
 
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, isFavorite, sortBy, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, personalRating, isFavorite, sortBy, search: searchTerm }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
@@ -85,6 +86,7 @@ export const MyMoviesPage: React.FC = () => {
       if (language) params.append('language', language);
       if (ott) params.append('ott', ott);
       if (tagId) params.append('tagId', tagId);
+      if (personalRating) params.append('personalRating', personalRating);
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
       params.append('sortBy', sortBy);
@@ -793,6 +795,8 @@ export const MyMoviesPage: React.FC = () => {
         onLanguageChange={setLanguage}
         selectedTag={tagId}
         onTagChange={setTagId}
+        selectedPersonalRating={personalRating}
+        onPersonalRatingChange={setPersonalRating}
         isFavorite={isFavorite}
         onFavoriteToggle={() => setIsFavorite(!isFavorite)}
         sortBy={sortBy}
@@ -806,6 +810,7 @@ export const MyMoviesPage: React.FC = () => {
           setOtt(undefined);
           setLanguage(undefined);
           setTagId(undefined);
+          setPersonalRating(undefined);
           setIsFavorite(false);
           setSortBy('added_at');
           setSearchParams({});

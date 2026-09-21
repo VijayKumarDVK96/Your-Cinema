@@ -17,6 +17,7 @@ export class MoviesController {
         runtimeMin: req.query.runtimeMin ? parseInt(req.query.runtimeMin as string, 10) : undefined,
         runtimeMax: req.query.runtimeMax ? parseInt(req.query.runtimeMax as string, 10) : undefined,
         ratingMin: req.query.ratingMin ? parseFloat(req.query.ratingMin as string) : undefined,
+        personalRating: req.query.personalRating as string | undefined,
         isFavorite: req.query.isFavorite === 'true' ? true : req.query.isFavorite === 'false' ? false : undefined,
         mediaType: (req.query.mediaType || req.query.media_type) as any,
         search: req.query.search as string,
