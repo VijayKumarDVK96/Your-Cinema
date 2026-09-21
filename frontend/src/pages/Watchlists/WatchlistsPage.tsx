@@ -458,7 +458,20 @@ export const WatchlistsPage: React.FC = () => {
                           }}
                         />
 
-                        {!isSystem && (
+                        {isSystem ? (
+                          <Button
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedListId(wl.id);
+                              setSelectedMovieIds([]);
+                              setMoviesPage(1);
+                            }}
+                            sx={{ ml: 'auto', fontSize: '0.72rem', fontWeight: 700, color: '#38BDF8', minWidth: 'auto', p: 0.5 }}
+                          >
+                            View &rarr;
+                          </Button>
+                        ) : (
                           <Button
                             size="small"
                             onClick={(e) => {

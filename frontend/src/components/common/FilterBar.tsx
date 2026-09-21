@@ -138,15 +138,24 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     ? availableGenres.filter(g => !g.is_predefined)
     : (availableGenres?.custom || []);
 
-  const customGenresList: Genre[] = rawCustom.slice().sort((a, b) => a.name.localeCompare(b.name));
-
   const rawPredefined: Genre[] = Array.isArray(availableGenres)
     ? availableGenres.filter(g => g.is_predefined)
     : (availableGenres?.predefined?.length
         ? availableGenres.predefined
         : GENRE_OPTIONS.map(g => ({ id: g.id, tmdb_id: g.id, name: g.name, is_predefined: true })));
 
-  const predefinedGenresList: Genre[] = rawPredefined.slice().sort((a, b) => a.name.localeCompare(b.name));
+  // Combine predefined and custom genres into a single unified common list sorted alphabetically
+  const allGenresMap = new Map<string, Genre>();
+  [...rawCustom, ...rawPredefined].forEach((g) => {
+    const key = (g.name || '').trim().toLowerCase();
+    if (key && !allGenresMap.has(key)) {
+      allGenresMap.set(key, g);
+    }
+  });
+  const allGenresList: Genre[] = Array.from(allGenresMap.values()).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+
   const sortedTags: Tag[] = (availableTags || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   return (
     <Box
@@ -258,58 +267,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
           >
             <MenuItem value=""><em>All Genres</em></MenuItem>
-
-            {customGenresList.length > 0 && (
-              <ListSubheader
-                sx={{
-                  backgroundColor: '#0F172A',
-                  color: '#38BDF8',
-                  fontWeight: 700,
-                  fontSize: '0.75rem',
-                  letterSpacing: '0.05em',
-                  lineHeight: '32px',
-                }}
-              >
-                ✨ CUSTOM GENRES
-              </ListSubheader>
-            )}
-            {customGenresList.map((g) => (
-              <MenuItem key={g.id} value={String(g.id)}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%' }}>
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: g.color || '#38BDF8',
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#F8FAFC' }}>
-                    {g.name}
-                  </Typography>
-                  {g.movie_count !== undefined && (
-                    <Typography variant="caption" sx={{ color: '#64748B', ml: 'auto' }}>
-                      ({g.movie_count})
-                    </Typography>
-                  )}
-                </Box>
-              </MenuItem>
-            ))}
-
-            <ListSubheader
-              sx={{
-                backgroundColor: '#0F172A',
-                color: '#E5A93C',
-                fontWeight: 700,
-                fontSize: '0.75rem',
-                letterSpacing: '0.05em',
-                lineHeight: '32px',
-              }}
-            >
-              PREDEFINED GENRES
-            </ListSubheader>
-            {predefinedGenresList.map((g) => (
-              <MenuItem key={g.id} value={String(g.tmdb_id || g.id)}>
+            {allGenresList.map((g) => (
+              <MenuItem key={g.id || g.name} value={String(g.tmdb_id || g.id || g.name)}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%' }}>
                   <Box
                     sx={{
@@ -319,7 +278,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                       backgroundColor: g.color || '#E5A93C',
                     }}
                   />
-                  <span>{g.name}</span>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#F8FAFC' }}>
+                    {g.name}
+                  </Typography>
                   {g.movie_count !== undefined && (
                     <Typography variant="caption" sx={{ color: '#64748B', ml: 'auto' }}>
                       ({g.movie_count})

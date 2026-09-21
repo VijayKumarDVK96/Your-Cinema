@@ -150,14 +150,14 @@ export class WatchlistsService {
             m.release_date,
             m.genres,
             0 AS sort_order,
-            um.created_at AS in_list_since
+            um.added_at AS in_list_since
           FROM user_movies um
           JOIN movies m ON um.movie_id = m.id
           WHERE um.user_id = $1
           AND NOT EXISTS (
             SELECT 1 FROM watchlist_movies wm WHERE wm.user_movie_id = um.id
           )
-          ORDER BY um.created_at DESC
+          ORDER BY um.added_at DESC
           LIMIT $2 OFFSET $3
         `;
         const res = await pool.query(mSql, [userId, limit, offset]);
@@ -181,7 +181,7 @@ export class WatchlistsService {
               release_date: m.release_date,
               genres: m.genres || [],
               sort_order: 0,
-              in_list_since: um.created_at,
+              in_list_since: um.added_at,
             };
           });
         movies = allUnassigned.slice(offset, offset + limit);
