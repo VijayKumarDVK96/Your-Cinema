@@ -452,7 +452,7 @@ export class MoviesService {
           const pIcon = (s.provider_icon || '').toLowerCase();
           if (ottLower.includes('sun')) return pName.includes('sun') || pIcon.includes('sun');
           if (ottLower.includes('prime') || ottLower.includes('amazon')) return pName.includes('prime') || pName.includes('amazon') || pIcon.includes('prime');
-          if (ottLower.includes('hotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('disney') || pIcon.includes('hotstar');
+          if (ottLower.includes('hotstar') || ottLower.includes('jiohotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('jiohotstar') || pName.includes('disney') || pIcon.includes('hotstar');
           if (ottLower.includes('apple')) return pName.includes('apple') || pIcon.includes('apple');
           if (ottLower.includes('jio')) return pName.includes('jio') || pIcon.includes('jio');
           if (ottLower.includes('zee')) return pName.includes('zee') || pIcon.includes('zee');
@@ -893,17 +893,28 @@ export class MoviesService {
     custom_runtime: number | null;
     custom_director: string | null;
     trailer_url: string | null;
+    original_language: string | null;
+    language: string | null;
+    custom_language: string | null;
     playback_position_sec: number;
     current_season: number;
     current_episode: number;
   }>) {
-    const { trailer_url, ...umUpdates } = updates;
+    const { trailer_url, original_language, language, custom_language, ...umUpdates } = updates;
+    const langVal = original_language || language || custom_language;
 
     if (isPgConnected) {
       if (trailer_url !== undefined) {
         await pool.query(
           `UPDATE movies SET trailer_url = $1 WHERE id = (SELECT movie_id FROM user_movies WHERE id = $2 AND user_id = $3)`,
           [trailer_url, userMovieId, userId]
+        );
+      }
+
+      if (langVal !== undefined && langVal !== null) {
+        await pool.query(
+          `UPDATE movies SET original_language = $1 WHERE id = (SELECT movie_id FROM user_movies WHERE id = $2 AND user_id = $3)`,
+          [langVal, userMovieId, userId]
         );
       }
 
@@ -949,10 +960,11 @@ export class MoviesService {
     const um = inMemoryDb.userMovies.get(userMovieId);
     if (!um || um.user_id !== userId) throw new NotFoundError('Movie not found in your library.');
 
-    if (trailer_url !== undefined) {
+    if (trailer_url !== undefined || langVal !== undefined) {
       const m = inMemoryDb.movies.get(um.movie_id);
       if (m) {
-        m.trailer_url = trailer_url;
+        if (trailer_url !== undefined) m.trailer_url = trailer_url;
+        if (langVal !== undefined && langVal !== null) m.original_language = langVal;
         inMemoryDb.movies.set(m.id, m);
       }
     }
@@ -1115,18 +1127,20 @@ export class MoviesService {
     return this.updateMovie(userId, userMovieId, updates);
   }
 
-  static async bulkUpdate(userId: string, data: {
-    movieIds: string[];
-    action: 'mark_watched' | 'mark_unwatched' | 'favorite' | 'unfavorite' | 'delete' | 'add_tag' | 'remove_tag' | 'add_genre' | 'remove_genre' | 'add_to_watchlist' | 'edit_tags_genres';
+    action: 'mark_watched' | 'mark_unwatched' | 'favorite' | 'unfavorite' | 'delete' | 'add_tag' | 'remove_tag' | 'add_genre' | 'remove_genre' | 'add_to_watchlist' | 'edit_tags_genres' | 'edit_language';
     tagId?: string;
     tagIds?: string[];
     genreId?: string;
     genreIds?: string[];
+    language?: string;
+    original_language?: string;
     watchlistId?: string;
     newWatchlistName?: string;
     mode?: 'add' | 'remove';
   }) {
     const { movieIds, action, tagId, tagIds, genreId, genreIds, watchlistId, newWatchlistName, mode = 'add' } = data;
+    const lang = data.language || data.original_language;
+
     if (!movieIds || movieIds.length === 0) {
       throw new BadRequestError('No movies selected for bulk action.');
     }
@@ -1150,6 +1164,10 @@ export class MoviesService {
     } else if (action === 'unfavorite') {
       for (const id of movieIds) {
         await this.updateMovie(userId, id, { is_favorite: false });
+      }
+    } else if (action === 'edit_language' && lang) {
+      for (const id of movieIds) {
+        await this.updateMovie(userId, id, { original_language: lang });
       }
     } else if (action === 'add_tag' && tagId) {
       for (const id of movieIds) {

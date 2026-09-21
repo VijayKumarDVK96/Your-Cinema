@@ -22,6 +22,9 @@ import {
   IconButton,
   Rating,
   Slider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
@@ -36,6 +39,7 @@ import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import StarIcon from '@mui/icons-material/Star';
 import TuneIcon from '@mui/icons-material/Tune';
+import CloseIcon from '@mui/icons-material/Close';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { OttBadge } from '../../utils/ottProviders.js';
@@ -70,7 +74,7 @@ export const ImportCenterPage: React.FC = () => {
 
   // Movie & OTT Merged Import State
   const [inputText, setInputText] = useState(
-    'Interstellar | 4.5 | watched | fav | Sci-Fi | Prime Video | https://www.primevideo.com/detail/0STV48F47G\nVikram | 4.0 | watched | Disney+ Hotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nThe Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nArrival | 5.0 | fav | Drama\nOppenheimer'
+    'Interstellar | 4.5 | watched | fav | Sci-Fi | Prime Video | https://www.primevideo.com/detail/0STV48F47G\nVikram | 4.0 | watched | JioHotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nThe Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nArrival | 5.0 | fav | Drama\nOppenheimer'
   );
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState<MatchItem[]>([]);
@@ -223,6 +227,57 @@ export const ImportCenterPage: React.FC = () => {
     setSelectedIndices((prev) => new Set(prev).add(index));
   };
 
+  // Row Change Movie Search Modal State
+  const [changeRowIndex, setChangeRowIndex] = useState<number | null>(null);
+  const [changeRowSearchTerm, setChangeRowSearchTerm] = useState('');
+  const [changeRowResults, setChangeRowResults] = useState<any[]>([]);
+  const [changeRowLoading, setChangeRowLoading] = useState(false);
+
+  const handleOpenChangeRowModal = (idx: number) => {
+    const item = matches[idx];
+    if (!item) return;
+    setChangeRowIndex(idx);
+    const initialQuery = item.searchTitle || item.inputTitle.split('|')[0].trim();
+    setChangeRowSearchTerm(initialQuery);
+    performRowSearch(initialQuery);
+  };
+
+  const performRowSearch = async (query: string) => {
+    if (!query.trim()) return;
+    setChangeRowLoading(true);
+    try {
+      const res = await api.get(`/tmdb/search?query=${encodeURIComponent(query.trim())}`);
+      const list = res.data?.data?.results || [];
+      setChangeRowResults(list);
+    } catch {
+      setChangeRowResults([]);
+    } finally {
+      setChangeRowLoading(false);
+    }
+  };
+
+  const handleSelectMovieForChangeRow = (movie: any) => {
+    if (changeRowIndex === null) return;
+    const item = matches[changeRowIndex];
+    if (!item) return;
+
+    const existingCandidates = item.candidates || [];
+    const hasCand = existingCandidates.some(c => c.id === movie.id);
+    const updatedCandidates = hasCand ? existingCandidates : [movie, ...existingCandidates];
+
+    const updatedMatches = [...matches];
+    updatedMatches[changeRowIndex] = {
+      ...item,
+      selectedMovie: movie,
+      status: 'matched',
+      candidates: updatedCandidates,
+    };
+
+    setMatches(updatedMatches);
+    setSelectedIndices(prev => new Set(prev).add(changeRowIndex));
+    setChangeRowIndex(null);
+  };
+
   const handleCreateGenre = async () => {
     const name = newGenreNameInput.trim();
     if (!name) return;
@@ -334,7 +389,7 @@ export const ImportCenterPage: React.FC = () => {
           fullWidth
           multiline
           rows={5}
-          placeholder={`Interstellar | 4.5 | watched | fav | Sci-Fi | Prime Video | https://www.primevideo.com/detail/0STV48F47G\nVikram | 4.0 | watched | Disney+ Hotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nThe Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nArrival | 5.0 | fav | Drama`}
+          placeholder={`Interstellar | 4.5 | watched | fav | Sci-Fi | Prime Video | https://www.primevideo.com/detail/0STV48F47G\nVikram | 4.0 | watched | JioHotstar | https://www.hotstar.com/in/movies/vikram/1260105307\nThe Greatest of All Time | Netflix | https://www.netflix.com/title/81234567\nArrival | 5.0 | fav | Drama`}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           sx={{ mb: 2.5 }}
@@ -708,15 +763,25 @@ export const ImportCenterPage: React.FC = () => {
                             component="img"
                             src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
                             alt={m.title}
-                            sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover' }}
+                            sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
                           />
-                          <Box>
+                          <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                             <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{m.title}</Typography>
                             <Typography variant="caption" sx={{ color: '#64748B' }}>{m.release_date ? m.release_date.substring(0, 4) : 'Unknown Year'}</Typography>
                           </Box>
+                          <Tooltip title="Search TMDB to choose a different movie for this row">
+                            <IconButton size="small" onClick={() => handleOpenChangeRowModal(idx)} sx={{ color: '#38BDF8', p: 0.5 }}>
+                              <SearchIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
                         </Box>
                       ) : (
-                        <Typography variant="caption" sx={{ color: '#EF4444' }}>No confident match found</Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="caption" sx={{ color: '#EF4444' }}>No confident match found</Typography>
+                          <Button size="small" onClick={() => handleOpenChangeRowModal(idx)} sx={{ color: '#38BDF8', fontSize: '0.75rem', fontWeight: 700 }}>
+                            Search TMDB
+                          </Button>
+                        </Box>
                       )}
                     </TableCell>
 
@@ -852,21 +917,37 @@ export const ImportCenterPage: React.FC = () => {
                     </TableCell>
 
                     <TableCell>
-                      {item.status === 'ambiguous' && item.candidates.length > 1 ? (
+                      {item.candidates && item.candidates.length > 0 ? (
                         <Select
                           size="small"
                           value={m?.id || ''}
-                          onChange={(e) => handleDisambiguate(idx, Number(e.target.value))}
-                          sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 140 }}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__search__') {
+                              handleOpenChangeRowModal(idx);
+                            } else {
+                              handleDisambiguate(idx, Number(val));
+                            }
+                          }}
+                          sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 160, backgroundColor: '#0B0F19' }}
                         >
                           {item.candidates.map((cand) => (
-                            <MenuItem key={cand.id} value={cand.id}>{cand.title} ({cand.release_date?.substring(0, 4) || '?'})</MenuItem>
+                            <MenuItem key={cand.id} value={cand.id}>
+                              {cand.title} ({cand.release_date ? cand.release_date.substring(0, 4) : '?'})
+                            </MenuItem>
                           ))}
+                          <MenuItem value="__search__" sx={{ color: '#38BDF8', fontWeight: 700 }}>
+                            🔍 Search / Change Movie...
+                          </MenuItem>
                         </Select>
-                      ) : item.status === 'matched' ? (
-                        <Chip label="Matched" size="small" sx={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#10B981', fontWeight: 600 }} />
                       ) : (
-                        <Chip label="Not Found" size="small" sx={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#EF4444' }} />
+                        <Button
+                          size="small"
+                          onClick={() => handleOpenChangeRowModal(idx)}
+                          sx={{ color: '#38BDF8', fontSize: '0.75rem', fontWeight: 700 }}
+                        >
+                          🔍 Search TMDB
+                        </Button>
                       )}
                     </TableCell>
                     <TableCell sx={{ color: item.confidence >= 80 ? '#10B981' : '#F59E0B', fontWeight: 700 }}>
@@ -879,6 +960,119 @@ export const ImportCenterPage: React.FC = () => {
           </Table>
         </Paper>
       )}
+
+      {/* Change Movie Dialog for Row */}
+      <Dialog
+        open={changeRowIndex !== null}
+        onClose={() => setChangeRowIndex(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0F172A',
+            color: '#F8FAFC',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: 3,
+          },
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            Change Movie Match
+          </Typography>
+          <IconButton onClick={() => setChangeRowIndex(null)} sx={{ color: '#94A3B8' }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          {changeRowIndex !== null && matches[changeRowIndex] && (
+            <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 2 }}>
+              Input Line: <code>{matches[changeRowIndex].inputTitle}</code>
+            </Typography>
+          )}
+
+          <Box
+            component="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              performRowSearch(changeRowSearchTerm);
+            }}
+            sx={{ display: 'flex', gap: 1, mb: 2.5 }}
+          >
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search title, release year, TMDB ID or paste TMDB URL..."
+              value={changeRowSearchTerm}
+              onChange={(e) => setChangeRowSearchTerm(e.target.value)}
+              sx={{ backgroundColor: '#0B0F19' }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={changeRowLoading}
+              startIcon={changeRowLoading ? <CircularProgress size={16} color="inherit" /> : <SearchIcon />}
+              sx={{ backgroundColor: '#38BDF8', color: '#000', fontWeight: 700, '&:hover': { backgroundColor: '#7DD3FC' } }}
+            >
+              Search
+            </Button>
+          </Box>
+
+          {changeRowLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} sx={{ color: '#38BDF8' }} />
+            </Box>
+          ) : changeRowResults.length > 0 ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: 380, overflowY: 'auto', pr: 0.5 }}>
+              {changeRowResults.map((m) => (
+                <Paper
+                  key={m.id}
+                  sx={{
+                    p: 1.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 1.5,
+                    backgroundColor: '#111827',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: 2,
+                    '&:hover': { borderColor: '#38BDF8' },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, overflow: 'hidden' }}>
+                    <Box
+                      component="img"
+                      src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
+                      alt={m.title}
+                      sx={{ width: 42, height: 60, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
+                    />
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {m.title} ({m.release_date ? m.release_date.substring(0, 4) : 'TBD'})
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#94A3B8', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {m.overview || 'No overview available.'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleSelectMovieForChangeRow(m)}
+                    sx={{ color: '#38BDF8', borderColor: '#38BDF8', fontWeight: 700, flexShrink: 0 }}
+                  >
+                    Select
+                  </Button>
+                </Paper>
+              ))}
+            </Box>
+          ) : (
+            <Typography variant="body2" sx={{ color: '#64748B', textAlign: 'center', py: 4 }}>
+              No TMDB matches found. Try searching with year (e.g. "Dada 2023") or TMDB ID / link.
+            </Typography>
+          )}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 };

@@ -42,7 +42,7 @@ export function detectProviderFromUrl(url: string, fallbackName: string): string
   const u = (url || '').toLowerCase();
   if (u.includes('primevideo.com') || u.includes('amazon.com')) return 'Prime Video';
   if (u.includes('netflix.com')) return 'Netflix';
-  if (u.includes('hotstar.com') || u.includes('disneyplus.com')) return 'Disney+ Hotstar';
+  if (u.includes('hotstar.com') || u.includes('jiohotstar.com') || u.includes('disneyplus.com')) return 'JioHotstar';
   if (u.includes('sunnxt.com')) return 'Sun NXT';
   if (u.includes('zee5.com')) return 'Zee5';
   if (u.includes('jiocinema.com')) return 'JioCinema';

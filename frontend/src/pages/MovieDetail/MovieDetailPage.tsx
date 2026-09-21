@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -19,6 +19,9 @@ import {
   DialogActions,
   TextField,
   LinearProgress,
+  Tabs,
+  Tab,
+  InputAdornment,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -50,6 +53,13 @@ import TvIcon from '@mui/icons-material/Tv';
 import LiveTvIcon from '@mui/icons-material/LiveTv';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import GroupIcon from '@mui/icons-material/Group';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
@@ -78,6 +88,22 @@ export const MovieDetailPage: React.FC = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
+  const [mainTab, setMainTab] = useState<'overview' | 'cast_crew'>('overview');
+
+  // Cast & Crew Modal & Carousel States
+  const [castCrewModalOpen, setCastCrewModalOpen] = useState(false);
+  const [modalSearch, setModalSearch] = useState('');
+  const [modalFilter, setModalFilter] = useState<'all' | 'cast' | 'crew'>('all');
+
+  const castCarouselRef = useRef<HTMLDivElement>(null);
+  const crewCarouselRef = useRef<HTMLDivElement>(null);
+
+  const scrollCarousel = (ref: React.RefObject<HTMLDivElement>, direction: 'left' | 'right') => {
+    if (ref.current) {
+      const scrollAmount = direction === 'left' ? -420 : 420;
+      ref.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Custom Genre Management State
   const [genreDialogOpen, setGenreDialogOpen] = useState(false);
@@ -269,7 +295,7 @@ export const MovieDetailPage: React.FC = () => {
     } else if (tLower.includes('interstellar') || tLower.includes('arrival')) {
       fallbackOtt = { name: 'Prime Video', icon: 'prime', url: `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(movie.title)}` };
     } else if (tLower.includes('vikram')) {
-      fallbackOtt = { name: 'Disney+ Hotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
+      fallbackOtt = { name: 'JioHotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
     } else if (tLower.includes('dune') || tLower.includes('oppenheimer')) {
       fallbackOtt = { name: 'JioCinema', icon: 'jiocinema', url: `https://www.jiocinema.com/search/${encodeURIComponent(movie.title)}` };
     }
@@ -373,7 +399,6 @@ export const MovieDetailPage: React.FC = () => {
           borderRadius: 3.5,
           overflow: 'hidden',
           backgroundColor: '#0A0E18',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
           minHeight: '440px',
           display: 'flex',
           alignItems: 'flex-end',
@@ -854,197 +879,522 @@ export const MovieDetailPage: React.FC = () => {
             </Paper>
           )}
 
-          <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-            <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700, mb: 1.5 }}>
-              Synopsis
-            </Typography>
-            <Typography variant="body1" sx={{ color: '#94A3B8', lineHeight: 1.7, mb: 3 }}>
-              {movie.overview || 'No synopsis recorded.'}
-            </Typography>
-
-            {movie.personal_notes && (
-              <Box sx={{ p: 2, borderRadius: 2, backgroundColor: 'rgba(229, 169, 60, 0.08)', borderLeft: '4px solid #E5A93C' }}>
-                <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 0.5 }}>
-                  My Personal Note
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#F8FAFC', fontStyle: 'italic' }}>
-                  "{movie.personal_notes}"
-                </Typography>
-              </Box>
-            )}
+          {/* Main Content Tabs: Overview | Cast & Crew */}
+          <Paper
+            sx={{
+              backgroundColor: '#0B0F19',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 2.5,
+              mb: 3,
+              p: 0.5,
+            }}
+          >
+            <Tabs
+              value={mainTab}
+              onChange={(_, val) => setMainTab(val)}
+              textColor="inherit"
+              sx={{
+                '& .MuiTabs-indicator': {
+                  backgroundColor: '#E5A93C',
+                  height: 3,
+                  borderRadius: '3px 3px 0 0',
+                },
+                '& .MuiTab-root': {
+                  color: '#94A3B8',
+                  fontWeight: 700,
+                  fontSize: '0.92rem',
+                  textTransform: 'none',
+                  minHeight: 48,
+                  px: 3,
+                  '&.Mui-selected': {
+                    color: '#F8FAFC',
+                  },
+                },
+              }}
+            >
+              <Tab
+                value="overview"
+                label="Overview"
+                icon={<InfoOutlinedIcon sx={{ fontSize: 18 }} />}
+                iconPosition="start"
+              />
+              <Tab
+                value="cast_crew"
+                label={`Cast & Crew (${(movie.cast_members?.length || 0) + (movie.crew_members?.length || 0)})`}
+                icon={<GroupIcon sx={{ fontSize: 18 }} />}
+                iconPosition="start"
+              />
+            </Tabs>
           </Paper>
 
-          {/* AI / Recommendation Insight */}
-          <Paper sx={{ p: 3, mt: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-              <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <AutoAwesomeIcon sx={{ color: '#38BDF8' }} /> Why This Movie in Your Cinema?
-              </Typography>
-              {!aiExplanation && (
-                <Button size="small" color="secondary" onClick={handleExplainAI} disabled={explaining}>
-                  {explaining ? 'Analyzing...' : 'Generate AI Insight'}
-                </Button>
+          {/* TAB 1: OVERVIEW */}
+          {mainTab === 'overview' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {/* Synopsis */}
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700, mb: 1.5 }}>
+                  Synopsis
+                </Typography>
+                <Typography variant="body1" sx={{ color: '#94A3B8', lineHeight: 1.7, mb: movie.personal_notes ? 3 : 0 }}>
+                  {movie.overview || 'No synopsis recorded.'}
+                </Typography>
+
+                {movie.personal_notes && (
+                  <Box sx={{ p: 2, borderRadius: 2, backgroundColor: 'rgba(229, 169, 60, 0.08)', borderLeft: '4px solid #E5A93C' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#E5A93C', fontWeight: 700, mb: 0.5 }}>
+                      My Personal Note
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#F8FAFC', fontStyle: 'italic' }}>
+                      "{movie.personal_notes}"
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* AI / Recommendation Insight */}
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                  <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AutoAwesomeIcon sx={{ color: '#38BDF8' }} /> Why This Movie in Your Cinema?
+                  </Typography>
+                  {!aiExplanation && (
+                    <Button size="small" color="secondary" onClick={handleExplainAI} disabled={explaining}>
+                      {explaining ? 'Analyzing...' : 'Generate AI Insight'}
+                    </Button>
+                  )}
+                </Box>
+                <Typography variant="body2" sx={{ color: '#94A3B8', lineHeight: 1.6 }}>
+                  {aiExplanation ||
+                    `"${movie.title}" was selected based on your affinity for ${
+                      (movie.genres || []).map((g: any) => g.name).join(', ') || 'quality storytelling'
+                    } and films with similar narrative craftsmanship in your collection.`}
+                </Typography>
+              </Paper>
+
+              {/* Seasons & Episodes Breakdown for TV Series */}
+              {movie.media_type === 'tv' && movie.seasons && movie.seasons.length > 0 && (
+                <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TvIcon sx={{ color: '#A78BFA' }} />
+                      <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                        Seasons & Episodes ({movie.seasons.length})
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                      {movie.number_of_episodes ? `${movie.number_of_episodes} Total Episodes` : ''}
+                    </Typography>
+                  </Box>
+
+                  <Grid container spacing={2}>
+                    {movie.seasons.map((s: any) => {
+                      const isCurrent = (movie.current_season || 1) === s.season_number;
+                      const seasonPoster = s.poster_path
+                        ? (s.poster_path.startsWith('http') ? s.poster_path : `https://image.tmdb.org/t/p/w185${s.poster_path}`)
+                        : posterUrl;
+                      return (
+                        <Grid item xs={12} sm={6} key={s.id || s.season_number}>
+                          <Box
+                            sx={{
+                              p: 1.8,
+                              borderRadius: 2.5,
+                              backgroundColor: isCurrent ? 'rgba(124, 58, 237, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                              border: isCurrent ? '1px solid rgba(167, 139, 250, 0.45)' : '1px solid rgba(255, 255, 255, 0.06)',
+                              display: 'flex',
+                              gap: 2,
+                              alignItems: 'center',
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                borderColor: 'rgba(167, 139, 250, 0.3)',
+                              },
+                            }}
+                          >
+                            <Box
+                              component="img"
+                              src={seasonPoster}
+                              alt={s.name}
+                              sx={{
+                                width: 54,
+                                height: 80,
+                                borderRadius: 1.5,
+                                objectFit: 'cover',
+                                backgroundColor: '#1E293B',
+                                flexShrink: 0,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                              }}
+                            />
+                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                                <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {s.name}
+                                </Typography>
+                                {isCurrent && (
+                                  <Chip label="Current" size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, backgroundColor: '#7C3AED', color: '#FFF' }} />
+                                )}
+                              </Box>
+                              <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mt: 0.5 }}>
+                                {s.episode_count || 0} Episodes • {s.air_date ? s.air_date.substring(0, 4) : 'TBD'}
+                              </Typography>
+                              {isCurrent && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                                  <Typography variant="caption" sx={{ color: '#E5A93C', fontWeight: 700 }}>
+                                    Progress: Ep {movie.current_episode || 1}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Box>
+                          </Box>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                </Paper>
               )}
             </Box>
-            <Typography variant="body2" sx={{ color: '#94A3B8', lineHeight: 1.6 }}>
-              {aiExplanation ||
-                `"${movie.title}" was selected based on your affinity for ${
-                  (movie.genres || []).map((g: any) => g.name).join(', ') || 'quality storytelling'
-                } and films with similar narrative craftsmanship in your collection.`}
-            </Typography>
-          </Paper>
-
-          {/* Cast Members Section */}
-          {movie.cast_members && movie.cast_members.length > 0 && (
-            <Paper sx={{ p: 3, mt: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <PeopleAltIcon sx={{ color: '#E5A93C' }} />
-                <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-                  Top Billed Cast ({movie.cast_members.length})
-                </Typography>
-              </Box>
-
-              <Grid container spacing={2}>
-                {movie.cast_members.map((c: any, idx: number) => {
-                  const photoUrl = c.profile_path
-                    ? (c.profile_path.startsWith('http') ? c.profile_path : `https://image.tmdb.org/t/p/w185${c.profile_path}`)
-                    : null;
-                  return (
-                    <Grid item xs={6} sm={4} md={3} key={idx}>
-                      <Box
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 2,
-                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid rgba(255, 255, 255, 0.06)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1.5,
-                          transition: 'all 0.2s ease',
-                          '&:hover': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                            borderColor: 'rgba(229, 169, 60, 0.3)',
-                            transform: 'translateY(-2px)',
-                          },
-                        }}
-                      >
-                        <Avatar
-                          src={photoUrl || undefined}
-                          alt={c.name}
-                          sx={{
-                            width: 44,
-                            height: 44,
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                            backgroundColor: '#1E293B',
-                            color: '#E5A93C',
-                            fontWeight: 700,
-                            fontSize: '0.9rem',
-                          }}
-                        >
-                          {c.name.charAt(0)}
-                        </Avatar>
-                        <Box sx={{ minWidth: 0, overflow: 'hidden' }}>
-                          <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                            {c.name}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                            {c.character || 'Cast'}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </Paper>
           )}
 
-          {/* Key Technicians & Crew Section */}
-          {movie.crew_members && movie.crew_members.length > 0 && (
-            <Paper sx={{ p: 3, mt: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <EngineeringIcon sx={{ color: '#38BDF8' }} />
-                <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
-                  Key Technicians & Crew
-                </Typography>
-              </Box>
+          {/* TAB 2: CAST & CREW */}
+          {mainTab === 'cast_crew' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {/* TOP BILLED CAST CAROUSEL */}
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PeopleAltIcon sx={{ color: '#E5A93C' }} />
+                    <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                      Top Billed Cast
+                    </Typography>
+                    {movie.cast_members && (
+                      <Chip label={movie.cast_members.length} size="small" sx={{ backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C', fontWeight: 700, height: 22 }} />
+                    )}
+                  </Box>
 
-              <Grid container spacing={2}>
-                {movie.crew_members.map((member: any, idx: number) => {
-                  const job = member.job || 'Crew';
-                  let icon = <EngineeringIcon sx={{ fontSize: 20, color: '#38BDF8' }} />;
-                  let roleBadgeColor = '#38BDF8';
-                  let roleBgColor = 'rgba(56, 189, 248, 0.12)';
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => scrollCarousel(castCarouselRef, 'left')}
+                      sx={{ color: '#94A3B8', border: '1px solid rgba(255, 255, 255, 0.1)', '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.08)' } }}
+                    >
+                      <ChevronLeftIcon />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => scrollCarousel(castCarouselRef, 'right')}
+                      sx={{ color: '#94A3B8', border: '1px solid rgba(255, 255, 255, 0.1)', '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.08)' } }}
+                    >
+                      <ChevronRightIcon />
+                    </IconButton>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<GridOnIcon />}
+                      onClick={() => {
+                        setModalFilter('cast');
+                        setCastCrewModalOpen(true);
+                      }}
+                      sx={{
+                        borderColor: 'rgba(229, 169, 60, 0.4)',
+                        color: '#E5A93C',
+                        fontWeight: 700,
+                        ml: 0.5,
+                        textTransform: 'none',
+                        '&:hover': { backgroundColor: 'rgba(229, 169, 60, 0.12)', borderColor: '#E5A93C' },
+                      }}
+                    >
+                      View All
+                    </Button>
+                  </Box>
+                </Box>
 
-                  if (job.includes('Director') && !job.includes('Art') && !job.includes('Photography')) {
-                    icon = <VideocamIcon sx={{ fontSize: 20, color: '#E5A93C' }} />;
-                    roleBadgeColor = '#E5A93C';
-                    roleBgColor = 'rgba(229, 169, 60, 0.15)';
-                  } else if (job.includes('Music') || job.includes('Composer') || member.department === 'Sound') {
-                    icon = <MusicNoteIcon sx={{ fontSize: 20, color: '#A855F7' }} />;
-                    roleBadgeColor = '#A855F7';
-                    roleBgColor = 'rgba(168, 85, 247, 0.15)';
-                  } else if (job.includes('Photography') || job.includes('Camera') || member.department === 'Camera') {
-                    icon = <CameraAltIcon sx={{ fontSize: 20, color: '#06B6D4' }} />;
-                    roleBadgeColor = '#06B6D4';
-                    roleBgColor = 'rgba(6, 182, 212, 0.15)';
-                  } else if (job.includes('Editor')) {
-                    icon = <ContentCutIcon sx={{ fontSize: 20, color: '#10B981' }} />;
-                    roleBadgeColor = '#10B981';
-                    roleBgColor = 'rgba(16, 185, 129, 0.15)';
-                  } else if (job.includes('Writer') || job.includes('Screenplay') || job.includes('Story')) {
-                    icon = <CreateIcon sx={{ fontSize: 20, color: '#F59E0B' }} />;
-                    roleBadgeColor = '#F59E0B';
-                    roleBgColor = 'rgba(245, 158, 11, 0.15)';
-                  } else if (job.includes('Producer')) {
-                    icon = <BusinessCenterIcon sx={{ fontSize: 20, color: '#EC4899' }} />;
-                    roleBadgeColor = '#EC4899';
-                    roleBgColor = 'rgba(236, 72, 153, 0.15)';
-                  } else if (job.includes('Stunt')) {
-                    icon = <SportsMartialArtsIcon sx={{ fontSize: 20, color: '#EF4444' }} />;
-                    roleBadgeColor = '#EF4444';
-                    roleBgColor = 'rgba(239, 68, 68, 0.15)';
-                  }
-
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={idx}>
-                      <Box
-                        sx={{
-                          p: 1.8,
-                          borderRadius: 2,
-                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid rgba(255, 255, 255, 0.06)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1.5,
-                        }}
-                      >
-                        <Box
+                {movie.cast_members && movie.cast_members.length > 0 ? (
+                  <Box
+                    ref={castCarouselRef}
+                    sx={{
+                      display: 'flex',
+                      gap: 2,
+                      overflowX: 'auto',
+                      scrollBehavior: 'smooth',
+                      pb: 1.5,
+                      pt: 0.5,
+                      px: 0.5,
+                      '&::-webkit-scrollbar': { height: 6 },
+                      '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(255, 255, 255, 0.15)', borderRadius: 3 },
+                    }}
+                  >
+                    {movie.cast_members.map((c: any, idx: number) => {
+                      const photoUrl = c.profile_path
+                        ? (c.profile_path.startsWith('http') ? c.profile_path : `https://image.tmdb.org/t/p/w185${c.profile_path}`)
+                        : null;
+                      return (
+                        <Paper
+                          key={idx}
+                          elevation={0}
                           sx={{
-                            p: 1,
-                            borderRadius: 1.5,
-                            backgroundColor: roleBgColor,
+                            width: 155,
+                            minWidth: 155,
+                            borderRadius: '14px',
+                            overflow: 'hidden',
+                            backgroundColor: '#0F172A',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
+                            flexDirection: 'column',
+                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              transform: 'translateY(-6px)',
+                              boxShadow: '0 12px 24px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(229, 169, 60, 0.4)',
+                              borderColor: 'rgba(229, 169, 60, 0.5)',
+                              '& .cast-image': { transform: 'scale(1.06)' },
+                            },
+                          }}
+                          onClick={() => {
+                            setModalFilter('cast');
+                            setCastCrewModalOpen(true);
                           }}
                         >
-                          {icon}
-                        </Box>
-                        <Box sx={{ minWidth: 0, overflow: 'hidden' }}>
-                          <Typography variant="caption" sx={{ color: roleBadgeColor, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block' }}>
-                            {job}
-                          </Typography>
-                          <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                            {member.name}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </Paper>
+                          <Box sx={{ width: '100%', height: 210, overflow: 'hidden', position: 'relative', backgroundColor: '#1E293B' }}>
+                            {photoUrl ? (
+                              <Box
+                                component="img"
+                                className="cast-image"
+                                src={photoUrl}
+                                alt={c.name}
+                                sx={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
+                              />
+                            ) : (
+                              <Box sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94A3B8' }}>
+                                <Avatar sx={{ width: 52, height: 52, backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C', fontWeight: 800, fontSize: '1.2rem' }}>
+                                  {c.name.charAt(0)}
+                                </Avatar>
+                              </Box>
+                            )}
+                          </Box>
+                          <Box sx={{ p: 1.5, flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <Typography
+                              variant="subtitle2"
+                              sx={{
+                                color: '#F8FAFC',
+                                fontWeight: 700,
+                                fontSize: '0.875rem',
+                                lineHeight: 1.25,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                mb: 0.5,
+                              }}
+                            >
+                              {c.name}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                color: '#94A3B8',
+                                fontSize: '0.75rem',
+                                lineHeight: 1.2,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {c.character || 'Cast'}
+                            </Typography>
+                          </Box>
+                        </Paper>
+                      );
+                    })}
+                  </Box>
+                ) : (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <PeopleAltIcon sx={{ fontSize: 40, color: '#334155', mb: 1 }} />
+                    <Typography variant="body2" sx={{ color: '#64748B' }}>
+                      No cast information recorded for this title.
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* KEY TECHNICIANS & CREW CAROUSEL */}
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <EngineeringIcon sx={{ color: '#38BDF8' }} />
+                    <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                      Key Technicians & Crew
+                    </Typography>
+                    {movie.crew_members && (
+                      <Chip label={movie.crew_members.length} size="small" sx={{ backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700, height: 22 }} />
+                    )}
+                  </Box>
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => scrollCarousel(crewCarouselRef, 'left')}
+                      sx={{ color: '#94A3B8', border: '1px solid rgba(255, 255, 255, 0.1)', '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.08)' } }}
+                    >
+                      <ChevronLeftIcon />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => scrollCarousel(crewCarouselRef, 'right')}
+                      sx={{ color: '#94A3B8', border: '1px solid rgba(255, 255, 255, 0.1)', '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.08)' } }}
+                    >
+                      <ChevronRightIcon />
+                    </IconButton>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<GridOnIcon />}
+                      onClick={() => {
+                        setModalFilter('crew');
+                        setCastCrewModalOpen(true);
+                      }}
+                      sx={{
+                        borderColor: 'rgba(56, 189, 248, 0.4)',
+                        color: '#38BDF8',
+                        fontWeight: 700,
+                        ml: 0.5,
+                        textTransform: 'none',
+                        '&:hover': { backgroundColor: 'rgba(56, 189, 248, 0.12)', borderColor: '#38BDF8' },
+                      }}
+                    >
+                      View All
+                    </Button>
+                  </Box>
+                </Box>
+
+                {movie.crew_members && movie.crew_members.length > 0 ? (
+                  <Box
+                    ref={crewCarouselRef}
+                    sx={{
+                      display: 'flex',
+                      gap: 2,
+                      overflowX: 'auto',
+                      scrollBehavior: 'smooth',
+                      pb: 1.5,
+                      pt: 0.5,
+                      px: 0.5,
+                      '&::-webkit-scrollbar': { height: 6 },
+                      '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(255, 255, 255, 0.15)', borderRadius: 3 },
+                    }}
+                  >
+                    {movie.crew_members.map((member: any, idx: number) => {
+                      const job = member.job || 'Crew';
+                      let icon = <EngineeringIcon sx={{ fontSize: 18, color: '#38BDF8' }} />;
+                      let roleBadgeColor = '#38BDF8';
+                      let roleBgColor = 'rgba(56, 189, 248, 0.15)';
+
+                      if (job.includes('Director') && !job.includes('Art') && !job.includes('Photography')) {
+                        icon = <VideocamIcon sx={{ fontSize: 18, color: '#E5A93C' }} />;
+                        roleBadgeColor = '#E5A93C';
+                        roleBgColor = 'rgba(229, 169, 60, 0.18)';
+                      } else if (job.includes('Music') || job.includes('Composer') || member.department === 'Sound') {
+                        icon = <MusicNoteIcon sx={{ fontSize: 18, color: '#A855F7' }} />;
+                        roleBadgeColor = '#A855F7';
+                        roleBgColor = 'rgba(168, 85, 247, 0.18)';
+                      } else if (job.includes('Photography') || job.includes('Camera') || member.department === 'Camera') {
+                        icon = <CameraAltIcon sx={{ fontSize: 18, color: '#06B6D4' }} />;
+                        roleBadgeColor = '#06B6D4';
+                        roleBgColor = 'rgba(6, 182, 212, 0.18)';
+                      } else if (job.includes('Editor')) {
+                        icon = <ContentCutIcon sx={{ fontSize: 18, color: '#10B981' }} />;
+                        roleBadgeColor = '#10B981';
+                        roleBgColor = 'rgba(16, 185, 129, 0.18)';
+                      } else if (job.includes('Writer') || job.includes('Screenplay') || job.includes('Story')) {
+                        icon = <CreateIcon sx={{ fontSize: 18, color: '#F59E0B' }} />;
+                        roleBadgeColor = '#F59E0B';
+                        roleBgColor = 'rgba(245, 158, 11, 0.18)';
+                      } else if (job.includes('Producer')) {
+                        icon = <BusinessCenterIcon sx={{ fontSize: 18, color: '#EC4899' }} />;
+                        roleBadgeColor = '#EC4899';
+                        roleBgColor = 'rgba(236, 72, 153, 0.18)';
+                      } else if (job.includes('Stunt')) {
+                        icon = <SportsMartialArtsIcon sx={{ fontSize: 18, color: '#EF4444' }} />;
+                        roleBadgeColor = '#EF4444';
+                        roleBgColor = 'rgba(239, 68, 68, 0.18)';
+                      }
+
+                      return (
+                        <Paper
+                          key={idx}
+                          elevation={0}
+                          sx={{
+                            width: 165,
+                            minWidth: 165,
+                            borderRadius: '14px',
+                            overflow: 'hidden',
+                            backgroundColor: '#0F172A',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            p: 2,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              transform: 'translateY(-6px)',
+                              boxShadow: `0 12px 24px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px ${roleBadgeColor}66`,
+                              borderColor: `${roleBadgeColor}88`,
+                            },
+                          }}
+                          onClick={() => {
+                            setModalFilter('crew');
+                            setCastCrewModalOpen(true);
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+                            <Box sx={{ p: 1, borderRadius: 2, backgroundColor: roleBgColor }}>{icon}</Box>
+                            <Chip
+                              label={job}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.65rem',
+                                fontWeight: 700,
+                                backgroundColor: roleBgColor,
+                                color: roleBadgeColor,
+                                maxWidth: 100,
+                              }}
+                            />
+                          </Box>
+
+                          <Box sx={{ mt: 1 }}>
+                            <Typography
+                              variant="subtitle2"
+                              sx={{
+                                color: '#F8FAFC',
+                                fontWeight: 700,
+                                fontSize: '0.9rem',
+                                lineHeight: 1.25,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {member.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748B', display: 'block', mt: 0.5 }}>
+                              {member.department || 'Crew'}
+                            </Typography>
+                          </Box>
+                        </Paper>
+                      );
+                    })}
+                  </Box>
+                ) : (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <EngineeringIcon sx={{ fontSize: 40, color: '#334155', mb: 1 }} />
+                    <Typography variant="body2" sx={{ color: '#64748B' }}>
+                      No crew information recorded for this title.
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+            </Box>
           )}
 
           {/* Seasons & Episodes Breakdown for TV Series */}
@@ -1288,9 +1638,22 @@ export const MovieDetailPage: React.FC = () => {
                 </>
               )}
 
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center' }}>
                 <Typography variant="body2" sx={{ color: '#64748B' }}>Original Language</Typography>
-                <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600, textTransform: 'uppercase' }}>{movie.original_language || 'N/A'}</Typography>
+                <Chip
+                  label={(movie.original_language || 'EN').toUpperCase()}
+                  size="small"
+                  onClick={() => setEditModalOpen(true)}
+                  sx={{
+                    backgroundColor: 'rgba(167, 139, 250, 0.15)',
+                    color: '#A78BFA',
+                    fontWeight: 700,
+                    border: '1px solid rgba(167, 139, 250, 0.3)',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    '&:hover': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
+                  }}
+                />
               </Box>
 
               {movie.original_title && movie.original_title !== movie.title && (
@@ -1541,6 +1904,232 @@ export const MovieDetailPage: React.FC = () => {
         title="Remove Title from Library"
         description={`Are you sure you want to remove "${movie.title}" from your personal library?`}
       />
+
+      {/* Full Cast & Crew Popup Modal */}
+      <Dialog
+        open={castCrewModalOpen}
+        onClose={() => setCastCrewModalOpen(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0B0F19',
+            backgroundImage: 'radial-gradient(ellipse at top, rgba(30, 41, 59, 0.5) 0%, #0B0F19 70%)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 3.5,
+            maxHeight: '88vh',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.9)',
+          },
+        }}
+      >
+        {/* Modal Header */}
+        <DialogTitle sx={{ px: 3, py: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <GroupIcon sx={{ color: '#E5A93C', fontSize: 26 }} />
+            <Box>
+              <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 800, lineHeight: 1.2 }}>
+                Full Cast & Crew
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+                {movie.title} • {(movie.cast_members?.length || 0) + (movie.crew_members?.length || 0)} Total Contributors
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton onClick={() => setCastCrewModalOpen(false)} sx={{ color: '#94A3B8', '&:hover': { color: '#F8FAFC' } }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ px: 3, py: 2.5 }}>
+          {/* Controls: Search & Category Filter Chips */}
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 2, mb: 3 }}>
+            {/* Filter Chips */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Chip
+                label={`All (${(movie.cast_members?.length || 0) + (movie.crew_members?.length || 0)})`}
+                onClick={() => setModalFilter('all')}
+                sx={{
+                  backgroundColor: modalFilter === 'all' ? '#E5A93C' : 'rgba(255, 255, 255, 0.05)',
+                  color: modalFilter === 'all' ? '#07090E' : '#94A3B8',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  '&:hover': { backgroundColor: modalFilter === 'all' ? '#D4982B' : 'rgba(255, 255, 255, 0.1)' },
+                }}
+              />
+              <Chip
+                label={`Cast (${movie.cast_members?.length || 0})`}
+                onClick={() => setModalFilter('cast')}
+                sx={{
+                  backgroundColor: modalFilter === 'cast' ? '#E5A93C' : 'rgba(255, 255, 255, 0.05)',
+                  color: modalFilter === 'cast' ? '#07090E' : '#94A3B8',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  '&:hover': { backgroundColor: modalFilter === 'cast' ? '#D4982B' : 'rgba(255, 255, 255, 0.1)' },
+                }}
+              />
+              <Chip
+                label={`Crew (${movie.crew_members?.length || 0})`}
+                onClick={() => setModalFilter('crew')}
+                sx={{
+                  backgroundColor: modalFilter === 'crew' ? '#38BDF8' : 'rgba(255, 255, 255, 0.05)',
+                  color: modalFilter === 'crew' ? '#07090E' : '#94A3B8',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  '&:hover': { backgroundColor: modalFilter === 'crew' ? '#0284C7' : 'rgba(255, 255, 255, 0.1)' },
+                }}
+              />
+            </Box>
+
+            {/* Live Search */}
+            <TextField
+              size="small"
+              placeholder="Search actor or technician..."
+              value={modalSearch}
+              onChange={(e) => setModalSearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: '#64748B', fontSize: 18 }} />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{
+                width: { xs: '100%', sm: 260 },
+                input: { color: '#F8FAFC', fontSize: '0.875rem' },
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: 2,
+                  '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.1)' },
+                  '&:hover fieldset': { borderColor: '#38BDF8' },
+                  '&.Mui-focused fieldset': { borderColor: '#38BDF8' },
+                },
+              }}
+            />
+          </Box>
+
+          {/* Modal Items Grid */}
+          <Grid container spacing={2}>
+            {/* Cast Grid */}
+            {(modalFilter === 'all' || modalFilter === 'cast') &&
+              (movie.cast_members || [])
+                .filter((c: any) =>
+                  !modalSearch ||
+                  c.name?.toLowerCase().includes(modalSearch.toLowerCase()) ||
+                  c.character?.toLowerCase().includes(modalSearch.toLowerCase())
+                )
+                .map((c: any, idx: number) => {
+                  const photoUrl = c.profile_path
+                    ? (c.profile_path.startsWith('http') ? c.profile_path : `https://image.tmdb.org/t/p/w185${c.profile_path}`)
+                    : null;
+                  return (
+                    <Grid item xs={6} sm={4} md={3} lg={2.4} key={`cast-${idx}`}>
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          borderRadius: '14px',
+                          overflow: 'hidden',
+                          backgroundColor: '#0F172A',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          height: '100%',
+                          transition: 'all 0.2s ease',
+                          '&:hover': {
+                            borderColor: 'rgba(229, 169, 60, 0.4)',
+                            transform: 'translateY(-3px)',
+                          },
+                        }}
+                      >
+                        <Box sx={{ width: '100%', height: 200, overflow: 'hidden', backgroundColor: '#1E293B' }}>
+                          {photoUrl ? (
+                            <Box component="img" src={photoUrl} alt={c.name} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Avatar sx={{ width: 48, height: 48, backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C', fontWeight: 800 }}>
+                                {c.name.charAt(0)}
+                              </Avatar>
+                            </Box>
+                          )}
+                        </Box>
+                        <Box sx={{ p: 1.5, flexGrow: 1 }}>
+                          <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700, fontSize: '0.85rem', lineHeight: 1.2, mb: 0.5 }}>
+                            {c.name}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.75rem', display: 'block', lineHeight: 1.2 }}>
+                            {c.character || 'Cast'}
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
+
+            {/* Crew Grid */}
+            {(modalFilter === 'all' || modalFilter === 'crew') &&
+              (movie.crew_members || [])
+                .filter((member: any) =>
+                  !modalSearch ||
+                  member.name?.toLowerCase().includes(modalSearch.toLowerCase()) ||
+                  member.job?.toLowerCase().includes(modalSearch.toLowerCase()) ||
+                  member.department?.toLowerCase().includes(modalSearch.toLowerCase())
+                )
+                .map((member: any, idx: number) => {
+                  const job = member.job || 'Crew';
+                  let roleColor = '#38BDF8';
+                  if (job.includes('Director')) roleColor = '#E5A93C';
+                  else if (job.includes('Music') || job.includes('Composer')) roleColor = '#A855F7';
+                  else if (job.includes('Photography') || job.includes('Camera')) roleColor = '#06B6D4';
+                  else if (job.includes('Editor')) roleColor = '#10B981';
+                  else if (job.includes('Writer') || job.includes('Screenplay')) roleColor = '#F59E0B';
+
+                  return (
+                    <Grid item xs={6} sm={4} md={3} lg={2.4} key={`crew-${idx}`}>
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          p: 2,
+                          borderRadius: '14px',
+                          backgroundColor: '#0F172A',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          height: '100%',
+                          transition: 'all 0.2s ease',
+                          '&:hover': {
+                            borderColor: `${roleColor}88`,
+                            transform: 'translateY(-3px)',
+                          },
+                        }}
+                      >
+                        <Chip
+                          label={job}
+                          size="small"
+                          sx={{
+                            alignSelf: 'flex-start',
+                            height: 20,
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            backgroundColor: `${roleColor}22`,
+                            color: roleColor,
+                            mb: 1.5,
+                          }}
+                        />
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ color: '#F8FAFC', fontWeight: 700, fontSize: '0.85rem', lineHeight: 1.2 }}>
+                            {member.name}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#64748B', display: 'block', mt: 0.5 }}>
+                            {member.department || 'Crew'}
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
+          </Grid>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 };

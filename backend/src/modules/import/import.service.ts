@@ -78,7 +78,7 @@ export class ImportService {
     ];
 
     const KNOWN_PROVIDERS = [
-      'netflix', 'hotstar', 'disney+ hotstar', 'disney hotstar', 'prime video',
+      'netflix', 'jiohotstar', 'jio hotstar', 'hotstar', 'disney+ hotstar', 'disney hotstar', 'prime video',
       'amazon prime', 'amazon prime video', 'sun nxt', 'sunnxt', 'zee5', 'zee 5',
       'jiocinema', 'jio cinema', 'sonyliv', 'sony liv', 'aha', 'apple tv', 'apple tv+',
       'youtube', 'google drive', 'drive'

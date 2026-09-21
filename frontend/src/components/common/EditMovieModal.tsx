@@ -20,11 +20,25 @@ interface EditMovieModalProps {
   onUpdated: () => void;
 }
 
+export const LANGUAGE_LIST = [
+  { code: 'en', name: 'English' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'ml', name: 'Malayalam' },
+  { code: 'kn', name: 'Kannada' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+];
+
 export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, movie, onUpdated }) => {
   const [title, setTitle] = useState(movie.title || '');
   const [overview, setOverview] = useState(movie.overview || '');
   const [director, setDirector] = useState(movie.director || '');
   const [runtime, setRuntime] = useState<number | string>(movie.runtime || '');
+  const [language, setLanguage] = useState(movie.original_language || 'en');
   const [customPosterUrl, setCustomPosterUrl] = useState(movie.custom_poster_url || '');
   const [customBackdropUrl, setCustomBackdropUrl] = useState(movie.custom_backdrop_url || '');
   const [trailerUrl, setTrailerUrl] = useState(movie.trailer_url || '');
@@ -39,6 +53,7 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
         custom_overview: overview.trim() || null,
         custom_director: director.trim() || null,
         custom_runtime: runtime ? Number(runtime) : null,
+        original_language: language.trim() || null,
         custom_poster_url: customPosterUrl.trim() || null,
         custom_backdrop_url: customBackdropUrl.trim() || null,
         trailer_url: trailerUrl.trim() || null,
@@ -86,7 +101,7 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
             </TextField>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={4}>
             <TextField
               fullWidth
               label="Director"
@@ -94,7 +109,7 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
               onChange={(e) => setDirector(e.target.value)}
             />
           </Grid>
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={4}>
             <TextField
               fullWidth
               type="number"
@@ -102,6 +117,21 @@ export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, m
               value={runtime}
               onChange={(e) => setRuntime(e.target.value)}
             />
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <TextField
+              fullWidth
+              select
+              label="Original Language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              {LANGUAGE_LIST.map((l) => (
+                <MenuItem key={l.code} value={l.code}>
+                  {l.name} ({l.code.toUpperCase()})
+                </MenuItem>
+              ))}
+            </TextField>
           </Grid>
 
           <Grid item xs={12}>

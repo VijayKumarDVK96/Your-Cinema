@@ -45,7 +45,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
       const pIcon = (s.provider_icon || '').toLowerCase();
       if (ottLower.includes('sun')) return pName.includes('sun') || pIcon.includes('sun');
       if (ottLower.includes('prime') || ottLower.includes('amazon')) return pName.includes('prime') || pName.includes('amazon') || pIcon.includes('prime');
-      if (ottLower.includes('hotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('disney') || pIcon.includes('hotstar');
+      if (ottLower.includes('hotstar') || ottLower.includes('jiohotstar') || ottLower.includes('disney')) return pName.includes('hotstar') || pName.includes('jiohotstar') || pName.includes('disney') || pIcon.includes('hotstar');
       if (ottLower.includes('apple')) return pName.includes('apple') || pIcon.includes('apple');
       if (ottLower.includes('jio')) return pName.includes('jio') || pIcon.includes('jio');
       if (ottLower.includes('zee')) return pName.includes('zee') || pIcon.includes('zee');
@@ -75,7 +75,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
   } else if (tLower.includes('interstellar') || tLower.includes('arrival')) {
     ottInfo = { name: 'Prime Video', icon: 'prime', url: `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(movie.title)}` };
   } else if (tLower.includes('vikram')) {
-    ottInfo = { name: 'Disney+ Hotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
+    ottInfo = { name: 'JioHotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
   } else if (tLower.includes('dune') || tLower.includes('oppenheimer')) {
     ottInfo = { name: 'JioCinema', icon: 'jiocinema', url: `https://www.jiocinema.com/search/${encodeURIComponent(movie.title)}` };
   }

@@ -32,6 +32,7 @@ import AddIcon from '@mui/icons-material/Add';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import StarIcon from '@mui/icons-material/Star';
+import TranslateIcon from '@mui/icons-material/Translate';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -42,6 +43,7 @@ import { EmptyState } from '../../components/feedback/EmptyState.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { LANGUAGE_LIST } from '../../components/common/EditMovieModal.js';
 
 const STORAGE_KEY = 'my_cinema_my_movies_filters';
 
@@ -116,6 +118,10 @@ export const MyMoviesPage: React.FC = () => {
   const [newWatchlistNameInput, setNewWatchlistNameInput] = useState('');
   const [isBulkMode, setIsBulkMode] = useState<boolean>(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
+
+  // Bulk Edit Language state
+  const [bulkLanguageOpen, setBulkLanguageOpen] = useState(false);
+  const [selectedBulkLanguage, setSelectedBulkLanguage] = useState('ta');
 
   // Bulk Edit Tags & Genres state
   const [bulkTagsGenresOpen, setBulkTagsGenresOpen] = useState(false);
@@ -241,6 +247,22 @@ export const MyMoviesPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['tags'] });
       queryClient.invalidateQueries({ queryKey: ['genres'] });
+    },
+  });
+
+  const bulkLanguageMutation = useMutation({
+    mutationFn: async (lang: string) => {
+      await api.post('/movies/bulk', {
+        movieIds: Array.from(selectedIds),
+        action: 'edit_language',
+        language: lang,
+      });
+    },
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      setIsBulkMode(false);
+      setBulkLanguageOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
     },
   });
 
@@ -425,6 +447,20 @@ export const MyMoviesPage: React.FC = () => {
               onClick={() => setBulkTagsGenresOpen(true)}
             >
               Edit Tags & Genres
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              sx={{
+                color: '#A78BFA',
+                borderColor: 'rgba(167, 139, 250, 0.5)',
+                '&:hover': { borderColor: '#A78BFA', backgroundColor: 'rgba(167, 139, 250, 0.1)' },
+              }}
+              startIcon={<TranslateIcon />}
+              disabled={selectedIds.size === 0}
+              onClick={() => setBulkLanguageOpen(true)}
+            >
+              Edit Language
             </Button>
             <Button
               size="small"
@@ -1161,6 +1197,63 @@ export const MyMoviesPage: React.FC = () => {
         title="Delete Selected Titles"
         description={`Are you sure you want to delete ${selectedIds.size} selected movie${selectedIds.size === 1 ? '' : 's'} from your library?`}
       />
+
+      {/* Bulk Edit Language Dialog */}
+      <Dialog
+        open={bulkLanguageOpen}
+        onClose={() => setBulkLanguageOpen(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0F172A',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            minWidth: 360,
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#F8FAFC', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TranslateIcon sx={{ color: '#A78BFA' }} /> Bulk Edit Language
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: '#94A3B8', mb: 2 }}>
+            Set original language for all <strong>{selectedIds.size}</strong> selected titles:
+          </Typography>
+          <TextField
+            fullWidth
+            select
+            size="small"
+            label="Select Primary Language"
+            value={selectedBulkLanguage}
+            onChange={(e) => setSelectedBulkLanguage(e.target.value)}
+            sx={{
+              input: { color: '#F8FAFC' },
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' },
+                '&:hover fieldset': { borderColor: '#A78BFA' },
+                '&.Mui-focused fieldset': { borderColor: '#A78BFA' },
+              },
+            }}
+          >
+            {LANGUAGE_LIST.map((l) => (
+              <MenuItem key={l.code} value={l.code}>
+                {l.name} ({l.code.toUpperCase()})
+              </MenuItem>
+            ))}
+          </TextField>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={() => setBulkLanguageOpen(false)} sx={{ color: '#94A3B8' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => bulkLanguageMutation.mutate(selectedBulkLanguage)}
+            disabled={bulkLanguageMutation.isPending}
+            sx={{ backgroundColor: '#7C3AED', '&:hover': { backgroundColor: '#6D28D9' }, fontWeight: 700 }}
+          >
+            {bulkLanguageMutation.isPending ? 'Updating...' : 'Apply Language'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

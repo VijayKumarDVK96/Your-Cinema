@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   ToggleButtonGroup,
@@ -50,7 +50,7 @@ interface FilterBarProps {
 const OTT_OPTIONS = [
   { value: 'Netflix', label: 'Netflix', color: '#E50914' },
   { value: 'Amazon Prime Video', label: 'Prime Video', color: '#00A8E1' },
-  { value: 'Disney+ Hotstar', label: 'Disney+ Hotstar', color: '#113CCF' },
+  { value: 'JioHotstar', label: 'JioHotstar', color: '#113CCF' },
   { value: 'Sun NXT', label: 'Sun NXT', color: '#FF6B00' },
   { value: 'Apple TV+', label: 'Apple TV+', color: '#A3AAAE' },
   { value: 'YouTube', label: 'YouTube', color: '#FF0000' },
@@ -108,6 +108,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onReset,
 }) => {
   const [ratingAnchorEl, setRatingAnchorEl] = useState<null | HTMLElement>(null);
+  const [localRatingRange, setLocalRatingRange] = useState<[number, number]>(ratingRange);
+
+  // Sync local rating range state when prop changes externally (e.g. on reset)
+  useEffect(() => {
+    setLocalRatingRange(ratingRange);
+  }, [ratingRange[0], ratingRange[1]]);
+
+  // Debounced notification to parent handler (350ms delay)
+  useEffect(() => {
+    if (localRatingRange[0] === ratingRange[0] && localRatingRange[1] === ratingRange[1]) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (onRatingRangeChange) {
+        onRatingRangeChange(localRatingRange);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [localRatingRange, onRatingRangeChange, ratingRange]);
+
   const customGenresList: Genre[] = Array.isArray(availableGenres)
     ? availableGenres.filter(g => !g.is_predefined)
     : (availableGenres?.custom || []);
@@ -370,21 +390,21 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             sx={{
               height: 40,
               px: 2,
-              color: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
-              backgroundColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 'rgba(229, 169, 60, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-              border: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '1px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.23)',
+              color: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
+              backgroundColor: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? 'rgba(229, 169, 60, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              border: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? '1px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.23)',
               borderRadius: '4px',
               textTransform: 'none',
               fontSize: '0.85rem',
-              fontWeight: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 700 : 500,
+              fontWeight: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? 700 : 500,
               '&:hover': {
-                backgroundColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 'rgba(229, 169, 60, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                borderColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
+                backgroundColor: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? 'rgba(229, 169, 60, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                borderColor: (localRatingRange[0] > 1 || localRatingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
               },
             }}
           >
             <StarIcon sx={{ fontSize: 16, mr: 0.8, color: '#E5A93C' }} />
-            {(ratingRange[0] > 1 || ratingRange[1] < 5) ? `⭐ ${ratingRange[0].toFixed(1)} – ${ratingRange[1].toFixed(1)}` : 'My Rating'}
+            {(localRatingRange[0] > 1 || localRatingRange[1] < 5) ? `⭐ ${localRatingRange[0].toFixed(1)} – ${localRatingRange[1].toFixed(1)}` : 'My Rating'}
           </Button>
 
           <Popover
@@ -409,7 +429,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 Filter Rating Range
               </Typography>
               <Chip
-                label={`⭐ ${ratingRange[0].toFixed(1)} to ${ratingRange[1].toFixed(1)}`}
+                label={`⭐ ${localRatingRange[0].toFixed(1)} to ${localRatingRange[1].toFixed(1)}`}
                 size="small"
                 sx={{ backgroundColor: '#E5A93C', color: '#000', fontWeight: 700, fontSize: '0.72rem' }}
               />
@@ -417,8 +437,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
             <Box sx={{ px: 1, py: 1 }}>
               <Slider
-                value={ratingRange}
-                onChange={(_, val) => onRatingRangeChange && onRatingRangeChange(val as [number, number])}
+                value={localRatingRange}
+                onChange={(_, val) => setLocalRatingRange(val as [number, number])}
+                onChangeCommitted={(_, val) => {
+                  const range = val as [number, number];
+                  setLocalRatingRange(range);
+                  if (onRatingRangeChange) onRatingRangeChange(range);
+                }}
                 min={1.0}
                 max={5.0}
                 step={0.5}
@@ -444,19 +469,31 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               <Chip
                 label="All (1-5)"
                 size="small"
-                onClick={() => onRatingRangeChange && onRatingRangeChange([1, 5])}
+                onClick={() => {
+                  const val: [number, number] = [1, 5];
+                  setLocalRatingRange(val);
+                  if (onRatingRangeChange) onRatingRangeChange(val);
+                }}
                 sx={{ cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.06)', color: '#94A3B8' }}
               />
               <Chip
                 label="4.0+ Stars"
                 size="small"
-                onClick={() => onRatingRangeChange && onRatingRangeChange([4.0, 5.0])}
+                onClick={() => {
+                  const val: [number, number] = [4.0, 5.0];
+                  setLocalRatingRange(val);
+                  if (onRatingRangeChange) onRatingRangeChange(val);
+                }}
                 sx={{ cursor: 'pointer', backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C' }}
               />
               <Chip
                 label="3.0+ Stars"
                 size="small"
-                onClick={() => onRatingRangeChange && onRatingRangeChange([3.0, 5.0])}
+                onClick={() => {
+                  const val: [number, number] = [3.0, 5.0];
+                  setLocalRatingRange(val);
+                  if (onRatingRangeChange) onRatingRangeChange(val);
+                }}
                 sx={{ cursor: 'pointer', backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C' }}
               />
             </Box>

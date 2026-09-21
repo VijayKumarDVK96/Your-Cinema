@@ -139,10 +139,10 @@ export const getOttMeta = (providerName: string = '', iconOrUrl?: string): OttMe
     };
   }
 
-  if (nameLower.includes('hotstar') || nameLower.includes('disney') || iconLower.includes('hotstar')) {
+  if (nameLower.includes('hotstar') || nameLower.includes('jiohotstar') || nameLower.includes('disney') || iconLower.includes('hotstar')) {
     return {
       key: 'hotstar',
-      name: 'Disney+ Hotstar',
+      name: 'JioHotstar',
       bgColor: '#0C1B33',
       textColor: '#FFCC00',
       borderColor: 'rgba(255, 204, 0, 0.4)',

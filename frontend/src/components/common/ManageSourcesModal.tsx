@@ -35,7 +35,7 @@ interface ManageSourcesModalProps {
 const POPULAR_PROVIDERS = [
   { name: 'Netflix', icon: 'netflix', type: 'ott' as const },
   { name: 'Amazon Prime Video', icon: 'prime', type: 'ott' as const },
-  { name: 'Disney+ Hotstar', icon: 'hotstar', type: 'ott' as const },
+  { name: 'JioHotstar', icon: 'hotstar', type: 'ott' as const },
   { name: 'Sun NXT', icon: 'sunnxt', type: 'ott' as const },
   { name: 'Apple TV+', icon: 'appletv', type: 'ott' as const },
   { name: 'JioCinema', icon: 'jiocinema', type: 'ott' as const },

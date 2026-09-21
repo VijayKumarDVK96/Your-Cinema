@@ -702,7 +702,7 @@ export class TmdbService {
     if (normalizedTitle.includes('vikram')) {
       return [
         {
-          providerName: 'Disney+ Hotstar',
+          providerName: 'JioHotstar',
           providerIcon: 'hotstar',
           externalUrl: 'https://www.hotstar.com/in/explore?search_query=Vikram',
           quality: '4K UHD',
