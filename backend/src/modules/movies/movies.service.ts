@@ -221,8 +221,13 @@ export class MoviesService {
         const searchParamIdx = pIdx++;
         conditions.push(`(
           LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(m.original_title, '')) LIKE '%' || $${searchParamIdx} || '%' OR
           LOWER(COALESCE(um.custom_director, m.director, '')) LIKE '%' || $${searchParamIdx} || '%' OR
-          LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%'
+          LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
+            WHERE LOWER(cm->>'name') LIKE '%' || $${searchParamIdx} || '%'
+          )
         )`);
         params.push(queryTerm);
 
@@ -502,8 +507,10 @@ export class MoviesService {
       const q = search.trim().toLowerCase();
       filtered = filtered.filter(m =>
         (m.title || '').toLowerCase().includes(q) ||
+        (m.original_title && m.original_title.toLowerCase().includes(q)) ||
         (m.director && m.director.toLowerCase().includes(q)) ||
-        (m.overview && m.overview.toLowerCase().includes(q))
+        (m.overview && m.overview.toLowerCase().includes(q)) ||
+        (Array.isArray(m.cast_members) && m.cast_members.some((cm: any) => (cm.name || '').toLowerCase().includes(q)))
       );
     }
     if (language) {

@@ -182,6 +182,17 @@ export const MyMoviesPage: React.FC = () => {
   const totalMovies = data?.total ?? movies.length;
   const totalPages = Math.max(1, Math.ceil(totalMovies / 50));
 
+  // Reset page to 1 whenever search query changes or page exceeds total results
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (totalMovies > 0 && page > 1 && (page - 1) * 50 >= totalMovies) {
+      setPage(1);
+    }
+  }, [totalMovies, page]);
+
   // Query Watchlists for bulk add
   const { data: watchlistsData } = useQuery({
     queryKey: ['watchlists', { parentId: 'all', limit: 1000 }],
@@ -877,15 +888,15 @@ export const MyMoviesPage: React.FC = () => {
       {/* Advanced Filter Bar */}
       <FilterBar
         status={status}
-        onStatusChange={setStatus}
+        onStatusChange={(val) => { setStatus(val); setPage(1); }}
         selectedMediaType={mediaType}
-        onMediaTypeChange={setMediaType}
+        onMediaTypeChange={(val) => { setMediaType(val); setPage(1); }}
         selectedGenre={genreId}
-        onGenreChange={setGenreId}
+        onGenreChange={(val) => { setGenreId(val); setPage(1); }}
         selectedOtt={ott}
-        onOttChange={setOtt}
+        onOttChange={(val) => { setOtt(val); setPage(1); }}
         selectedLanguage={language}
-        onLanguageChange={setLanguage}
+        onLanguageChange={(val) => { setLanguage(val); setPage(1); }}
         selectedTag={tagId}
         onTagChange={(val) => { setTagId(val); setPage(1); }}
         ratingRange={ratingRange}
@@ -1134,11 +1145,19 @@ export const MyMoviesPage: React.FC = () => {
           actionLabel="Reset Filters"
           onAction={() => {
             setStatus('all');
+            setMediaType('all');
             setGenreId(undefined);
+            setOtt(undefined);
+            setLanguage(undefined);
             setTagId(undefined);
+            setRatingRange([1, 5]);
             setIsFavorite(false);
+            setSortBy('added_at');
             setPage(1);
             setSearchParams({});
+            try {
+              localStorage.removeItem(STORAGE_KEY);
+            } catch (e) {}
           }}
         />
       )}
