@@ -19,6 +19,7 @@ import {
   ListItemIcon,
   ToggleButtonGroup,
   ToggleButton,
+  Pagination,
 } from '@mui/material';
 import GridViewIcon from '@mui/icons-material/GridView';
 import ViewListIcon from '@mui/icons-material/ViewList';
@@ -47,6 +48,7 @@ export const MyMoviesPage: React.FC = () => {
   const { openPlayer } = usePlayer();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const [page, setPage] = useState<number>(1);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [status, setStatus] = useState<string>('all');
   const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>('all');
@@ -77,7 +79,7 @@ export const MyMoviesPage: React.FC = () => {
 
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, personalRating, isFavorite, sortBy, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, personalRating, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
@@ -90,6 +92,8 @@ export const MyMoviesPage: React.FC = () => {
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
       params.append('sortBy', sortBy);
+      params.append('page', page.toString());
+      params.append('limit', '50');
 
       const res = await api.get(`/movies?${params.toString()}`);
       return res.data?.data;
@@ -115,15 +119,18 @@ export const MyMoviesPage: React.FC = () => {
   });
 
   const movies = data?.movies || [];
+  const totalMovies = data?.total ?? movies.length;
+  const totalPages = Math.max(1, Math.ceil(totalMovies / 50));
 
   // Query Watchlists for bulk add
-  const { data: watchlists = [] } = useQuery<any[]>({
-    queryKey: ['watchlists'],
+  const { data: watchlistsData } = useQuery({
+    queryKey: ['watchlists', { parentId: 'all', limit: 1000 }],
     queryFn: async () => {
-      const res = await api.get('/watchlists');
-      return res.data?.data || [];
+      const res = await api.get('/watchlists?parentId=all&limit=1000');
+      return res.data?.data;
     },
   });
+  const watchlists = Array.isArray(watchlistsData) ? watchlistsData : (watchlistsData?.watchlists || []);
 
   // Bulk Mutation
   const bulkMutation = useMutation({
@@ -408,7 +415,7 @@ export const MyMoviesPage: React.FC = () => {
           </ListItemIcon>
           Create New Watchlist...
         </MenuItem>
-        {watchlists.map((wl) => (
+        {watchlists.map((wl: any) => (
           <MenuItem
             key={wl.id}
             onClick={() => bulkWatchlistMutation.mutate({ watchlistId: wl.id })}
@@ -1040,9 +1047,52 @@ export const MyMoviesPage: React.FC = () => {
             setGenreId(undefined);
             setTagId(undefined);
             setIsFavorite(false);
+            setPage(1);
             setSearchParams({});
           }}
         />
+      )}
+
+      {/* Server-Side Pagination Bar */}
+      {totalMovies > 0 && (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 2,
+            mt: 3,
+            pt: 2.5,
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          }}
+        >
+          <Typography variant="body2" sx={{ color: '#94A3B8', fontWeight: 500 }}>
+            Showing {Math.min((page - 1) * 50 + 1, totalMovies)}–{Math.min(page * 50, totalMovies)} of {totalMovies} titles
+          </Typography>
+          {totalPages > 1 && (
+            <Pagination
+              count={totalPages}
+              page={page}
+              onChange={(_, val) => {
+                setPage(val);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              color="primary"
+              sx={{
+                '& .MuiPaginationItem-root': {
+                  color: '#94A3B8',
+                  fontWeight: 600,
+                  '&.Mui-selected': {
+                    backgroundColor: '#E5A93C',
+                    color: '#000',
+                    fontWeight: 700,
+                  },
+                },
+              }}
+            />
+          )}
+        </Box>
       )}
     </Box>
   );

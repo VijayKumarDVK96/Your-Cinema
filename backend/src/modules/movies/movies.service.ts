@@ -92,7 +92,7 @@ export class MoviesService {
       sortBy = 'added_at',
       sortOrder = 'desc',
       page = 1,
-      limit = 48,
+      limit = 50,
     } = filters;
 
     if (isPgConnected) {

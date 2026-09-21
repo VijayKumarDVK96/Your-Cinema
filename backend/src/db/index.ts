@@ -46,9 +46,14 @@ export function setPgConnected(val: boolean) {
 
 // Test connectivity on start
 pool.connect()
-  .then((client) => {
+  .then(async (client) => {
     isPgConnected = true;
     Logger.info('Connected successfully to PostgreSQL database');
+    try {
+      await client.query('ALTER TABLE watchlists ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES watchlists(id) ON DELETE CASCADE;');
+    } catch (e: any) {
+      Logger.warn(`Watchlists parent_id column check: ${e.message}`);
+    }
     client.release();
   })
   .catch((err) => {

@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS user_movie_tags (
 CREATE TABLE IF NOT EXISTS watchlists (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES watchlists(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     cover_image_url TEXT,

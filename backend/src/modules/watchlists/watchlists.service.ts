@@ -3,11 +3,34 @@ import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
 
 export class WatchlistsService {
-  static async listUserWatchlists(userId: string) {
+  static async listUserWatchlists(userId: string, options: { page?: number; limit?: number; parentId?: string | null } = {}) {
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.max(1, options.limit || 50);
+    const parentId = options.parentId;
+
     if (isPgConnected) {
-      const sql = `
+      const conditions = ['w.user_id = $1'];
+      const params: any[] = [userId];
+      let pIdx = 2;
+
+      if (parentId === 'root' || parentId === 'null') {
+        conditions.push('w.parent_id IS NULL');
+      } else if (parentId && parentId !== 'all') {
+        conditions.push(`w.parent_id = $${pIdx++}`);
+        params.push(parentId);
+      }
+
+      const countSql = `SELECT COUNT(*)::INT AS total FROM watchlists w WHERE ${conditions.join(' AND ')}`;
+      const totalRes = await pool.query(countSql, params.slice(0, pIdx - 1));
+      const total = totalRes.rows[0]?.total || 0;
+
+      const offset = (page - 1) * limit;
+
+      const listSql = `
         SELECT
           w.id,
+          w.user_id,
+          w.parent_id,
           w.name,
           w.description,
           w.cover_image_url,
@@ -15,25 +38,47 @@ export class WatchlistsService {
           w.smart_criteria,
           w.display_order,
           w.created_at,
-          COUNT(wm.user_movie_id)::INT AS movie_count
+          w.updated_at,
+          COUNT(DISTINCT wm.user_movie_id)::INT AS movie_count,
+          COUNT(DISTINCT sub.id)::INT AS subfolder_count
         FROM watchlists w
         LEFT JOIN watchlist_movies wm ON w.id = wm.watchlist_id
-        WHERE w.user_id = $1
+        LEFT JOIN watchlists sub ON w.id = sub.parent_id
+        WHERE ${conditions.join(' AND ')}
         GROUP BY w.id
         ORDER BY w.display_order ASC, w.created_at DESC
+        LIMIT $${pIdx++} OFFSET $${pIdx++}
       `;
-      const { rows } = await pool.query(sql, [userId]);
-      return rows;
+      params.push(limit, offset);
+      const { rows } = await pool.query(listSql, params);
+
+      return { watchlists: rows, total, page, limit };
     }
 
-    return Array.from(inMemoryDb.watchlists.values())
-      .filter(w => w.user_id === userId)
-      .map(w => {
-        const count = Array.from(inMemoryDb.watchlistMovies.values())
-          .filter(wm => wm.watchlist_id === w.id).length;
-        return { ...w, movie_count: count };
-      })
-      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    let userLists = Array.from(inMemoryDb.watchlists.values())
+      .filter(w => w.user_id === userId);
+
+    if (parentId === 'root' || parentId === 'null') {
+      userLists = userLists.filter(w => !w.parent_id);
+    } else if (parentId && parentId !== 'all') {
+      userLists = userLists.filter(w => w.parent_id === parentId);
+    }
+
+    const total = userLists.length;
+    userLists.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
+    const offset = (page - 1) * limit;
+    const paged = userLists.slice(offset, offset + limit);
+
+    const watchlists = paged.map(w => {
+      const movieCount = Array.from(inMemoryDb.watchlistMovies.values())
+        .filter(wm => wm.watchlist_id === w.id).length;
+      const subfolderCount = Array.from(inMemoryDb.watchlists.values())
+        .filter(sub => sub.parent_id === w.id).length;
+      return { ...w, movie_count: movieCount, subfolder_count: subfolderCount };
+    });
+
+    return { watchlists, total, page, limit };
   }
 
   static async getWatchlistById(userId: string, watchlistId: string) {
@@ -41,6 +86,15 @@ export class WatchlistsService {
       const wRows = (await pool.query('SELECT * FROM watchlists WHERE id = $1 AND user_id = $2', [watchlistId, userId])).rows;
       if (wRows.length === 0) throw new NotFoundError('Watchlist not found');
       const watchlist = wRows[0];
+
+      const ancestors: any[] = [];
+      let currentParentId = watchlist.parent_id;
+      while (currentParentId) {
+        const pRes = await pool.query('SELECT id, name, parent_id FROM watchlists WHERE id = $1 AND user_id = $2', [currentParentId, userId]);
+        if (pRes.rows.length === 0) break;
+        ancestors.unshift(pRes.rows[0]);
+        currentParentId = pRes.rows[0].parent_id;
+      }
 
       const mSql = `
         SELECT
@@ -64,11 +118,20 @@ export class WatchlistsService {
         ORDER BY wm.sort_order ASC, wm.added_at DESC
       `;
       const { rows: movies } = await pool.query(mSql, [watchlistId]);
-      return { ...watchlist, movies };
+      return { ...watchlist, ancestors, movies };
     }
 
     const w = inMemoryDb.watchlists.get(watchlistId);
     if (!w || w.user_id !== userId) throw new NotFoundError('Watchlist not found');
+
+    const ancestors: any[] = [];
+    let currentParentId = w.parent_id;
+    while (currentParentId) {
+      const parent = inMemoryDb.watchlists.get(currentParentId);
+      if (!parent || parent.user_id !== userId) break;
+      ancestors.unshift({ id: parent.id, name: parent.name, parent_id: parent.parent_id });
+      currentParentId = parent.parent_id;
+    }
 
     const moviesInList = Array.from(inMemoryDb.watchlistMovies.values())
       .filter(wm => wm.watchlist_id === watchlistId)
@@ -95,30 +158,33 @@ export class WatchlistsService {
       })
       .filter(Boolean);
 
-    return { ...w, movies: moviesInList };
+    return { ...w, ancestors, movies: moviesInList };
   }
 
   static async createWatchlist(userId: string, data: {
     name: string;
     description?: string;
     cover_image_url?: string;
+    parent_id?: string | null;
     is_smart?: boolean;
     smart_criteria?: any;
   }) {
     const listId = uuidv4();
+    const parentId = data.parent_id && data.parent_id.trim() ? data.parent_id.trim() : null;
 
     if (isPgConnected) {
       const { rows } = await pool.query(`
-        INSERT INTO watchlists (id, user_id, name, description, cover_image_url, is_smart, smart_criteria)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO watchlists (id, user_id, parent_id, name, description, cover_image_url, is_smart, smart_criteria)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
-      `, [listId, userId, data.name.trim(), data.description || null, data.cover_image_url || null, data.is_smart || false, JSON.stringify(data.smart_criteria || {})]);
+      `, [listId, userId, parentId, data.name.trim(), data.description || null, data.cover_image_url || null, data.is_smart || false, JSON.stringify(data.smart_criteria || {})]);
       return rows[0];
     }
 
     const newW = {
       id: listId,
       user_id: userId,
+      parent_id: parentId,
       name: data.name.trim(),
       description: data.description || null,
       cover_image_url: data.cover_image_url || null,
@@ -136,6 +202,7 @@ export class WatchlistsService {
     name: string;
     description: string;
     cover_image_url: string;
+    parent_id: string | null;
     display_order: number;
   }>) {
     if (isPgConnected) {

@@ -11,6 +11,7 @@ const createListSchema = z.object({
   name: z.string().min(1, 'Watchlist title is required').max(255),
   description: z.string().optional().nullable(),
   cover_image_url: z.string().url().optional().nullable().or(z.literal('')),
+  parent_id: z.string().uuid().optional().nullable().or(z.literal('')),
   is_smart: z.boolean().optional(),
   smart_criteria: z.any().optional(),
 });
@@ -19,13 +20,19 @@ const updateListSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional().nullable(),
   cover_image_url: z.string().url().optional().nullable().or(z.literal('')),
+  parent_id: z.string().uuid().optional().nullable().or(z.literal('')),
   display_order: z.number().optional(),
 });
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const lists = await WatchlistsService.listUserWatchlists(req.user!.id);
-    return res.status(200).json({ success: true, data: lists });
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const rawParent = (req.query.parentId ?? req.query.parent_id) as string | undefined;
+    const parentId = rawParent !== undefined ? rawParent : undefined;
+
+    const result = await WatchlistsService.listUserWatchlists(req.user!.id, { page, limit, parentId });
+    return res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }
