@@ -97,13 +97,17 @@ export const ImportCenterPage: React.FC = () => {
   const [creatingGenre, setCreatingGenre] = useState(false);
 
   // Fetch user's existing watchlists
-  const { data: watchlists = [] } = useQuery<any[]>({
+  const { data: watchlistsData } = useQuery({
     queryKey: ['watchlists'],
     queryFn: async () => {
       const res = await api.get('/watchlists');
-      return res.data?.data || [];
+      return res.data?.data;
     },
   });
+
+  const watchlists: any[] = Array.isArray(watchlistsData)
+    ? watchlistsData
+    : (watchlistsData?.watchlists || []);
 
   // Fetch genres (predefined + custom)
   const { data: genresData, refetch: refetchGenres } = useQuery({
@@ -129,6 +133,7 @@ export const ImportCenterPage: React.FC = () => {
 
       const items: MatchItem[] = rawItems.map((m: any) => ({
         ...m,
+        candidates: Array.isArray(m.candidates) ? m.candidates : [],
         watchStatus: m.parsedStatus || globalWatchStatus,
         personalRating: m.parsedRating !== undefined && m.parsedRating !== null ? m.parsedRating : globalPersonalRating,
         isFavorite: m.parsedFavorite !== undefined ? m.parsedFavorite : globalIsFavorite,

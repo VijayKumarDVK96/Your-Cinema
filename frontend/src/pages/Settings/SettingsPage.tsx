@@ -249,7 +249,7 @@ export const SettingsPage: React.FC = () => {
         exportedAt: new Date().toISOString(),
         version: '1.0',
         movies: moviesRes.data?.data?.movies || [],
-        watchlists: watchlistsRes.data?.data || [],
+        watchlists: Array.isArray(watchlistsRes.data?.data) ? watchlistsRes.data?.data : (watchlistsRes.data?.data?.watchlists || []),
         customGenres: genresRes.data?.data?.custom || [],
         tags: tagsRes.data?.data || [],
       };
