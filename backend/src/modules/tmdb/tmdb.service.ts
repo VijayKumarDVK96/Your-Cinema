@@ -493,26 +493,30 @@ export class TmdbService {
     const rawIdMatch = trimmed.match(/^\d+$/);
 
     if (tmdbUrlMatch || rawIdMatch) {
-      const mediaType = (tmdbUrlMatch?.[1] || tmdbUrlMatch?.[3] || (type !== 'all' ? type : 'movie')).toLowerCase() as 'movie' | 'tv';
+      const explicitType = tmdbUrlMatch?.[1] || tmdbUrlMatch?.[3];
+      const mediaType = (explicitType || (type !== 'all' ? type : 'movie')).toLowerCase() as 'movie' | 'tv';
       const tmdbId = parseInt(tmdbUrlMatch?.[2] || tmdbUrlMatch?.[4] || rawIdMatch![0], 10);
       try {
-        const item = mediaType === 'tv'
-          ? await this.getTvDetails(tmdbId)
-          : await this.getDetails(tmdbId);
-        if (item && item.id) {
+        let item = await this.getMediaDetails(tmdbId, mediaType);
+        let resolvedType = mediaType;
+        if ((!item || (!item.title && !item.name)) && !explicitType && type === 'all') {
+          item = await this.getMediaDetails(tmdbId, 'tv');
+          resolvedType = 'tv';
+        }
+        if (item && (item.title || item.name)) {
           return {
             results: [{
-              id: item.id,
-              title: item.title || (item as any).name,
-              original_title: item.original_title || (item as any).original_name || item.title,
-              overview: item.overview,
+              id: item.id || item.tmdb_id || tmdbId,
+              title: item.title || item.name || '',
+              original_title: item.original_title || item.original_name || item.title || item.name || '',
+              overview: item.overview || '',
               release_date: item.release_date || item.first_air_date || '',
-              poster_path: item.poster_path,
-              backdrop_path: item.backdrop_path,
-              vote_average: item.vote_average,
-              original_language: item.original_language,
-              genre_ids: (item.genres || []).map((g: any) => g.id),
-              media_type: mediaType,
+              poster_path: item.poster_path || '',
+              backdrop_path: item.backdrop_path || '',
+              vote_average: item.vote_average || 0,
+              original_language: item.original_language || 'en',
+              genre_ids: Array.isArray(item.genres) ? item.genres.map((g: any) => typeof g === 'object' ? g.id : g) : [],
+              media_type: resolvedType,
             }],
             total_results: 1,
           };
