@@ -328,6 +328,15 @@ export class MoviesService {
         LIMIT $${pIdx++} OFFSET $${pIdx++}
       `;
 
+      const countSql = `
+        SELECT COUNT(*)::INT AS total
+        FROM user_movies um
+        JOIN movies m ON um.movie_id = m.id
+        WHERE ${conditions.join(' AND ')}
+      `;
+      const countRes = await pool.query(countSql, params);
+      const total = countRes.rows[0]?.total || 0;
+
       params.push(limit, offset);
       const { rows } = await pool.query(sql, params);
       const cleanedRows = rows.map(r => {
@@ -338,7 +347,7 @@ export class MoviesService {
           custom_genres,
         };
       });
-      return { movies: cleanedRows, total: cleanedRows.length, page, limit };
+      return { movies: cleanedRows, total, page, limit };
     }
 
     // In-Memory resilient fallback query
@@ -510,7 +519,10 @@ export class MoviesService {
       return 0;
     });
 
-    return { movies: filtered, total: filtered.length, page, limit };
+    const total = filtered.length;
+    const offset = (page - 1) * limit;
+    const paged = filtered.slice(offset, offset + limit);
+    return { movies: paged, total, page, limit };
   }
 
   static async getMovieById(userId: string, userMovieId: string) {
