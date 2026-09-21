@@ -218,27 +218,19 @@ export class MoviesService {
       let searchOrderClause = '';
       if (search && search.trim()) {
         const queryTerm = search.trim().toLowerCase();
-        const pAny = `%${queryTerm}%`;
-        const pStart = `${queryTerm}%`;
-        const pWord = `% ${queryTerm}%`;
-
+        const searchParamIdx = pIdx++;
         conditions.push(`(
-          LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pIdx} OR
-          LOWER(COALESCE(um.custom_director, m.director, '')) LIKE $${pIdx} OR
-          LOWER(COALESCE(m.overview, '')) LIKE $${pIdx}
+          LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(um.custom_director, m.director, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%'
         )`);
-        params.push(pAny);
-        const pAnyIdx = pIdx++;
-
-        params.push(pStart, pWord);
-        const pStartIdx = pIdx++;
-        const pWordIdx = pIdx++;
+        params.push(queryTerm);
 
         searchOrderClause = `
           CASE
-            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pStartIdx} THEN 0
-            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pWordIdx} THEN 1
-            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${pAnyIdx} THEN 2
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE $${searchParamIdx} || '%' THEN 0
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE '% ' || $${searchParamIdx} || '%' THEN 1
+            WHEN LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' THEN 2
             ELSE 3
           END ASC,
         `;
@@ -290,24 +282,22 @@ export class MoviesService {
         const matchName = pgMatch ? pgMatch.name : gidStr;
 
         conditions.push(`(
-          LOWER(um.assigned_genre) = LOWER($${pIdx})
+          LOWER(COALESCE(um.assigned_genre, '')) = LOWER($${pIdx})
+          OR EXISTS (
+            SELECT 1 FROM user_movie_custom_genres umcg
+            JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+            WHERE umcg.user_movie_id = um.id AND (
+              cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+            )
+          )
           OR (
-            um.assigned_genre IS NULL AND (
-              EXISTS (
-                SELECT 1 FROM user_movie_custom_genres umcg
-                JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
-                WHERE umcg.user_movie_id = um.id AND (
-                  cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
-                )
-              )
-              OR (
-                NOT EXISTS (SELECT 1 FROM user_movie_custom_genres WHERE user_movie_id = um.id)
-                AND (
-                  (m.genres->0->>'id' = $${pIdx} OR LOWER(m.genres->0->>'name') = LOWER($${pIdx}))
-                  AND NOT (LOWER(m.genres->0->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
-                  AND NOT (m.genres->0->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
-                )
-              )
+            (um.assigned_genre IS NULL OR um.assigned_genre = '') AND
+            NOT EXISTS (SELECT 1 FROM user_movie_custom_genres WHERE user_movie_id = um.id) AND
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.genres::jsonb) = 'array' THEN m.genres::jsonb ELSE '[]'::jsonb END) elem
+              WHERE (elem->>'id' = $${pIdx} OR LOWER(elem->>'name') = LOWER($${pIdx}))
+                AND NOT (LOWER(elem->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+                AND NOT (elem->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
             )
           )
         )`);
@@ -556,10 +546,25 @@ export class MoviesService {
     }
     if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
       const gidStr = String(genreId).trim().toLowerCase();
-      filtered = filtered.filter(m =>
-        (m.genres || []).some((g: any) => String(g.id) === gidStr || (g.name && g.name.toLowerCase() === gidStr)) ||
-        ((m as any).custom_genres || []).some((cg: any) => String(cg.id) === gidStr || (cg.name && cg.name.toLowerCase() === gidStr))
+      const pgMatch = PREDEFINED_GENRES.find(
+        pg => pg.id === gidStr || String(pg.tmdb_id) === gidStr || pg.name.toLowerCase() === gidStr
       );
+      const matchName = pgMatch ? pgMatch.name.toLowerCase() : gidStr;
+
+      filtered = filtered.filter(m => {
+        if (m.assigned_genre && m.assigned_genre.toLowerCase() === matchName) return true;
+        const customList = ((m as any).custom_genres || []).map((cg: any) => (cg.name || cg.id || '').toLowerCase());
+        if (customList.includes(matchName) || customList.includes(gidStr)) return true;
+        if (!m.assigned_genre && (!m.custom_genres || (m.custom_genres as any[]).length === 0)) {
+          const excluded = ((m as any).excluded_genres || []).map((e: string) => String(e).toLowerCase());
+          return (m.genres || []).some((g: any) =>
+            !excluded.includes(String(g.id).toLowerCase()) &&
+            !excluded.includes((g.name || '').toLowerCase()) &&
+            (String(g.id).toLowerCase() === gidStr || (g.name && g.name.toLowerCase() === matchName))
+          );
+        }
+        return false;
+      });
     }
     if (tagId) {
       filtered = filtered.filter(m => (m.tags || []).some((t: any) => String(t.id) === String(tagId) || (t.name && t.name.toLowerCase() === String(tagId).toLowerCase())));
