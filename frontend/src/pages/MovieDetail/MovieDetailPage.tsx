@@ -73,6 +73,7 @@ import { MovieCard } from '../../components/common/MovieCard.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { formatRuntime } from '../../utils/formatters.js';
 
 export const MovieDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -545,7 +546,7 @@ export const MovieDetailPage: React.FC = () => {
               <Typography variant="body1" sx={{ color: '#94A3B8', fontWeight: 500 }}>
                 {movie.media_type === 'tv'
                   ? `${movie.first_air_date ? movie.first_air_date.substring(0, 4) : (movie.release_date?.substring(0, 4) || 'TBD')}${movie.last_air_date && movie.last_air_date.substring(0, 4) !== (movie.first_air_date || movie.release_date || '').substring(0, 4) ? `–${movie.last_air_date.substring(0, 4)}` : ''} • ${movie.number_of_seasons || 1} ${movie.number_of_seasons === 1 ? 'Season' : 'Seasons'}${movie.number_of_episodes ? ` • ${movie.number_of_episodes} Episodes` : ''} • ${movie.created_by && movie.created_by.length > 0 ? `Created by ${movie.created_by.map((c: any) => c.name).join(', ')}` : (movie.director ? `Directed by ${movie.director}` : '')}`
-                  : `${movie.release_date?.substring(0, 4)} • ${movie.runtime ? `${movie.runtime} min` : 'Runtime TBD'} • Directed by ${movie.director || 'Unknown'}`}
+                  : `${movie.release_date?.substring(0, 4)} • ${movie.runtime ? formatRuntime(movie.runtime) : 'Runtime TBD'} • Directed by ${movie.director || 'Unknown'}`}
               </Typography>
 
               {/* Ratings */}
@@ -1906,7 +1907,9 @@ export const MovieDetailPage: React.FC = () => {
                   </Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <Typography variant="body2" sx={{ color: '#64748B' }}>Runtime</Typography>
-                    <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{movie.runtime ? `${movie.runtime} min` : 'TBD'}</Typography>
+                    <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>
+                      {movie.runtime ? `${formatRuntime(movie.runtime)} (${movie.runtime} min)` : 'TBD'}
+                    </Typography>
                   </Box>
                 </>
               )}

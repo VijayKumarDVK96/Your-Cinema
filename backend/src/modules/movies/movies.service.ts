@@ -343,6 +343,13 @@ export class MoviesService {
           um.is_favorite,
           um.personal_notes,
           um.assigned_genre,
+          um.custom_title,
+          um.custom_overview,
+          um.custom_poster_url,
+          um.custom_backdrop_url,
+          um.custom_runtime,
+          um.custom_director,
+          um.is_customized,
           (
             SELECT json_build_object('id', cg.id, 'name', cg.name, 'color', cg.color, 'description', cg.description, 'is_predefined', false)
             FROM custom_genres cg
@@ -350,6 +357,33 @@ export class MoviesService {
             WHERE umcg.user_movie_id = um.id
             LIMIT 1
           ) AS custom_genre,
+          COALESCE(
+            (
+              SELECT json_agg(json_build_object('id', cg.id, 'name', cg.name, 'color', cg.color, 'description', cg.description, 'is_predefined', false))
+              FROM custom_genres cg
+              JOIN user_movie_custom_genres umcg ON cg.id = umcg.custom_genre_id
+              WHERE umcg.user_movie_id = um.id
+            ),
+            '[]'::json
+          ) AS custom_genres,
+          COALESCE(
+            (
+              SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+              FROM tags t
+              JOIN user_movie_tags umt ON t.id = umt.tag_id
+              WHERE umt.user_movie_id = um.id
+            ),
+            '[]'::json
+          ) AS tags,
+          COALESCE(
+            (
+              SELECT json_agg(json_build_object('id', w.id, 'name', w.name, 'parent_id', w.parent_id))
+              FROM watchlists w
+              JOIN watchlist_movies wm ON wm.watchlist_id = w.id
+              WHERE wm.user_movie_id = um.id
+            ),
+            '[]'::json
+          ) AS watchlists,
           COALESCE(um.excluded_genres, ARRAY[]::TEXT[]) AS excluded_genres,
           COALESCE(mpp.last_played_position_sec, um.playback_position_sec, 0) AS playback_position_sec,
           mpp.last_played_time_formatted,
@@ -389,6 +423,8 @@ export class MoviesService {
                 'provider_name', ms.provider_name,
                 'provider_icon', ms.provider_icon,
                 'external_url', ms.external_url,
+                'external_file_id', ms.external_file_id,
+                'file_name', ms.file_name,
                 'quality', ms.quality
               ))
               FROM movie_sources ms
@@ -479,6 +515,15 @@ export class MoviesService {
         last_played_time_formatted: prog ? prog.last_played_time_formatted : undefined,
         last_played_source_type: prog ? prog.source_type : undefined,
         last_played_source_id: prog ? prog.source_id : undefined,
+        custom_title: um.custom_title,
+        custom_overview: um.custom_overview,
+        custom_poster_url: um.custom_poster_url,
+        custom_backdrop_url: um.custom_backdrop_url,
+        custom_runtime: um.custom_runtime,
+        custom_director: um.custom_director,
+        is_customized: um.is_customized,
+        assigned_genre: um.assigned_genre,
+        excluded_genres: um.excluded_genres || [],
         title: um.custom_title || m.title,
         overview: um.custom_overview || m.overview,
         poster_path: um.custom_poster_url || m.poster_path,

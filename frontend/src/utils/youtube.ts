@@ -5,9 +5,21 @@
 export function extractYouTubeId(url?: string | null): string | null {
   if (!url) return null;
   const cleanUrl = url.trim();
-  const match = cleanUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+  
+  // Regex matching various YouTube formats
+  const regExp = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/i;
+  const match = cleanUrl.match(regExp);
   if (match && match[1]) return match[1];
-  if (/^[\w-]{11}$/.test(cleanUrl)) return cleanUrl;
+
+  try {
+    const parsed = new URL(cleanUrl);
+    if (parsed.searchParams.has('v')) {
+      const v = parsed.searchParams.get('v');
+      if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+    }
+  } catch {}
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) return cleanUrl;
   return null;
 }
 
@@ -16,7 +28,8 @@ export function getYouTubeEmbedUrl(urlOrId?: string | null, startSec: number = 0
   if (!id) return null;
   const start = Math.max(0, Math.floor(startSec));
   const startParam = start > 0 ? `&start=${start}` : '';
-  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&enablejsapi=1${startParam}`;
+  const originParam = typeof window !== 'undefined' && window.location?.origin ? `&origin=${encodeURIComponent(window.location.origin)}` : '';
+  return `https://www.youtube.com/embed/${id}?autoplay=1&enablejsapi=1&playsinline=1&rel=0${startParam}${originParam}`;
 }
 
 export function isYouTubeSource(source?: {

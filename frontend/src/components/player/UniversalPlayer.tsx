@@ -243,6 +243,15 @@ export const UniversalPlayer: React.FC = () => {
     let isSubscribed = true;
     let checkInterval: any = null;
 
+    // Dynamically ensure YouTube API script is loaded
+    if (typeof window !== 'undefined' && !window.YT) {
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.body.appendChild(tag);
+      }
+    }
+
     const initYt = () => {
       if (!isSubscribed) return;
       const elem = document.getElementById(ytContainerId);
@@ -257,14 +266,6 @@ export const UniversalPlayer: React.FC = () => {
         }
 
         const player = new window.YT.Player(ytContainerId, {
-          videoId: ytId,
-          playerVars: {
-            autoplay: 1,
-            start: Math.floor(initialSec),
-            enablejsapi: 1,
-            modestbranding: 1,
-            rel: 0,
-          },
           events: {
             onReady: (event: any) => {
               if (!isSubscribed) return;
@@ -304,7 +305,7 @@ export const UniversalPlayer: React.FC = () => {
     };
 
     if (window.YT?.Player) {
-      const t = setTimeout(initYt, 80);
+      const t = setTimeout(initYt, 100);
       return () => {
         isSubscribed = false;
         clearTimeout(t);
@@ -315,11 +316,11 @@ export const UniversalPlayer: React.FC = () => {
           clearInterval(checkInterval);
           initYt();
         }
-      }, 200);
+      }, 250);
 
       const timeout = setTimeout(() => {
         if (checkInterval) clearInterval(checkInterval);
-      }, 4000);
+      }, 5000);
 
       return () => {
         isSubscribed = false;
@@ -867,11 +868,16 @@ export const UniversalPlayer: React.FC = () => {
 
         {/* Case 2: YouTube In-App Player (Trailer / Full Movie) */}
         {isYouTube && ytId && (
-          <Box sx={{ width: '100%', height: '540px', position: 'relative' }}>
-            {/* Dynamic YouTube container mounted by API */}
-            <div
+          <Box sx={{ width: '100%', height: '540px', backgroundColor: '#000', position: 'relative' }} key={`yt-player-${playerKey}-${ytId}`}>
+            <iframe
               id={ytContainerId}
-              style={{ width: '100%', height: '100%' }}
+              src={ytEmbedUrl || `https://www.youtube.com/embed/${ytId}?autoplay=1&enablejsapi=1&playsinline=1`}
+              title={`${activeMovie.title} YouTube Player`}
+              width="100%"
+              height="100%"
+              style={{ border: 'none', backgroundColor: '#000', width: '100%', height: '100%' }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
             />
           </Box>
         )}

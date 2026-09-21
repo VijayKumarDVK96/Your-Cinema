@@ -43,6 +43,7 @@ import { EmptyState } from '../../components/feedback/EmptyState.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { formatRuntime } from '../../utils/formatters.js';
 import { LANGUAGE_LIST } from '../../components/common/EditMovieModal.js';
 
 const STORAGE_KEY = 'my_cinema_my_movies_filters';
@@ -1031,7 +1032,7 @@ export const MyMoviesPage: React.FC = () => {
                       {year ? `${year} • ` : ''}
                       {movie.media_type === 'tv'
                         ? (movie.number_of_seasons ? `${movie.number_of_seasons} Seasons` : 'TV Series')
-                        : (movie.runtime ? `${movie.runtime} mins` : 'Movie')}
+                        : (movie.runtime ? formatRuntime(movie.runtime) : 'Movie')}
                       {movie.original_language ? ` • ${movie.original_language.toUpperCase()}` : ''}
                     </Typography>
 

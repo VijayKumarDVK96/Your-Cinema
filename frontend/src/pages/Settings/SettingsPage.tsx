@@ -241,18 +241,65 @@ export const SettingsPage: React.FC = () => {
     try {
       const [moviesRes, watchlistsRes, genresRes, tagsRes] = await Promise.all([
         api.get('/movies?limit=9999'),
-        api.get('/watchlists'),
+        api.get('/watchlists?limit=1000'),
         api.get('/genres'),
         api.get('/tags'),
       ]);
+
+      const rawMovies = moviesRes.data?.data?.movies || [];
+      const exportedMovies = rawMovies.map((m: any) => ({
+        id: m.id,
+        movie_id: m.movie_id,
+        user_movie_id: m.user_movie_id,
+        tmdb_id: m.tmdb_id,
+        media_type: m.media_type || 'movie',
+        title: m.title,
+        original_title: m.original_title,
+        release_date: m.release_date,
+        original_language: m.original_language,
+        // All Custom Overrides & Selections
+        custom_title: m.custom_title || null,
+        custom_overview: m.custom_overview || null,
+        custom_poster_url: m.custom_poster_url || (m.poster_path?.startsWith('http') ? m.poster_path : null),
+        custom_backdrop_url: m.custom_backdrop_url || (m.backdrop_path?.startsWith('http') ? m.backdrop_path : null),
+        custom_runtime: m.custom_runtime || null,
+        custom_director: m.custom_director || null,
+        is_customized: Boolean(m.is_customized || m.custom_poster_url || m.custom_backdrop_url || m.custom_title || m.custom_director),
+        assigned_genre: m.assigned_genre || null,
+        excluded_genres: Array.isArray(m.excluded_genres) ? m.excluded_genres : [],
+        // User Status & Rating
+        watch_status: m.watch_status || 'unwatched',
+        personal_rating: m.personal_rating ?? null,
+        is_favorite: Boolean(m.is_favorite),
+        personal_notes: m.personal_notes || null,
+        current_season: m.current_season || 1,
+        current_episode: m.current_episode || 1,
+        playback_position_sec: m.playback_position_sec || 0,
+        trailer_url: m.trailer_url || null,
+        // Relations
+        sources: Array.isArray(m.sources) ? m.sources : [],
+        custom_genres: Array.isArray(m.custom_genres) ? m.custom_genres : (m.custom_genre ? [m.custom_genre] : []),
+        tags: Array.isArray(m.tags) ? m.tags : [],
+        watchlists: Array.isArray(m.watchlists) ? m.watchlists : [],
+      }));
+
+      const rawWatchlists = Array.isArray(watchlistsRes.data?.data)
+        ? watchlistsRes.data?.data
+        : (watchlistsRes.data?.data?.watchlists || []);
+
       const payload = {
         exportedAt: new Date().toISOString(),
-        version: '1.0',
-        movies: moviesRes.data?.data?.movies || [],
-        watchlists: Array.isArray(watchlistsRes.data?.data) ? watchlistsRes.data?.data : (watchlistsRes.data?.data?.watchlists || []),
+        version: '2.0',
+        userPreferences: {
+          preferred_runtime_min: user?.preferred_runtime_min,
+          preferred_runtime_max: user?.preferred_runtime_max,
+        },
+        movies: exportedMovies,
+        watchlists: rawWatchlists,
         customGenres: genresRes.data?.data?.custom || [],
         tags: tagsRes.data?.data || [],
       };
+
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -279,23 +326,74 @@ export const SettingsPage: React.FC = () => {
       if (!payload.version || !Array.isArray(payload.movies)) {
         throw new Error('Invalid backup file format. Please use a file exported from Your Cinema.');
       }
-      // Import custom genres first
+
+      // 1. Import and map custom genres
       const genreIdMap: Record<string, string> = {};
+      const genreNameMap: Record<string, string> = {};
       for (const cg of (payload.customGenres || [])) {
         try {
           const res = await api.post('/genres', { name: cg.name, color: cg.color, description: cg.description });
-          if (res.data?.data?.id) genreIdMap[cg.id] = res.data.data.id;
-        } catch { /* genre may already exist */ }
+          if (res.data?.data?.id) {
+            genreIdMap[cg.id] = res.data.data.id;
+            genreNameMap[cg.name.toLowerCase()] = res.data.data.id;
+          }
+        } catch {
+          // Genre may already exist, query to match
+          try {
+            const list = await api.get('/genres');
+            const found = (list.data?.data?.custom || []).find((x: any) => x.name.toLowerCase() === (cg.name || '').toLowerCase());
+            if (found) {
+              genreIdMap[cg.id] = found.id;
+              genreNameMap[cg.name.toLowerCase()] = found.id;
+            }
+          } catch {}
+        }
       }
-      // Import tags
+
+      // 2. Import and map tags
       const tagIdMap: Record<string, string> = {};
+      const tagNameMap: Record<string, string> = {};
       for (const tag of (payload.tags || [])) {
         try {
-          const res = await api.post('/tags', { name: tag.name });
-          if (res.data?.data?.id) tagIdMap[tag.id] = res.data.data.id;
-        } catch { /* tag may already exist */ }
+          const res = await api.post('/tags', { name: tag.name, color: tag.color });
+          if (res.data?.data?.id) {
+            tagIdMap[tag.id] = res.data.data.id;
+            tagNameMap[tag.name.toLowerCase()] = res.data.data.id;
+          }
+        } catch {
+          try {
+            const list = await api.get('/tags');
+            const found = (list.data?.data || []).find((t: any) => t.name.toLowerCase() === (tag.name || '').toLowerCase());
+            if (found) {
+              tagIdMap[tag.id] = found.id;
+              tagNameMap[tag.name.toLowerCase()] = found.id;
+            }
+          } catch {}
+        }
       }
-      // Import movies with all customizations, OTT/Drive sources & continue watching progress
+
+      // 3. Import and map watchlists
+      const watchlistIdMap: Record<string, string> = {};
+      for (const wl of (payload.watchlists || [])) {
+        try {
+          const res = await api.post('/watchlists', {
+            name: wl.name,
+            description: wl.description,
+            cover_image_url: wl.cover_image_url,
+          });
+          if (res.data?.data?.id) {
+            watchlistIdMap[wl.id] = res.data.data.id;
+          }
+        } catch {
+          try {
+            const list = await api.get('/watchlists?limit=1000');
+            const found = (list.data?.data?.watchlists || list.data?.data || []).find((w: any) => w.name.toLowerCase() === (wl.name || '').toLowerCase());
+            if (found) watchlistIdMap[wl.id] = found.id;
+          } catch {}
+        }
+      }
+
+      // 4. Import movies with all customized posters, backdrops, overrides & streaming sources
       let importedCount = 0;
       for (const movie of (payload.movies || [])) {
         try {
@@ -315,21 +413,26 @@ export const SettingsPage: React.FC = () => {
             });
             userMovieId = addRes.data?.data?.user_movie_id || addRes.data?.data?.id;
           } catch {
-            // Already in library, fetch movie list to match userMovieId
+            // Already in library, query list to find userMovieId
             const listRes = await api.get('/movies?limit=9999');
             const found = (listRes.data?.data?.movies || []).find((m: any) => m.tmdb_id === tmdbId);
             if (found) userMovieId = found.user_movie_id;
           }
 
           if (userMovieId) {
-            // 1. Restore custom overrides and trailer
+            const posterToRestore = movie.custom_poster_url || (movie.poster_path?.startsWith('http') ? movie.poster_path : null);
+            const backdropToRestore = movie.custom_backdrop_url || (movie.backdrop_path?.startsWith('http') ? movie.backdrop_path : null);
+
+            // 1. Restore all custom overrides (poster, backdrop, title, overview, director, runtime, etc.)
             await api.patch(`/movies/${userMovieId}`, {
               custom_title: movie.custom_title || null,
               custom_overview: movie.custom_overview || null,
               custom_director: movie.custom_director || null,
               custom_runtime: movie.custom_runtime || null,
-              custom_poster_url: movie.custom_poster_url || null,
-              custom_backdrop_url: movie.custom_backdrop_url || null,
+              custom_poster_url: posterToRestore,
+              custom_backdrop_url: backdropToRestore,
+              assigned_genre: movie.assigned_genre || null,
+              excluded_genres: Array.isArray(movie.excluded_genres) ? movie.excluded_genres : [],
               trailer_url: movie.trailer_url || null,
               watch_status: movie.watch_status || 'unwatched',
               personal_rating: movie.personal_rating ?? null,
@@ -367,12 +470,32 @@ export const SettingsPage: React.FC = () => {
               }
             }
 
-            // 4. Attach Custom Genres if mapped
+            // 4. Re-attach Custom Genres
             if (Array.isArray(movie.custom_genres)) {
               for (const cg of movie.custom_genres) {
-                const targetId = genreIdMap[cg.id] || cg.id;
+                const targetId = genreIdMap[cg.id] || genreNameMap[(cg.name || '').toLowerCase()] || cg.id;
                 try {
                   await api.post('/genres/attach', { userMovieId, customGenreId: targetId });
+                } catch {}
+              }
+            }
+
+            // 5. Re-attach Tags
+            if (Array.isArray(movie.tags)) {
+              for (const tag of movie.tags) {
+                const targetTagId = tagIdMap[tag.id] || tagNameMap[(tag.name || '').toLowerCase()] || tag.id;
+                try {
+                  await api.post('/tags/attach', { userMovieId, tagId: targetTagId });
+                } catch {}
+              }
+            }
+
+            // 6. Restore Watchlist memberships
+            if (Array.isArray(movie.watchlists)) {
+              for (const wl of movie.watchlists) {
+                const targetWlId = watchlistIdMap[wl.id] || wl.id;
+                try {
+                  await api.post(`/watchlists/${targetWlId}/movies`, { userMovieId });
                 } catch {}
               }
             }
@@ -381,11 +504,16 @@ export const SettingsPage: React.FC = () => {
           importedCount++;
         } catch { /* ignore individual movie error */ }
       }
+
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       queryClient.invalidateQueries({ queryKey: ['tags'] });
-      setImportMsg({ type: 'success', text: `Full sanctuary restore complete! ${importedCount} titles with OTT links and progress restored.` });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+      setImportMsg({
+        type: 'success',
+        text: `Full sanctuary restore complete! ${importedCount} titles with custom posters, backdrops, metadata, OTT links, and progress successfully restored.`
+      });
     } catch (err: any) {
       setImportMsg({ type: 'error', text: err.message || 'Import failed. Please check the file format.' });
     } finally {

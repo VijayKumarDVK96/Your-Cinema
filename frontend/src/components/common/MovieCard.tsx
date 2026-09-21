@@ -11,6 +11,7 @@ import { UserMovie } from '../../types/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { formatRuntime } from '../../utils/formatters.js';
 
 interface MovieCardProps {
   movie: UserMovie;
@@ -313,7 +314,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
             <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 500 }}>
               {movie.media_type === 'tv'
                 ? `${year ? `${year} • ` : ''}${movie.number_of_seasons ? `${movie.number_of_seasons} ${movie.number_of_seasons === 1 ? 'Season' : 'Seasons'}` : 'Series'}`
-                : `${year}${movie.runtime ? ` • ${movie.runtime}m` : ''}`}
+                : `${year}${movie.runtime ? ` • ${formatRuntime(movie.runtime)}` : ''}`}
             </Typography>
 
             {/* Personal Rating or TMDB Rating */}
