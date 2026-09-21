@@ -63,7 +63,6 @@ export const MovieCard: React.FC<MovieCardProps> = ({
       (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
   }
 
-  const tLower = (movie.title || '').toLowerCase();
   let ottInfo: { name: string; icon?: string; url?: string } | null = null;
   if (primarySource) {
     ottInfo = {
@@ -71,14 +70,6 @@ export const MovieCard: React.FC<MovieCardProps> = ({
       icon: primarySource.provider_icon,
       url: primarySource.external_url || undefined,
     };
-  } else if (tLower.includes('greatest of all time') || tLower === 'goat' || tLower.includes('inception')) {
-    ottInfo = { name: 'Netflix', icon: 'netflix', url: `https://www.netflix.com/search?q=${encodeURIComponent(movie.title)}` };
-  } else if (tLower.includes('interstellar') || tLower.includes('arrival')) {
-    ottInfo = { name: 'Prime Video', icon: 'prime', url: `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(movie.title)}` };
-  } else if (tLower.includes('vikram')) {
-    ottInfo = { name: 'JioHotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
-  } else if (tLower.includes('dune') || tLower.includes('oppenheimer')) {
-    ottInfo = { name: 'JioCinema', icon: 'jiocinema', url: `https://www.jiocinema.com/search/${encodeURIComponent(movie.title)}` };
   }
 
   const handleCardClick = () => {

@@ -69,10 +69,8 @@ interface WatchlistNode {
 export const WatchlistsPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  // Navigation state: current parent folder (null means Root)
-  const [currentParentId, setCurrentParentId] = useState<string | null>(null);
+  // Selected Watchlist in right content pane
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-  const [page, setPage] = useState<number>(1);
   const [moviesPage, setMoviesPage] = useState<number>(1);
   const [watchlistToDelete, setWatchlistToDelete] = useState<{ id: string; name: string } | null>(null);
 
@@ -91,20 +89,6 @@ export const WatchlistsPage: React.FC = () => {
   const [newListDesc, setNewListDesc] = useState('');
   const [selectedParentIdInput, setSelectedParentIdInput] = useState<string>('root');
 
-  // Query Watchlists for current parent level
-  const { data: watchlistsData, isLoading } = useQuery({
-    queryKey: ['watchlists', { parentId: currentParentId || 'root', page }],
-    queryFn: async () => {
-      const p = currentParentId || 'root';
-      const res = await api.get(`/watchlists?parentId=${p}&page=${page}&limit=50`);
-      return res.data?.data;
-    },
-  });
-
-  const watchlists: any[] = Array.isArray(watchlistsData) ? watchlistsData : (watchlistsData?.watchlists || []);
-  const totalWatchlists: number = watchlistsData?.total ?? watchlists.length;
-  const totalPages = Math.max(1, Math.ceil(totalWatchlists / 50));
-
   // Query ALL watchlists flat (for tree hierarchy & parent selection dropdown & breadcrumbs)
   const { data: allWatchlistsData } = useQuery({
     queryKey: ['all-watchlists-flat'],
@@ -115,9 +99,18 @@ export const WatchlistsPage: React.FC = () => {
   });
   const flatWatchlists: any[] = Array.isArray(allWatchlistsData) ? allWatchlistsData : (allWatchlistsData?.watchlists || []);
 
-  // Extract system folders from root query or calculate fallbacks
+  // Query root watchlists to extract system folders & unassigned counts
+  const { data: rootWatchlistsData } = useQuery({
+    queryKey: ['watchlists-root'],
+    queryFn: async () => {
+      const res = await api.get('/watchlists?parentId=root&limit=50');
+      return res.data?.data;
+    },
+  });
+
   const systemFolders = useMemo(() => {
-    const sys = watchlists.filter((w: any) => w.is_system);
+    const rootLists: any[] = Array.isArray(rootWatchlistsData) ? rootWatchlistsData : (rootWatchlistsData?.watchlists || []);
+    const sys = rootLists.filter((w: any) => w.is_system);
     if (sys.length > 0) return sys;
     return [
       {
@@ -137,7 +130,7 @@ export const WatchlistsPage: React.FC = () => {
         movie_count: 0,
       },
     ];
-  }, [watchlists]);
+  }, [rootWatchlistsData]);
 
   // Build recursive tree of user watchlists
   const watchlistTree = useMemo(() => {
@@ -178,11 +171,14 @@ export const WatchlistsPage: React.FC = () => {
     return chain;
   };
 
-  const currentPath = currentParentId ? getWatchlistPath(currentParentId) : [];
+  // Active selected folder in right content area
+  const activeId = useMemo(() => {
+    if (selectedListId) return selectedListId;
+    if (flatWatchlists.length > 0) return flatWatchlists[0].id;
+    return 'unassigned-movies';
+  }, [selectedListId, flatWatchlists]);
 
-  // Default to first system folder or first watchlist on root
-  const activeId = selectedListId || (watchlists.length > 0 && !currentParentId ? watchlists[0].id : null);
-  const { data: activeList } = useQuery({
+  const { data: activeList, isLoading: isActiveListLoading } = useQuery({
     queryKey: ['watchlist', activeId, moviesPage],
     queryFn: async () => {
       if (!activeId) return null;
@@ -191,6 +187,13 @@ export const WatchlistsPage: React.FC = () => {
     },
     enabled: !!activeId,
   });
+
+  const activeBreadcrumbs = useMemo(() => {
+    if (!activeId || activeId.startsWith('unassigned')) {
+      return [{ id: activeId || 'unassigned', name: activeList?.name || 'Unassigned Queue' }];
+    }
+    return getWatchlistPath(activeId);
+  }, [activeId, activeList, flatWatchlists]);
 
   // Bulk Move / Copy Mutation
   const bulkMoveMutation = useMutation({
@@ -206,7 +209,7 @@ export const WatchlistsPage: React.FC = () => {
       setSelectedMovieIds([]);
       setBulkMoveModalOpen(false);
       queryClient.invalidateQueries({ queryKey: ['watchlist', activeId] });
-      queryClient.invalidateQueries({ queryKey: ['watchlists'] });
+      queryClient.invalidateQueries({ queryKey: ['watchlists-root'] });
       queryClient.invalidateQueries({ queryKey: ['all-watchlists-flat'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['movies'] });
@@ -230,12 +233,15 @@ export const WatchlistsPage: React.FC = () => {
       }
       if (newCreatedId) {
         setSelectedListId(newCreatedId);
+        setSelectedMovieIds([]);
+        setMoviesPage(1);
       }
       setNewListName('');
       setNewListDesc('');
       setCreateDialogOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['watchlists'] });
+      queryClient.invalidateQueries({ queryKey: ['watchlists-root'] });
       queryClient.invalidateQueries({ queryKey: ['all-watchlists-flat'] });
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] });
     },
   });
 
@@ -244,15 +250,23 @@ export const WatchlistsPage: React.FC = () => {
     mutationFn: async (id: string) => {
       await api.delete(`/watchlists/${id}`);
     },
-    onSuccess: () => {
-      if (selectedListId) setSelectedListId(null);
-      queryClient.invalidateQueries({ queryKey: ['watchlists'] });
+    onSuccess: (_, deletedId) => {
+      if (selectedListId === deletedId) {
+        setSelectedListId(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['watchlists-root'] });
       queryClient.invalidateQueries({ queryKey: ['all-watchlists-flat'] });
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] });
     },
   });
 
   const handleOpenCreateModal = (defaultParentId?: string) => {
-    setSelectedParentIdInput(defaultParentId || currentParentId || 'root');
+    const isCustomActive = activeId && !activeId.startsWith('unassigned');
+    const initialParent = defaultParentId !== undefined
+      ? defaultParentId
+      : (isCustomActive ? activeId : 'root');
+
+    setSelectedParentIdInput(initialParent);
     setNewListName('');
     setNewListDesc('');
     setCreateDialogOpen(true);
@@ -304,14 +318,13 @@ export const WatchlistsPage: React.FC = () => {
   const renderTreeItem = (node: WatchlistNode, depth: number = 0) => {
     const hasChildren = (node.children && node.children.length > 0) || (node.subfolder_count || 0) > 0;
     const isExpanded = expandedFolderIds.has(node.id);
-    const isSelected = selectedListId === node.id || (activeId === node.id && !selectedListId);
+    const isSelected = activeId === node.id;
 
     return (
       <React.Fragment key={node.id}>
         <ListItemButton
           onClick={() => {
             setSelectedListId(node.id);
-            setCurrentParentId(node.parent_id || null);
             setSelectedMovieIds([]);
             setMoviesPage(1);
           }}
@@ -416,12 +429,12 @@ export const WatchlistsPage: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
-          {currentParentId && (
+          {activeId && !activeId.startsWith('unassigned') && (
             <Button
               variant="outlined"
               color="secondary"
               startIcon={<CreateNewFolderIcon />}
-              onClick={() => handleOpenCreateModal(currentParentId)}
+              onClick={() => handleOpenCreateModal(activeId)}
               sx={{ fontWeight: 700 }}
             >
               Add Subfolder
@@ -431,7 +444,7 @@ export const WatchlistsPage: React.FC = () => {
             variant="contained"
             color="primary"
             startIcon={<AddIcon />}
-            onClick={() => handleOpenCreateModal()}
+            onClick={() => handleOpenCreateModal('root')}
             sx={{ fontWeight: 700 }}
           >
             Create Watchlist
@@ -493,7 +506,6 @@ export const WatchlistsPage: React.FC = () => {
                       key={sys.id}
                       onClick={() => {
                         setSelectedListId(sys.id);
-                        setCurrentParentId(null);
                         setSelectedMovieIds([]);
                         setMoviesPage(1);
                       }}
@@ -544,7 +556,6 @@ export const WatchlistsPage: React.FC = () => {
                       key={sys.id}
                       onClick={() => {
                         setSelectedListId(sys.id);
-                        setCurrentParentId(null);
                         setSelectedMovieIds([]);
                         setMoviesPage(1);
                       }}
@@ -594,7 +605,7 @@ export const WatchlistsPage: React.FC = () => {
                 CUSTOM FOLDERS ({flatWatchlists.length})
               </Typography>
               <Tooltip title="Create new root collection">
-                <IconButton size="small" onClick={() => handleOpenCreateModal()} sx={{ color: '#E5A93C', p: 0.3 }}>
+                <IconButton size="small" onClick={() => handleOpenCreateModal('root')} sx={{ color: '#E5A93C', p: 0.3 }}>
                   <AddIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               </Tooltip>
@@ -611,339 +622,157 @@ export const WatchlistsPage: React.FC = () => {
           </Paper>
         </Grid>
 
-        {/* Right Main Content Area */}
+        {/* Right Main Content Area: Selected Watchlist Detail & Movies */}
         <Grid item xs={12} md={8} lg={8.8}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {/* Breadcrumb Trail Navigation */}
-            <Box
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            {/* Folder Header Banner */}
+            <Paper
               sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                p: 1.5,
-                px: 2,
+                p: 2.5,
                 backgroundColor: '#0C101A',
-                borderRadius: 2,
-                border: '1px solid rgba(255, 255, 255, 0.07)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 2.5,
               }}
             >
-              <Breadcrumbs separator={<ChevronRightIcon sx={{ fontSize: 16, color: '#64748B' }} />}>
-                <Box
-                  onClick={() => {
-                    setCurrentParentId(null);
-                    setSelectedListId(null);
-                    setSelectedMovieIds([]);
-                    setPage(1);
-                    setMoviesPage(1);
-                  }}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.75,
-                    cursor: 'pointer',
-                    color: currentParentId === null ? '#E5A93C' : '#94A3B8',
-                    fontWeight: currentParentId === null ? 700 : 500,
-                    '&:hover': { color: '#E5A93C' },
-                  }}
-                >
-                  <HomeIcon sx={{ fontSize: 18 }} />
-                  <Typography variant="body2" sx={{ fontWeight: 'inherit', color: 'inherit' }}>
-                    Root Collections
-                  </Typography>
-                </Box>
-
-                {currentPath.map((item, index) => {
-                  const isLast = index === currentPath.length - 1;
-                  return (
-                    <Box
-                      key={item.id}
-                      onClick={() => {
-                        setCurrentParentId(item.id);
-                        setSelectedListId(item.id);
-                        setSelectedMovieIds([]);
-                        setPage(1);
-                        setMoviesPage(1);
-                      }}
-                      sx={{
-                        cursor: 'pointer',
-                        color: isLast ? '#E5A93C' : '#94A3B8',
-                        fontWeight: isLast ? 700 : 500,
-                        '&:hover': { color: '#E5A93C' },
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ fontWeight: 'inherit', color: 'inherit' }}>
-                        {item.name}
-                      </Typography>
-                    </Box>
-                  );
-                })}
-              </Breadcrumbs>
-
-              {currentParentId && (
-                <Tooltip title="Go up one folder level">
-                  <IconButton
-                    size="small"
+              {/* Breadcrumbs navigation */}
+              <Box sx={{ mb: 2 }}>
+                <Breadcrumbs separator={<ChevronRightIcon sx={{ fontSize: 16, color: '#64748B' }} />}>
+                  <Box
                     onClick={() => {
-                      const currentItem = flatWatchlists.find((w: any) => w.id === currentParentId);
-                      const parentOfCurrent = currentItem?.parent_id || null;
-                      setCurrentParentId(parentOfCurrent);
-                      setSelectedListId(parentOfCurrent);
+                      if (flatWatchlists.length > 0) {
+                        setSelectedListId(flatWatchlists[0].id);
+                      }
                       setSelectedMovieIds([]);
-                      setPage(1);
                       setMoviesPage(1);
                     }}
-                    sx={{ ml: 'auto', color: '#94A3B8', '&:hover': { color: '#E5A93C' } }}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      cursor: 'pointer',
+                      color: '#94A3B8',
+                      fontWeight: 500,
+                      '&:hover': { color: '#E5A93C' },
+                    }}
                   >
-                    <ArrowBackIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
+                    <HomeIcon sx={{ fontSize: 18 }} />
+                    <Typography variant="body2" sx={{ fontWeight: 'inherit', color: 'inherit' }}>
+                      Root Collections
+                    </Typography>
+                  </Box>
 
-            {/* Folder Cards Grid (Subfolders or Root Folders) */}
-            <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#F8FAFC', fontSize: '1.05rem' }}>
-                  {currentParentId ? 'Subfolders & Collections' : 'Watchlists & System Folders'}
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#64748B' }}>
-                  Showing {watchlists.length} of {totalWatchlists} items
-                </Typography>
-              </Box>
-
-              {isLoading ? (
-                <Typography variant="body2" sx={{ color: '#94A3B8', py: 4 }}>
-                  Loading watchlists...
-                </Typography>
-              ) : watchlists.length > 0 ? (
-                <Grid container spacing={2}>
-                  {watchlists.map((wl: any) => {
-                    const isActive = wl.id === activeId || (wl.id === 'unassigned-movies' && activeId === 'unassigned');
-                    const isSystem = Boolean(wl.is_system);
-                    const isTvSystem = wl.system_type === 'series';
-                    const hasSubfolders = (wl.subfolder_count || 0) > 0;
-
+                  {activeBreadcrumbs.map((item, index) => {
+                    const isLast = index === activeBreadcrumbs.length - 1;
                     return (
-                      <Grid item xs={12} sm={6} lg={4} key={wl.id}>
-                        <Card
-                          onClick={() => {
-                            setSelectedListId(wl.id);
+                      <Box
+                        key={item.id}
+                        onClick={() => {
+                          if (!isLast) {
+                            setSelectedListId(item.id);
                             setSelectedMovieIds([]);
                             setMoviesPage(1);
-                          }}
-                          sx={{
-                            cursor: 'pointer',
-                            border: isActive
-                              ? '2px solid #E5A93C'
-                              : isSystem
-                              ? isTvSystem
-                                ? '1px solid rgba(168, 85, 247, 0.4)'
-                                : '1px solid rgba(56, 189, 248, 0.4)'
-                              : '1px solid rgba(255,255,255,0.08)',
-                            backgroundColor: isActive
-                              ? '#131926'
-                              : isSystem
-                              ? isTvSystem
-                                ? 'rgba(30, 20, 45, 0.85)'
-                                : 'rgba(15, 23, 42, 0.85)'
-                              : '#0B0F19',
-                            transition: 'all 0.2s ease',
-                            '&:hover': { borderColor: '#E5A93C', transform: 'translateY(-2px)' },
-                          }}
-                        >
-                          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, p: 2 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
-                                {isSystem ? (
-                                  isTvSystem ? (
-                                    <TvIcon sx={{ color: '#A855F7', fontSize: 24 }} />
-                                  ) : (
-                                    <InventoryIcon sx={{ color: '#38BDF8', fontSize: 24 }} />
-                                  )
-                                ) : hasSubfolders ? (
-                                  <FolderOpenIcon sx={{ color: '#E5A93C', fontSize: 24 }} />
-                                ) : (
-                                  <PlaylistPlayIcon sx={{ color: '#A78BFA', fontSize: 24 }} />
-                                )}
-                                <Typography variant="h6" sx={{ fontWeight: 700, color: '#F8FAFC', fontSize: '0.95rem' }}>
-                                  {wl.name}
-                                </Typography>
-                              </Box>
-                              {!isSystem && (
-                                <IconButton
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setWatchlistToDelete({ id: wl.id, name: wl.name });
-                                  }}
-                                  sx={{ color: '#64748B', '&:hover': { color: '#EF4444' } }}
-                                >
-                                  <DeleteOutlineIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </Box>
-
-                            {wl.description && (
-                              <Typography
-                                variant="body2"
-                                sx={{
-                                  color: '#64748B',
-                                  fontSize: '0.78rem',
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 2,
-                                  WebkitBoxOrient: 'vertical',
-                                  overflow: 'hidden',
-                                }}
-                              >
-                                {wl.description}
-                              </Typography>
-                            )}
-
-                            {/* Chips & Badges */}
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 'auto', pt: 1 }}>
-                              {isSystem && (
-                                <Chip
-                                  label="SYSTEM FOLDER"
-                                  size="small"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: '0.65rem',
-                                    fontWeight: 800,
-                                    backgroundColor: isTvSystem ? 'rgba(168, 85, 247, 0.15)' : 'rgba(56, 189, 248, 0.15)',
-                                    color: isTvSystem ? '#C084FC' : '#38BDF8',
-                                    border: isTvSystem ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)',
-                                  }}
-                                />
-                              )}
-
-                              {wl.subfolder_count > 0 && (
-                                <Chip
-                                  icon={<FolderIcon sx={{ fontSize: '14px !important' }} />}
-                                  label={`${wl.subfolder_count} subfolder${wl.subfolder_count === 1 ? '' : 's'}`}
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCurrentParentId(wl.id);
-                                    setSelectedListId(wl.id);
-                                    setSelectedMovieIds([]);
-                                    setPage(1);
-                                  }}
-                                  sx={{
-                                    height: 22,
-                                    fontSize: '0.72rem',
-                                    fontWeight: 600,
-                                    backgroundColor: 'rgba(229, 169, 60, 0.15)',
-                                    color: '#E5A93C',
-                                    border: '1px solid rgba(229, 169, 60, 0.3)',
-                                    cursor: 'pointer',
-                                    '&:hover': { backgroundColor: 'rgba(229, 169, 60, 0.25)' },
-                                  }}
-                                />
-                              )}
-
-                              <Chip
-                                label={`${wl.movie_count || 0} ${isTvSystem ? 'series' : 'movies'}`}
-                                size="small"
-                                sx={{
-                                  height: 22,
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                  color: '#94A3B8',
-                                }}
-                              />
-
-                              {isSystem ? (
-                                <Button
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedListId(wl.id);
-                                    setSelectedMovieIds([]);
-                                    setMoviesPage(1);
-                                  }}
-                                  sx={{ ml: 'auto', fontSize: '0.72rem', fontWeight: 700, color: '#38BDF8', minWidth: 'auto', p: 0.5 }}
-                                >
-                                  View &rarr;
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCurrentParentId(wl.id);
-                                    setSelectedListId(wl.id);
-                                    setSelectedMovieIds([]);
-                                    setPage(1);
-                                  }}
-                                  sx={{ ml: 'auto', fontSize: '0.72rem', fontWeight: 700, color: '#38BDF8', minWidth: 'auto', p: 0.5 }}
-                                >
-                                  Open &rarr;
-                                </Button>
-                              )}
-                            </Box>
-                          </CardContent>
-                        </Card>
-                      </Grid>
+                          }
+                        }}
+                        sx={{
+                          cursor: isLast ? 'default' : 'pointer',
+                          color: isLast ? '#E5A93C' : '#94A3B8',
+                          fontWeight: isLast ? 700 : 500,
+                          '&:hover': isLast ? {} : { color: '#E5A93C' },
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 'inherit', color: 'inherit' }}>
+                          {item.name}
+                        </Typography>
+                      </Box>
                     );
                   })}
-                </Grid>
-              ) : (
-                <EmptyState
-                  icon={<FolderOpenIcon />}
-                  title="No collections or subfolders in this section"
-                  description="Create subcollections (e.g. MCU Collections, Harry Potter Collections) to categorize your films."
-                  actionLabel="Create Subcollection"
-                  onAction={() => handleOpenCreateModal(currentParentId || undefined)}
-                />
-              )}
+                </Breadcrumbs>
+              </Box>
 
-              {/* Server-Side Pagination for Watchlists */}
-              {totalWatchlists > 50 && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-                  <Pagination
-                    count={totalPages}
-                    page={page}
-                    onChange={(_, val) => setPage(val)}
-                    color="primary"
-                    sx={{
-                      '& .MuiPaginationItem-root': { color: '#94A3B8', '&.Mui-selected': { backgroundColor: '#E5A93C', color: '#000', fontWeight: 700 } },
-                    }}
-                  />
-                </Box>
-              )}
-            </Box>
-
-            {/* Selected Watchlist Titles Section */}
-            {activeList && (
-              <Box sx={{ mt: 1, pt: 3, borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-                  <Box>
-                    <Typography variant="h5" sx={{ fontWeight: 700, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {activeList.system_type === 'series' ? '📺' : '🎬'} {activeList.name}
-                      {activeList.is_system && (
-                        <Chip
-                          label="READ-ONLY SYSTEM FOLDER"
-                          size="small"
-                          sx={{
-                            backgroundColor: activeList.system_type === 'series' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(56, 189, 248, 0.15)',
-                            color: activeList.system_type === 'series' ? '#C084FC' : '#38BDF8',
-                            fontWeight: 700,
-                            height: 22,
-                            fontSize: '0.7rem',
-                          }}
-                        />
-                      )}
+              {/* Title, Details, & Actions */}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
+                <Box sx={{ minWidth: 240, flex: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                    <Typography variant="h5" sx={{ fontWeight: 800, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {activeList?.system_type === 'series' ? '📺' : activeList?.is_system ? '📦' : '📁'}{' '}
+                      {activeList?.name || 'Loading...'}
                     </Typography>
-                    {activeList.description && (
-                      <Typography variant="body2" sx={{ color: '#94A3B8', mt: 0.5 }}>
-                        {activeList.description}
-                      </Typography>
+
+                    {activeList?.is_system ? (
+                      <Chip
+                        label="READ-ONLY SYSTEM QUEUE"
+                        size="small"
+                        sx={{
+                          backgroundColor: activeList.system_type === 'series' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                          color: activeList.system_type === 'series' ? '#C084FC' : '#38BDF8',
+                          fontWeight: 700,
+                          height: 22,
+                          fontSize: '0.7rem',
+                        }}
+                      />
+                    ) : (
+                      <Chip
+                        label={`${activeList?.total ?? activeList?.movies?.length ?? 0} titles`}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(229, 169, 60, 0.15)',
+                          color: '#E5A93C',
+                          fontWeight: 700,
+                          height: 22,
+                          fontSize: '0.7rem',
+                        }}
+                      />
                     )}
                   </Box>
 
-                  {/* Bulk Toolbar Controls */}
-                  {activeList.movies && activeList.movies.length > 0 && (
+                  {activeList?.description && (
+                    <Typography variant="body2" sx={{ color: '#94A3B8', mt: 0.75 }}>
+                      {activeList.description}
+                    </Typography>
+                  )}
+                </Box>
+
+                {/* Folder Action Buttons */}
+                <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {!activeList?.is_system && activeId && (
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="secondary"
+                        startIcon={<CreateNewFolderIcon />}
+                        onClick={() => handleOpenCreateModal(activeId)}
+                        sx={{ fontWeight: 700 }}
+                      >
+                        Add Subfolder
+                      </Button>
+
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteOutlineIcon />}
+                        onClick={() => setWatchlistToDelete({ id: activeList.id, name: activeList.name })}
+                        sx={{ fontWeight: 600 }}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </Box>
+              </Box>
+            </Paper>
+
+            {/* Movies Content Area */}
+            {isActiveListLoading ? (
+              <Typography variant="body2" sx={{ color: '#94A3B8', py: 6, textAlign: 'center' }}>
+                Loading titles...
+              </Typography>
+            ) : activeList ? (
+              <Box>
+                {/* Bulk Toolbar Controls */}
+                {activeList.movies && activeList.movies.length > 0 && (
+                  <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                       <Button
                         size="small"
@@ -978,14 +807,15 @@ export const WatchlistsPage: React.FC = () => {
                           </Button>
                         </>
                       )}
-
-                      <Typography variant="caption" sx={{ color: '#E5A93C', fontWeight: 600 }}>
-                        {activeList.total || activeList.movie_count || activeList.movies?.length || 0} titles contained
-                      </Typography>
                     </Box>
-                  )}
-                </Box>
 
+                    <Typography variant="caption" sx={{ color: '#E5A93C', fontWeight: 600 }}>
+                      {activeList.total || activeList.movie_count || activeList.movies?.length || 0} titles contained
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* Movie Cards Grid */}
                 {activeList.movies && activeList.movies.length > 0 ? (
                   <Grid container spacing={2.5}>
                     {activeList.movies.map((m: any) => {
@@ -1031,11 +861,17 @@ export const WatchlistsPage: React.FC = () => {
                   <EmptyState
                     icon={<PlaylistPlayIcon />}
                     title="This collection is empty"
-                    description="Browse My Movies and assign movies to this collection."
+                    description={
+                      !activeList?.is_system
+                        ? 'Browse My Movies and assign movies to this collection, or add subfolders to organize your cinema.'
+                        : 'No unassigned titles remaining in this queue.'
+                    }
+                    actionLabel={!activeList?.is_system ? 'Add Subfolder' : undefined}
+                    onAction={!activeList?.is_system ? () => handleOpenCreateModal(activeId) : undefined}
                   />
                 )}
 
-                {/* Watchlist Movies Server-Side Pagination Bar */}
+                {/* Server-Side Pagination Bar */}
                 {activeList.movies && activeList.movies.length > 0 && (
                   <Box
                     sx={{
@@ -1076,7 +912,7 @@ export const WatchlistsPage: React.FC = () => {
                   </Box>
                 )}
               </Box>
-            )}
+            ) : null}
           </Box>
         </Grid>
       </Grid>

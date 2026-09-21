@@ -330,21 +330,6 @@ export const MovieDetailPage: React.FC = () => {
     return raw || getOttMeta(src.provider_name, src.provider_icon).getDefaultSearchUrl(movie.title);
   };
 
-  // Inferred OTT platform for known titles if sources are empty
-  const tLower = (movie.title || '').toLowerCase();
-  let fallbackOtt: { name: string; icon?: string; url?: string } | null = null;
-  if (ottSources.length === 0) {
-    if (tLower.includes('greatest of all time') || tLower === 'goat' || tLower.includes('inception')) {
-      fallbackOtt = { name: 'Netflix', icon: 'netflix', url: `https://www.netflix.com/search?q=${encodeURIComponent(movie.title)}` };
-    } else if (tLower.includes('interstellar') || tLower.includes('arrival')) {
-      fallbackOtt = { name: 'Prime Video', icon: 'prime', url: `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(movie.title)}` };
-    } else if (tLower.includes('vikram')) {
-      fallbackOtt = { name: 'JioHotstar', icon: 'hotstar', url: `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(movie.title)}` };
-    } else if (tLower.includes('dune') || tLower.includes('oppenheimer')) {
-      fallbackOtt = { name: 'JioCinema', icon: 'jiocinema', url: `https://www.jiocinema.com/search/${encodeURIComponent(movie.title)}` };
-    }
-  }
-
   const isResumable = Boolean(
     movie.playback_position_sec &&
     movie.playback_position_sec > 0 &&
@@ -359,18 +344,6 @@ export const MovieDetailPage: React.FC = () => {
         openPlayer(movie, primaryOttSource);
       } else {
         window.open(resolveOttUrl(primaryOttSource), '_blank', 'noopener,noreferrer');
-      }
-    } else if (fallbackOtt?.url) {
-      if (fallbackOtt.name.toLowerCase().includes('youtube')) {
-        openPlayer(movie, {
-          id: 'fallback-yt',
-          user_movie_id: movie.user_movie_id,
-          source_type: 'youtube',
-          provider_name: 'YouTube',
-          external_url: fallbackOtt.url,
-        } as any);
-      } else {
-        window.open(fallbackOtt.url, '_blank', 'noopener,noreferrer');
       }
     } else if (driveSource) {
       openPlayer(movie, driveSource);
@@ -526,17 +499,6 @@ export const MovieDetailPage: React.FC = () => {
                     }}
                   />
                 ))}
-                {ottSources.length === 0 && fallbackOtt && (
-                  <OttBadge
-                    providerName={fallbackOtt.name}
-                    providerIcon={fallbackOtt.icon}
-                    size="medium"
-                    interactive
-                    onClick={() => {
-                      if (fallbackOtt?.url) window.open(fallbackOtt.url, '_blank', 'noopener,noreferrer');
-                    }}
-                  />
-                )}
               </Box>
 
               <Typography variant="h3" sx={{ fontWeight: 800, color: '#F8FAFC', lineHeight: 1.1 }}>
@@ -648,8 +610,6 @@ export const MovieDetailPage: React.FC = () => {
                     ? `Resume Playback (${movie.last_played_time_formatted || `${Math.floor((movie.playback_position_sec || 0) / 60)}m`})`
                     : primaryOttSource
                     ? (isYouTubeSource(primaryOttSource) ? 'Play on YouTube' : `Stream on ${primaryOttSource.provider_name}`)
-                    : fallbackOtt
-                    ? (fallbackOtt.name.toLowerCase().includes('youtube') ? 'Play on YouTube' : `Stream on ${fallbackOtt.name}`)
                     : driveSource
                     ? (movie.media_type === 'tv' ? 'Play Episode' : 'Play Movie')
                     : (movie.media_type === 'tv' ? 'Stream Series' : 'Stream / Play Movie')}

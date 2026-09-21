@@ -105,57 +105,9 @@ router.post('/detect/:userMovieId', async (req: Request, res: Response, next: Ne
   try {
     const { userMovieId } = req.params;
     const userId = req.user!.id;
-
-    // Get movie info to find tmdb_id
     const movie = await MoviesService.getMovieById(userId, userMovieId);
-    const tmdbId = (movie as any).tmdb_id;
-    if (!tmdbId) {
-      return res.status(200).json({ success: true, data: movie.sources, added: 0 });
-    }
-
-    // Fetch from TMDB
-    const detected = await TmdbService.getWatchProviders(tmdbId, movie.title, (movie as any).original_title);
-    if (!detected || detected.length === 0) {
-      return res.status(200).json({ success: true, data: movie.sources, added: 0 });
-    }
-
-    // Get existing provider names to skip duplicates
-    const existingNames = new Set((movie.sources || []).map((s: any) => s.provider_name?.toLowerCase()));
-    const toAdd = detected.filter((p: any) => !existingNames.has(p.providerName?.toLowerCase()));
-
-    const newSources: any[] = [];
-    if (isPgConnected) {
-      for (const prov of toAdd) {
-        const srcId = uuidv4();
-        const { rows } = await pool.query(`
-          INSERT INTO movie_sources (
-            id, user_movie_id, source_type, provider_name, provider_icon, external_url, quality
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING *
-        `, [srcId, userMovieId, prov.sourceType || 'ott', prov.providerName, prov.providerIcon, prov.externalUrl, prov.quality || '4K UHD']);
-        newSources.push(rows[0]);
-      }
-    } else {
-      for (const prov of toAdd) {
-        const newSource = {
-          id: `src-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-          user_movie_id: userMovieId,
-          source_type: prov.sourceType as any,
-          provider_name: prov.providerName,
-          provider_icon: prov.providerIcon,
-          external_url: prov.externalUrl,
-          external_file_id: null,
-          file_name: null,
-          quality: prov.quality || '4K UHD',
-          created_at: new Date().toISOString(),
-        };
-        inMemoryDb.movieSources.set(newSource.id, newSource);
-        newSources.push(newSource);
-      }
-    }
-
-    const allSources = [...(movie.sources || []), ...newSources];
-    return res.status(200).json({ success: true, data: allSources, added: newSources.length });
+    // Auto OTT provider import and TMDB provider import are disabled globally
+    return res.status(200).json({ success: true, data: movie.sources || [], added: 0 });
   } catch (err) {
     next(err);
   }

@@ -133,18 +133,6 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
     }
   }, [deletingIds, movie.user_movie_id, onSourcesChanged, queryClient]);
 
-  // Auto-detect mutation
-  const detectMutation = useMutation({
-    mutationFn: async () => {
-      await api.post(`/sources/detect/${movie.user_movie_id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['movie', movie.user_movie_id] });
-      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
-      if (onSourcesChanged) onSourcesChanged();
-    },
-  });
-
   const existingSources = movie.sources || [];
 
   return (
@@ -184,15 +172,6 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
             <Typography variant="subtitle2" sx={{ color: '#CBD5E1', fontWeight: 600 }}>
               Linked Providers ({existingSources.length})
             </Typography>
-            <Button
-              size="small"
-              startIcon={<AutoAwesomeIcon sx={{ fontSize: 16 }} />}
-              onClick={() => detectMutation.mutate()}
-              disabled={detectMutation.isPending}
-              sx={{ color: '#38BDF8', fontSize: '0.78rem' }}
-            >
-              {detectMutation.isPending ? 'Detecting...' : 'Auto-Detect OTT'}
-            </Button>
           </Box>
 
           {existingSources.length === 0 ? (
