@@ -12,6 +12,7 @@ import {
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
+import TvIcon from '@mui/icons-material/Tv';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
@@ -36,11 +37,39 @@ export const HomePage: React.FC = () => {
     return 'Good evening';
   };
 
-  // Fetch Library Movies
-  const { data: moviesData, isLoading: moviesLoading } = useQuery({
-    queryKey: ['my-movies', 'home'],
+  // Fetch Library Stats (Total, Movies, Web Series, Watched, Unwatched, etc.)
+  const { data: statsData } = useQuery({
+    queryKey: ['movies', 'stats'],
     queryFn: async () => {
-      const res = await api.get('/movies?limit=50');
+      const res = await api.get('/movies/stats');
+      return res.data?.data;
+    },
+  });
+
+  const stats = statsData || {
+    total: 0,
+    movies: 0,
+    series: 0,
+    unwatched: 0,
+    watching: 0,
+    watched: 0,
+    favorites: 0,
+  };
+
+  // Fetch Watching Titles specifically for Continue Watching Hero & Rail
+  const { data: watchingData } = useQuery({
+    queryKey: ['movies', 'watching', 'home'],
+    queryFn: async () => {
+      const res = await api.get('/movies?status=watching&limit=10');
+      return res.data?.data;
+    },
+  });
+
+  // Fetch Recently Added Library Titles
+  const { data: moviesData, isLoading: moviesLoading } = useQuery({
+    queryKey: ['movies', 'recently-added', 'home'],
+    queryFn: async () => {
+      const res = await api.get('/movies?limit=20&sortBy=added_at');
       return res.data?.data;
     },
   });
@@ -64,23 +93,11 @@ export const HomePage: React.FC = () => {
   });
 
   const allMovies = moviesData?.movies || [];
-  const unwatched = allMovies.filter((m: any) => m.watch_status === 'unwatched');
-  const watching = allMovies
-    .filter(
-      (m: any) =>
-        m.watch_status === 'watching' ||
-        (m.playback_position_sec && m.playback_position_sec > 0 && m.watch_status !== 'watched')
-    )
-    .sort((a: any, b: any) => {
-      const dateA = new Date(a.last_watched_at || a.updated_at || a.added_at || 0).getTime();
-      const dateB = new Date(b.last_watched_at || b.updated_at || b.added_at || 0).getTime();
-      return dateB - dateA;
-    });
-  const watched = allMovies.filter((m: any) => m.watch_status === 'watched');
+  const watchingList = watchingData?.movies || [];
 
   // Currently watching candidate for resume hero
-  const continueWatchingMovie = watching.length > 0 ? watching[0] : null;
-  const otherWatching = watching.slice(1, 7);
+  const continueWatchingMovie = watchingList.length > 0 ? watchingList[0] : null;
+  const otherWatching = watchingList.slice(1, 7);
 
   const queryClient = useQueryClient();
 
@@ -105,25 +122,31 @@ export const HomePage: React.FC = () => {
           <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC', mb: 0.5 }}>
             {getGreeting()}, {user?.name || 'Collector'}
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5 }}>
             <Typography variant="body2" sx={{ color: '#94A3B8' }}>
               Your Personal Sanctuary:
             </Typography>
             <Chip
               icon={<LocalMoviesIcon sx={{ color: '#E5A93C !important', fontSize: 16 }} />}
-              label={`${allMovies.length} Movies`}
+              label={`${stats.movies} Movies`}
               size="small"
               sx={{ backgroundColor: '#131926', color: '#E5A93C', fontWeight: 600 }}
             />
             <Chip
+              icon={<TvIcon sx={{ color: '#A855F7 !important', fontSize: 16 }} />}
+              label={`${stats.series} Web Series`}
+              size="small"
+              sx={{ backgroundColor: '#131926', color: '#A855F7', fontWeight: 600 }}
+            />
+            <Chip
               icon={<VisibilityOutlinedIcon sx={{ color: '#38BDF8 !important', fontSize: 16 }} />}
-              label={`${unwatched.length} Unwatched`}
+              label={`${stats.unwatched} Unwatched`}
               size="small"
               sx={{ backgroundColor: '#131926', color: '#38BDF8', fontWeight: 600 }}
             />
             <Chip
               icon={<CheckCircleOutlineIcon sx={{ color: '#10B981 !important', fontSize: 16 }} />}
-              label={`${watched.length} Watched`}
+              label={`${stats.watched} Watched`}
               size="small"
               sx={{ backgroundColor: '#131926', color: '#10B981', fontWeight: 600 }}
             />

@@ -122,8 +122,9 @@ export const ImportCenterPage: React.FC = () => {
     },
   });
 
-  const predefinedGenres: any[] = genresData?.predefined || [];
-  const customGenres: any[] = genresData?.custom || [];
+  const predefinedGenres: any[] = (genresData?.predefined || []).slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
+  const customGenres: any[] = (genresData?.custom || []).slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
+  const allGenres: any[] = (genresData?.all || [...predefinedGenres, ...customGenres]).slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
 
   const handleFindMovies = async () => {
     const titles = inputText.split('\n').map(t => t.trim()).filter(t => t.length > 0);
@@ -444,11 +445,8 @@ export const ImportCenterPage: React.FC = () => {
                 sx={{ color: '#F8FAFC', backgroundColor: '#0B0F19' }}
               >
                 <MenuItem value="none"><em>None (TMDB Default)</em></MenuItem>
-                {predefinedGenres.map((g) => (
-                  <MenuItem key={g.id || g.name} value={g.name}>{g.name}</MenuItem>
-                ))}
-                {customGenres.map((g) => (
-                  <MenuItem key={g.id} value={g.id}>{g.name} (Custom)</MenuItem>
+                {allGenres.map((g) => (
+                  <MenuItem key={g.id || g.name} value={g.name || g.id}>{g.name}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -809,11 +807,8 @@ export const ImportCenterPage: React.FC = () => {
                         sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 120 }}
                       >
                         <MenuItem value="none"><em>TMDB Default</em></MenuItem>
-                        {predefinedGenres.map((g) => (
-                          <MenuItem key={g.id || g.name} value={g.name}>{g.name}</MenuItem>
-                        ))}
-                        {customGenres.map((g) => (
-                          <MenuItem key={g.id} value={g.id}>{g.name} (Custom)</MenuItem>
+                        {allGenres.map((g) => (
+                          <MenuItem key={g.id || g.name} value={g.name || g.id}>{g.name}</MenuItem>
                         ))}
                       </Select>
                     </TableCell>

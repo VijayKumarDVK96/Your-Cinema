@@ -8,28 +8,28 @@ export const PREDEFINED_GENRES = [
   { id: 'p-16', tmdb_id: 16, name: 'Animation', color: '#EC4899', is_predefined: true },
   { id: 'p-35', tmdb_id: 35, name: 'Comedy', color: '#EAB308', is_predefined: true },
   { id: 'p-80', tmdb_id: 80, name: 'Crime', color: '#64748B', is_predefined: true },
+  { id: 'p-c1', tmdb_id: null, name: 'Dark Comedy', color: '#7C3AED', is_predefined: true },
   { id: 'p-18', tmdb_id: 18, name: 'Drama', color: '#8B5CF6', is_predefined: true },
   { id: 'p-10751', tmdb_id: 10751, name: 'Family', color: '#10B981', is_predefined: true },
   { id: 'p-14', tmdb_id: 14, name: 'Fantasy', color: '#A855F7', is_predefined: true },
-  { id: 'p-36', tmdb_id: 36, name: 'History', color: '#D97706', is_predefined: true },
-  { id: 'p-27', tmdb_id: 27, name: 'Horror', color: '#DC2626', is_predefined: true },
-  { id: 'p-9648', tmdb_id: 9648, name: 'Mystery', color: '#6366F1', is_predefined: true },
-  { id: 'p-878', tmdb_id: 878, name: 'Science Fiction', color: '#06B6D4', is_predefined: true },
-  { id: 'p-53', tmdb_id: 53, name: 'Thriller', color: '#F97316', is_predefined: true },
-  { id: 'p-10752', tmdb_id: 10752, name: 'War', color: '#78716C', is_predefined: true },
-  { id: 'p-c1', tmdb_id: null, name: 'Dark Comedy', color: '#7C3AED', is_predefined: true },
   { id: 'p-c2', tmdb_id: null, name: 'Friendship', color: '#34D399', is_predefined: true },
   { id: 'p-c3', tmdb_id: null, name: 'Gangster', color: '#9CA3AF', is_predefined: true },
   { id: 'p-c4', tmdb_id: null, name: 'Heist', color: '#FBBF24', is_predefined: true },
+  { id: 'p-36', tmdb_id: 36, name: 'History', color: '#D97706', is_predefined: true },
+  { id: 'p-27', tmdb_id: 27, name: 'Horror', color: '#DC2626', is_predefined: true },
   { id: 'p-c5', tmdb_id: null, name: 'Love', color: '#F472B6', is_predefined: true },
   { id: 'p-c6', tmdb_id: null, name: 'Motivation', color: '#4ADE80', is_predefined: true },
+  { id: 'p-9648', tmdb_id: 9648, name: 'Mystery', color: '#6366F1', is_predefined: true },
   { id: 'p-c7', tmdb_id: null, name: 'Politics', color: '#60A5FA', is_predefined: true },
+  { id: 'p-878', tmdb_id: 878, name: 'Science Fiction', color: '#06B6D4', is_predefined: true },
+  { id: 'p-c11', tmdb_id: null, name: 'Space', color: '#818CF8', is_predefined: true },
   { id: 'p-c8', tmdb_id: null, name: 'Sports', color: '#FB923C', is_predefined: true },
   { id: 'p-c9', tmdb_id: null, name: 'Super Heroes', color: '#C084FC', is_predefined: true },
   { id: 'p-c10', tmdb_id: null, name: 'Survival', color: '#2DD4BF', is_predefined: true },
-  { id: 'p-c11', tmdb_id: null, name: 'Space', color: '#818CF8', is_predefined: true },
+  { id: 'p-53', tmdb_id: 53, name: 'Thriller', color: '#F97316', is_predefined: true },
   { id: 'p-c12', tmdb_id: null, name: 'Time Travel / Time Loop', color: '#A78BFA', is_predefined: true },
   { id: 'p-c13', tmdb_id: null, name: 'Travel', color: '#38BDF8', is_predefined: true },
+  { id: 'p-10752', tmdb_id: 10752, name: 'War', color: '#78716C', is_predefined: true },
 ];
 
 export class GenresService {
@@ -110,7 +110,7 @@ export class GenresService {
     const predefined = PREDEFINED_GENRES.map(pg => {
       const count = activeGenreNames.filter(n => n === pg.name.toLowerCase()).length;
       return { ...pg, movie_count: count };
-    });
+    }).sort((a, b) => a.name.localeCompare(b.name));
 
     // 2. Fetch custom genres for user
     let custom: any[] = [];
@@ -127,7 +127,7 @@ export class GenresService {
         custom = rows.map(r => ({
           ...r,
           movie_count: activeGenreNames.filter(n => n === r.name.toLowerCase()).length,
-        }));
+        })).sort((a, b) => a.name.localeCompare(b.name));
       } catch {
         custom = [];
       }
@@ -145,10 +145,12 @@ export class GenresService {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
 
+    const all = [...predefined, ...custom].sort((a, b) => a.name.localeCompare(b.name));
+
     return {
       predefined,
       custom,
-      all: [...predefined, ...custom],
+      all,
     };
   }
 

@@ -3,6 +3,16 @@ import { MoviesService } from './movies.service.js';
 import { BadRequestError } from '../../utils/errors.js';
 
 export class MoviesController {
+  static async getStats(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const stats = await MoviesService.getLibraryStats(userId);
+      return res.status(200).json({ success: true, data: stats });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async list(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;

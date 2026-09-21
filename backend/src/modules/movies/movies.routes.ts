@@ -48,6 +48,7 @@ const bulkSchema = z.object({
 
 router.use(authenticate);
 
+router.get('/stats', MoviesController.getStats);
 router.get('/', MoviesController.list);
 router.post('/bulk', validate(bulkSchema), MoviesController.bulkAction);
 router.delete('/clear/all', MoviesController.clearAll);

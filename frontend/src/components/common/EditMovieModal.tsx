@@ -22,15 +22,15 @@ interface EditMovieModalProps {
 
 export const LANGUAGE_LIST = [
   { code: 'en', name: 'English' },
-  { code: 'ta', name: 'Tamil' },
+  { code: 'fr', name: 'French' },
   { code: 'hi', name: 'Hindi' },
-  { code: 'te', name: 'Telugu' },
-  { code: 'ml', name: 'Malayalam' },
+  { code: 'ja', name: 'Japanese' },
   { code: 'kn', name: 'Kannada' },
   { code: 'ko', name: 'Korean' },
-  { code: 'ja', name: 'Japanese' },
+  { code: 'ml', name: 'Malayalam' },
   { code: 'es', name: 'Spanish' },
-  { code: 'fr', name: 'French' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
 ];
 
 export const EditMovieModal: React.FC<EditMovieModalProps> = ({ open, onClose, movie, onUpdated }) => {

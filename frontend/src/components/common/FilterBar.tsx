@@ -48,40 +48,46 @@ interface FilterBarProps {
 }
 
 const OTT_OPTIONS = [
-  { value: 'Netflix', label: 'Netflix', color: '#E50914' },
-  { value: 'Amazon Prime Video', label: 'Prime Video', color: '#00A8E1' },
-  { value: 'JioHotstar', label: 'JioHotstar', color: '#113CCF' },
-  { value: 'Sun NXT', label: 'Sun NXT', color: '#FF6B00' },
+  { value: 'Aha', label: 'Aha', color: '#FF5000' },
   { value: 'Apple TV+', label: 'Apple TV+', color: '#A3AAAE' },
-  { value: 'YouTube', label: 'YouTube', color: '#FF0000' },
   { value: 'Google Drive', label: 'Google Drive', color: '#34A853' },
   { value: 'JioCinema', label: 'JioCinema', color: '#D80075' },
-  { value: 'Zee5', label: 'Zee5', color: '#8230C6' },
+  { value: 'JioHotstar', label: 'JioHotstar', color: '#113CCF' },
+  { value: 'Netflix', label: 'Netflix', color: '#E50914' },
+  { value: 'Amazon Prime Video', label: 'Prime Video', color: '#00A8E1' },
   { value: 'Sony LIV', label: 'Sony LIV', color: '#00E5FF' },
-  { value: 'Aha', label: 'Aha', color: '#FF5000' },
+  { value: 'Sun NXT', label: 'Sun NXT', color: '#FF6B00' },
   { value: 'Vi Movies & TV', label: 'Vi Movies & TV', color: '#E40046' },
+  { value: 'YouTube', label: 'YouTube', color: '#FF0000' },
+  { value: 'Zee5', label: 'Zee5', color: '#8230C6' },
   { value: 'unassigned', label: 'Unassigned', color: '#94A3B8' },
 ];
 
 const GENRE_OPTIONS = [
   { id: 28, name: 'Action' },
   { id: 12, name: 'Adventure' },
+  { id: 16, name: 'Animation' },
   { id: 35, name: 'Comedy' },
+  { id: 80, name: 'Crime' },
   { id: 18, name: 'Drama' },
-  { id: 878, name: 'Sci-Fi' },
-  { id: 53, name: 'Thriller' },
+  { id: 10751, name: 'Family' },
+  { id: 14, name: 'Fantasy' },
+  { id: 36, name: 'History' },
   { id: 27, name: 'Horror' },
   { id: 9648, name: 'Mystery' },
+  { id: 878, name: 'Science Fiction' },
+  { id: 53, name: 'Thriller' },
+  { id: 10752, name: 'War' },
 ];
 
 const LANGUAGE_OPTIONS = [
   { code: 'en', name: 'English' },
-  { code: 'ta', name: 'Tamil' },
   { code: 'hi', name: 'Hindi' },
-  { code: 'te', name: 'Telugu' },
-  { code: 'ml', name: 'Malayalam' },
   { code: 'kn', name: 'Kannada' },
   { code: 'ko', name: 'Korean' },
+  { code: 'ml', name: 'Malayalam' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
 ];
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -128,15 +134,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     return () => clearTimeout(timer);
   }, [localRatingRange, onRatingRangeChange, ratingRange]);
 
-  const customGenresList: Genre[] = Array.isArray(availableGenres)
+  const rawCustom: Genre[] = Array.isArray(availableGenres)
     ? availableGenres.filter(g => !g.is_predefined)
     : (availableGenres?.custom || []);
 
-  const predefinedGenresList: Genre[] = Array.isArray(availableGenres)
+  const customGenresList: Genre[] = rawCustom.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  const rawPredefined: Genre[] = Array.isArray(availableGenres)
     ? availableGenres.filter(g => g.is_predefined)
     : (availableGenres?.predefined?.length
         ? availableGenres.predefined
         : GENRE_OPTIONS.map(g => ({ id: g.id, tmdb_id: g.id, name: g.name, is_predefined: true })));
+
+  const predefinedGenresList: Genre[] = rawPredefined.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const sortedTags: Tag[] = (availableTags || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   return (
     <Box
       sx={{
@@ -375,7 +386,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
             >
               <MenuItem value=""><em>All Tags</em></MenuItem>
-              {availableTags.map((t) => (
+              {sortedTags.map((t) => (
                 <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
               ))}
             </Select>

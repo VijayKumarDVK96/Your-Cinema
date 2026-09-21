@@ -74,6 +74,69 @@ export interface MovieFilters {
 }
 
 export class MoviesService {
+  static async getLibraryStats(userId: string) {
+    if (isPgConnected) {
+      const query = `
+        SELECT
+          COUNT(*)::INT AS total,
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'movie' THEN 1 END)::INT AS movies,
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'tv' THEN 1 END)::INT AS series,
+          COUNT(CASE WHEN um.watch_status = 'unwatched' THEN 1 END)::INT AS unwatched,
+          COUNT(CASE WHEN um.watch_status = 'watching' THEN 1 END)::INT AS watching,
+          COUNT(CASE WHEN um.watch_status = 'watched' THEN 1 END)::INT AS watched,
+          COUNT(CASE WHEN um.is_favorite = true THEN 1 END)::INT AS favorites
+        FROM user_movies um
+        JOIN movies m ON um.movie_id = m.id
+        WHERE um.user_id = $1
+      `;
+      const res = await pool.query(query, [userId]);
+      const row = res.rows[0] || {};
+      return {
+        total: Number(row.total) || 0,
+        movies: Number(row.movies) || 0,
+        series: Number(row.series) || 0,
+        unwatched: Number(row.unwatched) || 0,
+        watching: Number(row.watching) || 0,
+        watched: Number(row.watched) || 0,
+        favorites: Number(row.favorites) || 0,
+      };
+    }
+
+    const userEntries = Array.from(inMemoryDb.userMovies.values()).filter((um: any) => um.user_id === userId);
+    let movies = 0;
+    let series = 0;
+    let unwatched = 0;
+    let watching = 0;
+    let watched = 0;
+    let favorites = 0;
+
+    for (const um of userEntries) {
+      const movie = inMemoryDb.movies.get(um.movie_id) || Array.from(inMemoryDb.movies.values()).find((m: any) => m.id === um.movie_id);
+      const mType = um.media_type || movie?.media_type || 'movie';
+      if (mType === 'tv') {
+        series++;
+      } else {
+        movies++;
+      }
+
+      if (um.watch_status === 'watched') watched++;
+      else if (um.watch_status === 'watching') watching++;
+      else unwatched++;
+
+      if (um.is_favorite) favorites++;
+    }
+
+    return {
+      total: userEntries.length,
+      movies,
+      series,
+      unwatched,
+      watching,
+      watched,
+      favorites,
+    };
+  }
+
   static async getUserMovies(userId: string, filters: MovieFilters = {}) {
     const {
       status = 'all',
