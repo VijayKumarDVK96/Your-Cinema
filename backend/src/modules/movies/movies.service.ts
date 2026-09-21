@@ -1127,6 +1127,8 @@ export class MoviesService {
     return this.updateMovie(userId, userMovieId, updates);
   }
 
+  static async bulkUpdate(userId: string, data: {
+    movieIds: string[];
     action: 'mark_watched' | 'mark_unwatched' | 'favorite' | 'unfavorite' | 'delete' | 'add_tag' | 'remove_tag' | 'add_genre' | 'remove_genre' | 'add_to_watchlist' | 'edit_tags_genres' | 'edit_language';
     tagId?: string;
     tagIds?: string[];

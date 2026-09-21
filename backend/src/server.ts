@@ -22,6 +22,7 @@ import sourcesRoutes from './modules/sources/sources.routes.js';
 import aiRoutes from './modules/ai/ai.routes.js';
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Security Middleware
 app.use(helmet({
