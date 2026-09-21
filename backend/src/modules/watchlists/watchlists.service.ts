@@ -3,22 +3,37 @@ import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
 
 export class WatchlistsService {
-  static async getUnassignedCount(userId: string): Promise<number> {
+  static async getUnassignedCounts(userId: string): Promise<{ movie_count: number; series_count: number }> {
     if (isPgConnected) {
       const sql = `
-        SELECT COUNT(*)::INT AS count
+        SELECT
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'movie' THEN 1 END)::INT AS movie_count,
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'tv' THEN 1 END)::INT AS series_count
         FROM user_movies um
+        JOIN movies m ON um.movie_id = m.id
         WHERE um.user_id = $1
         AND NOT EXISTS (
           SELECT 1 FROM watchlist_movies wm WHERE wm.user_movie_id = um.id
         )
       `;
       const res = await pool.query(sql, [userId]);
-      return res.rows[0]?.count || 0;
+      return {
+        movie_count: res.rows[0]?.movie_count || 0,
+        series_count: res.rows[0]?.series_count || 0,
+      };
     }
 
     const assignedIds = new Set(Array.from(inMemoryDb.watchlistMovies.values()).map(wm => wm.user_movie_id));
-    return Array.from(inMemoryDb.userMovies.values()).filter(um => um.user_id === userId && !assignedIds.has(um.id)).length;
+    const unassigned = Array.from(inMemoryDb.userMovies.values()).filter(um => um.user_id === userId && !assignedIds.has(um.id));
+    let movie_count = 0;
+    let series_count = 0;
+    for (const um of unassigned) {
+      const m = inMemoryDb.movies.get(um.movie_id);
+      const mType = um.media_type || m?.media_type || 'movie';
+      if (mType === 'tv') series_count++;
+      else movie_count++;
+    }
+    return { movie_count, series_count };
   }
 
   static async listUserWatchlists(userId: string, options: { page?: number; limit?: number; parentId?: string | null } = {}) {
@@ -101,25 +116,43 @@ export class WatchlistsService {
     }
 
     if (isRoot && page === 1) {
-      const unassignedCount = await this.getUnassignedCount(userId);
-      const unassignedFolder = {
-        id: 'unassigned',
+      const counts = await this.getUnassignedCounts(userId);
+      const unassignedMoviesFolder = {
+        id: 'unassigned-movies',
         user_id: userId,
         parent_id: null,
         name: 'Unassigned Movies',
-        description: 'Library titles not added to any folder or collection',
+        description: 'Movie titles not added to any folder or collection',
         cover_image_url: null,
         is_smart: false,
         is_system: true,
+        system_type: 'movies',
         is_readonly: true,
-        movie_count: unassignedCount,
+        movie_count: counts.movie_count,
+        subfolder_count: 0,
+        display_order: -1000,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const unassignedSeriesFolder = {
+        id: 'unassigned-series',
+        user_id: userId,
+        parent_id: null,
+        name: 'Unassigned Web Series',
+        description: 'Web series & TV shows not added to any folder or collection',
+        cover_image_url: null,
+        is_smart: false,
+        is_system: true,
+        system_type: 'series',
+        is_readonly: true,
+        movie_count: counts.series_count,
         subfolder_count: 0,
         display_order: -999,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      watchlists = [unassignedFolder, ...watchlists];
-      total += 1;
+      watchlists = [unassignedMoviesFolder, unassignedSeriesFolder, ...watchlists];
+      total += 2;
     }
 
     return { watchlists, total, page, limit };
@@ -130,10 +163,15 @@ export class WatchlistsService {
     const limit = Math.max(1, options.limit || 50);
     const offset = (page - 1) * limit;
 
-    if (watchlistId === 'unassigned') {
-      const unassignedCount = await this.getUnassignedCount(userId);
+    const isUnassignedMovies = watchlistId === 'unassigned' || watchlistId === 'unassigned-movies';
+    const isUnassignedSeries = watchlistId === 'unassigned-series';
+
+    if (isUnassignedMovies || isUnassignedSeries) {
+      const counts = await this.getUnassignedCounts(userId);
+      const targetCount = isUnassignedSeries ? counts.series_count : counts.movie_count;
+      const targetType = isUnassignedSeries ? 'tv' : 'movie';
       let movies: any[] = [];
-      const totalPages = Math.max(1, Math.ceil(unassignedCount / limit));
+      const totalPages = Math.max(1, Math.ceil(targetCount / limit));
 
       if (isPgConnected) {
         const mSql = `
@@ -147,6 +185,7 @@ export class WatchlistsService {
             COALESCE(um.custom_backdrop_url, m.backdrop_path) AS backdrop_path,
             COALESCE(um.custom_runtime, m.runtime) AS runtime,
             COALESCE(um.custom_director, m.director) AS director,
+            COALESCE(um.media_type, m.media_type, 'movie') AS media_type,
             m.release_date,
             m.genres,
             0 AS sort_order,
@@ -154,18 +193,24 @@ export class WatchlistsService {
           FROM user_movies um
           JOIN movies m ON um.movie_id = m.id
           WHERE um.user_id = $1
+          AND COALESCE(um.media_type, m.media_type, 'movie') = $2
           AND NOT EXISTS (
             SELECT 1 FROM watchlist_movies wm WHERE wm.user_movie_id = um.id
           )
           ORDER BY um.added_at DESC
-          LIMIT $2 OFFSET $3
+          LIMIT $3 OFFSET $4
         `;
-        const res = await pool.query(mSql, [userId, limit, offset]);
+        const res = await pool.query(mSql, [userId, targetType, limit, offset]);
         movies = res.rows;
       } else {
         const assignedIds = new Set(Array.from(inMemoryDb.watchlistMovies.values()).map(wm => wm.user_movie_id));
         const allUnassigned = Array.from(inMemoryDb.userMovies.values())
-          .filter(um => um.user_id === userId && !assignedIds.has(um.id))
+          .filter(um => {
+            if (um.user_id !== userId || assignedIds.has(um.id)) return false;
+            const m = inMemoryDb.movies.get(um.movie_id);
+            const mType = um.media_type || m?.media_type || 'movie';
+            return mType === targetType;
+          })
           .map(um => {
             const m = inMemoryDb.movies.get(um.movie_id) || {};
             return {
@@ -178,6 +223,7 @@ export class WatchlistsService {
               backdrop_path: um.custom_backdrop_url || m.backdrop_path,
               runtime: um.custom_runtime || m.runtime,
               director: um.custom_director || m.director,
+              media_type: um.media_type || m.media_type || 'movie',
               release_date: m.release_date,
               genres: m.genres || [],
               sort_order: 0,
@@ -188,15 +234,18 @@ export class WatchlistsService {
       }
 
       return {
-        id: 'unassigned',
+        id: isUnassignedSeries ? 'unassigned-series' : 'unassigned-movies',
         user_id: userId,
         parent_id: null,
-        name: 'Unassigned Movies',
-        description: 'Library titles not added to any folder or collection',
+        name: isUnassignedSeries ? 'Unassigned Web Series' : 'Unassigned Movies',
+        description: isUnassignedSeries
+          ? 'Web series & TV shows not added to any folder or collection'
+          : 'Movie titles not added to any folder or collection',
         is_system: true,
+        system_type: isUnassignedSeries ? 'series' : 'movies',
         is_readonly: true,
-        movie_count: unassignedCount,
-        total: unassignedCount,
+        movie_count: targetCount,
+        total: targetCount,
         page,
         limit,
         totalPages,
@@ -460,23 +509,25 @@ export class WatchlistsService {
         await client.query('BEGIN');
 
         if (action === 'move') {
-          if (sourceWatchlistId && sourceWatchlistId !== 'unassigned') {
+          if (sourceWatchlistId && !sourceWatchlistId.startsWith('unassigned')) {
             await client.query(
               `DELETE FROM watchlist_movies WHERE watchlist_id = $1 AND user_movie_id = ANY($2::uuid[])`,
               [sourceWatchlistId, userMovieIds]
             );
           } else {
-            // Remove from all watchlists owned by user
-            await client.query(
-              `DELETE FROM watchlist_movies
-               WHERE user_movie_id = ANY($1::uuid[])
-               AND watchlist_id IN (SELECT id FROM watchlists WHERE user_id = $2)`,
-              [userMovieIds, userId]
-            );
+            // Remove from all watchlists owned by user if moved from unassigned or general
+            if (targetWatchlistId && !targetWatchlistId.startsWith('unassigned')) {
+              await client.query(
+                `DELETE FROM watchlist_movies
+                 WHERE user_movie_id = ANY($1::uuid[])
+                 AND watchlist_id IN (SELECT id FROM watchlists WHERE user_id = $2)`,
+                [userMovieIds, userId]
+              );
+            }
           }
         }
 
-        if (targetWatchlistId && targetWatchlistId !== 'unassigned') {
+        if (targetWatchlistId && !targetWatchlistId.startsWith('unassigned')) {
           // Verify target watchlist exists & owned by user
           const tRes = await client.query('SELECT id FROM watchlists WHERE id = $1 AND user_id = $2', [targetWatchlistId, userId]);
           if (tRes.rows.length === 0) throw new NotFoundError('Target watchlist not found');
@@ -502,7 +553,7 @@ export class WatchlistsService {
       }
     } else {
       if (action === 'move') {
-        if (sourceWatchlistId && sourceWatchlistId !== 'unassigned') {
+        if (sourceWatchlistId && !sourceWatchlistId.startsWith('unassigned')) {
           for (const umId of userMovieIds) {
             inMemoryDb.watchlistMovies.delete(`${sourceWatchlistId}-${umId}`);
           }
@@ -515,7 +566,7 @@ export class WatchlistsService {
         }
       }
 
-      if (targetWatchlistId && targetWatchlistId !== 'unassigned') {
+      if (targetWatchlistId && !targetWatchlistId.startsWith('unassigned')) {
         for (const umId of userMovieIds) {
           const key = `${targetWatchlistId}-${umId}`;
           inMemoryDb.watchlistMovies.set(key, {

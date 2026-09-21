@@ -9,23 +9,17 @@ import { UniversalPlayer } from '../components/player/UniversalPlayer.js';
 
 export const AppLayout: React.FC = () => {
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [addModalInitialQuery, setAddModalInitialQuery] = useState('');
 
-  const handleSearchChange = (term: string) => {
-    setGlobalSearchTerm(term);
-    if (location.pathname !== '/movies') {
-      navigate(`/movies?search=${encodeURIComponent(term)}`);
-    }
+  const handleOpenAddModal = (query?: string) => {
+    setAddModalInitialQuery(query || '');
+    setAddModalOpen(true);
   };
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#07090E' }}>
       <Navbar
-        onOpenAddMovie={() => setAddModalOpen(true)}
-        searchTerm={globalSearchTerm}
-        onSearchChange={handleSearchChange}
+        onOpenAddMovie={handleOpenAddModal}
       />
 
       <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden', position: 'relative' }}>
@@ -53,7 +47,11 @@ export const AppLayout: React.FC = () => {
       {/* Add Movie to Library Modal */}
       <AddMovieModal
         open={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
+        initialQuery={addModalInitialQuery}
+        onClose={() => {
+          setAddModalOpen(false);
+          setAddModalInitialQuery('');
+        }}
         onMovieAdded={() => {
           // Trigger refresh where appropriate
         }}

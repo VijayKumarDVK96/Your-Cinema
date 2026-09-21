@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -29,19 +29,31 @@ interface AddMovieModalProps {
   open: boolean;
   onClose: () => void;
   onMovieAdded?: () => void;
+  initialQuery?: string;
 }
 
-export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onMovieAdded }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onMovieAdded, initialQuery = '' }) => {
+  const [searchTerm, setSearchTerm] = useState(initialQuery);
   const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>('all');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = async (e?: React.FormEvent, overrideType?: 'all' | 'movie' | 'tv') => {
+  useEffect(() => {
+    if (open && initialQuery) {
+      setSearchTerm(initialQuery);
+      handleSearch(undefined, undefined, initialQuery);
+    } else if (open && !initialQuery) {
+      setSearchTerm('');
+      setResults([]);
+    }
+  }, [open, initialQuery]);
+
+  const handleSearch = async (e?: React.FormEvent, overrideType?: 'all' | 'movie' | 'tv', overrideQuery?: string) => {
     if (e) e.preventDefault();
-    if (!searchTerm.trim()) return;
+    const query = (overrideQuery !== undefined ? overrideQuery : searchTerm).trim();
+    if (!query) return;
 
     const activeType = overrideType || mediaType;
     setLoading(true);

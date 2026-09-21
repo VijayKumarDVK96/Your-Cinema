@@ -23,17 +23,16 @@ import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
+import { ImdbHeaderSearch } from './ImdbHeaderSearch.js';
 
 interface NavbarProps {
-  onOpenAddMovie: () => void;
+  onOpenAddMovie: (initialQuery?: string) => void;
   onSearchChange?: (term: string) => void;
   searchTerm?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenAddMovie,
-  onSearchChange,
-  searchTerm = '',
 }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -65,14 +64,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         boxShadow: 'none',
       }}
     >
-      <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', px: { xs: 2, md: 3 }, py: 1 }}>
+      <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', px: { xs: 2, md: 3 }, py: 1, gap: { xs: 1, md: 2 } }}>
         {/* Brand */}
         <Box
           onClick={() => navigate('/')}
-          sx={{ display: 'flex', alignItems: 'center', gap: 1.2, cursor: 'pointer' }}
+          sx={{ display: 'flex', alignItems: 'center', gap: 1.2, cursor: 'pointer', flexShrink: 0 }}
         >
           <LocalMoviesIcon sx={{ color: '#E5A93C', fontSize: 30 }} />
-          <Box>
+          <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
             <Typography
               variant="h6"
               sx={{
@@ -92,34 +91,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           </Box>
         </Box>
 
-        {/* Search My Movies (Strictly within User's Library) */}
-        <Box
-          sx={{
-            display: { xs: 'none', md: 'flex' },
-            alignItems: 'center',
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: 2,
-            px: 2,
-            py: 0.5,
-            width: { md: 280, lg: 380 },
-            transition: 'all 0.2s',
-            '&:focus-within': {
-              borderColor: '#E5A93C',
-              backgroundColor: 'rgba(255, 255, 255, 0.08)',
-              boxShadow: '0 0 10px rgba(229, 169, 60, 0.2)',
-            },
-          }}
-        >
-          <SearchIcon sx={{ color: '#64748B', mr: 1, fontSize: 20 }} />
-          <InputBase
-            placeholder="Search My Movies (title, director, tags)..."
-            value={searchTerm}
-            onChange={(e) => {
-              if (onSearchChange) onSearchChange(e.target.value);
-            }}
-            sx={{ color: '#F8FAFC', fontSize: '0.88rem', width: '100%' }}
-          />
+        {/* IMDb-Style Global Header Search */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', flexGrow: 1, mx: { xs: 1, md: 2 } }}>
+          <ImdbHeaderSearch onOpenAddModalWithQuery={onOpenAddMovie} />
         </Box>
 
         {/* Action Controls */}
@@ -129,7 +103,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             variant="contained"
             color="primary"
             startIcon={<AddIcon />}
-            onClick={onOpenAddMovie}
+            onClick={() => onOpenAddMovie()}
             sx={{
               fontWeight: 700,
               fontSize: { xs: '0.78rem', md: '0.85rem' },
