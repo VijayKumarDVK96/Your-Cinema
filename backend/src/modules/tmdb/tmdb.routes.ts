@@ -8,5 +8,6 @@ const router = Router();
 router.get('/search', authenticate, TmdbController.search);
 router.get('/movie/:id', authenticate, TmdbController.getDetails);
 router.get('/tv/:id', authenticate, TmdbController.getTvDetails);
+router.get('/images/:id', authenticate, TmdbController.getImages);
 
 export default router;

@@ -38,9 +38,34 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+const bulkMoveSchema = z.object({
+  userMovieIds: z.array(z.string().uuid()).min(1, 'At least one movie must be selected'),
+  targetWatchlistId: z.string().nullable().optional(),
+  action: z.enum(['move', 'copy']).optional().default('move'),
+  sourceWatchlistId: z.string().optional(),
+});
+
+router.post('/bulk-move', validate(bulkMoveSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userMovieIds, targetWatchlistId, action, sourceWatchlistId } = req.body;
+    const result = await WatchlistsService.bulkMoveMovies(
+      req.user!.id,
+      targetWatchlistId || null,
+      userMovieIds,
+      action,
+      sourceWatchlistId
+    );
+    return res.status(200).json({ success: true, message: 'Bulk move/copy completed successfully.', data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const list = await WatchlistsService.getWatchlistById(req.user!.id, req.params.id);
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const list = await WatchlistsService.getWatchlistById(req.user!.id, req.params.id, { page, limit });
     return res.status(200).json({ success: true, data: list });
   } catch (err) {
     next(err);

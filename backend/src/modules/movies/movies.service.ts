@@ -163,7 +163,12 @@ export class MoviesService {
         pIdx++;
       }
       if (ott && ott !== 'all') {
-        if (ott === 'any_ott') {
+        if (ott === 'unassigned' || ott === 'no_ott' || ott === 'none') {
+          conditions.push(`NOT EXISTS (
+            SELECT 1 FROM movie_sources ms
+            WHERE ms.user_movie_id = um.id
+          )`);
+        } else if (ott === 'any_ott') {
           conditions.push(`EXISTS (
             SELECT 1 FROM movie_sources ms
             WHERE ms.user_movie_id = um.id
@@ -446,6 +451,7 @@ export class MoviesService {
       const ottLower = ott.toLowerCase();
       filtered = filtered.filter(m => {
         const sources = m.sources || [];
+        if (ott === 'unassigned' || ott === 'no_ott' || ott === 'none') return sources.length === 0;
         if (ott === 'any_ott') return sources.length > 0;
         return sources.some((s: any) => {
           const pName = (s.provider_name || '').toLowerCase();

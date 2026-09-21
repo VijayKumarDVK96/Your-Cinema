@@ -38,7 +38,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
 
   // Determine primary streaming provider or active filter OTT provider
   let primarySource = null;
-  if (selectedOtt && selectedOtt !== 'all' && selectedOtt !== 'any_ott') {
+  if (selectedOtt && selectedOtt !== 'all' && selectedOtt !== 'any_ott' && selectedOtt !== 'unassigned') {
     const ottLower = selectedOtt.toLowerCase();
     primarySource = (movie.sources || []).find((s: any) => {
       const pName = (s.provider_name || '').toLowerCase();

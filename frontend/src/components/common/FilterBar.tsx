@@ -60,7 +60,7 @@ const OTT_OPTIONS = [
   { value: 'Sony LIV', label: 'Sony LIV', color: '#00E5FF' },
   { value: 'Aha', label: 'Aha', color: '#FF5000' },
   { value: 'Vi Movies & TV', label: 'Vi Movies & TV', color: '#E40046' },
-  { value: 'any_ott', label: 'Any Streaming / OTT', color: '#E5A93C' },
+  { value: 'unassigned', label: 'Unassigned', color: '#94A3B8' },
 ];
 
 const GENRE_OPTIONS = [

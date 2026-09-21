@@ -1160,28 +1160,26 @@ export const MyMoviesPage: React.FC = () => {
           <Typography variant="body2" sx={{ color: '#94A3B8', fontWeight: 500 }}>
             Showing {Math.min((page - 1) * 50 + 1, totalMovies)}–{Math.min(page * 50, totalMovies)} of {totalMovies} titles
           </Typography>
-          {totalPages > 1 && (
-            <Pagination
-              count={totalPages}
-              page={page}
-              onChange={(_, val) => {
-                setPage(val);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              color="primary"
-              sx={{
-                '& .MuiPaginationItem-root': {
-                  color: '#94A3B8',
-                  fontWeight: 600,
-                  '&.Mui-selected': {
-                    backgroundColor: '#E5A93C',
-                    color: '#000',
-                    fontWeight: 700,
-                  },
+          <Pagination
+            count={totalPages}
+            page={page}
+            onChange={(_, val) => {
+              setPage(val);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            color="primary"
+            sx={{
+              '& .MuiPaginationItem-root': {
+                color: '#94A3B8',
+                fontWeight: 600,
+                '&.Mui-selected': {
+                  backgroundColor: '#E5A93C',
+                  color: '#000',
+                  fontWeight: 700,
                 },
-              }}
-            />
-          )}
+              },
+            }}
+          />
         </Box>
       )}
 

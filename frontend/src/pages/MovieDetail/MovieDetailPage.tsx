@@ -88,7 +88,9 @@ export const MovieDetailPage: React.FC = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
-  const [mainTab, setMainTab] = useState<'overview' | 'cast_crew'>('overview');
+  const [mainTab, setMainTab] = useState<'overview' | 'cast_crew' | 'posters' | 'screenshots'>('overview');
+
+
 
   // Cast & Crew Modal & Carousel States
   const [castCrewModalOpen, setCastCrewModalOpen] = useState(false);
@@ -171,6 +173,47 @@ export const MovieDetailPage: React.FC = () => {
       return res.data?.data;
     },
     enabled: !!id,
+  });
+
+  // Query TMDB images for Posters & Screenshots tabs
+  const { data: tmdbImages, isLoading: imagesLoading } = useQuery({
+    queryKey: ['tmdb-images', movie?.tmdb_id, movie?.media_type],
+    queryFn: async () => {
+      if (!movie?.tmdb_id) return null;
+      const res = await api.get(`/tmdb/images/${movie.tmdb_id}?mediaType=${movie.media_type || 'movie'}`);
+      return res.data?.data;
+    },
+    enabled: !!movie?.tmdb_id && (mainTab === 'posters' || mainTab === 'screenshots'),
+  });
+
+  const setDefaultPosterMutation = useMutation({
+    mutationFn: async (posterPath: string) => {
+      const fullPosterUrl = posterPath.startsWith('http') ? posterPath : `https://image.tmdb.org/t/p/original${posterPath}`;
+      await api.patch(`/movies/${movie.user_movie_id}`, {
+        custom_poster_url: fullPosterUrl,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['movie', id] });
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+    },
+  });
+
+  const setDefaultBackdropMutation = useMutation({
+    mutationFn: async (backdropPath: string) => {
+      const fullBackdropUrl = backdropPath.startsWith('http') ? backdropPath : `https://image.tmdb.org/t/p/original${backdropPath}`;
+      await api.patch(`/movies/${movie.user_movie_id}`, {
+        custom_backdrop_url: fullBackdropUrl,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['movie', id] });
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
+    },
   });
 
   // Fetch Similar Movies strictly from user's library
@@ -924,6 +967,18 @@ export const MovieDetailPage: React.FC = () => {
                 icon={<GroupIcon sx={{ fontSize: 18 }} />}
                 iconPosition="start"
               />
+              <Tab
+                value="posters"
+                label="Posters"
+                icon={<CameraAltIcon sx={{ fontSize: 18 }} />}
+                iconPosition="start"
+              />
+              <Tab
+                value="screenshots"
+                label="Screenshots & Backdrops"
+                icon={<VideocamIcon sx={{ fontSize: 18 }} />}
+                iconPosition="start"
+              />
             </Tabs>
           </Paper>
 
@@ -1392,6 +1447,224 @@ export const MovieDetailPage: React.FC = () => {
                       No crew information recorded for this title.
                     </Typography>
                   </Box>
+                )}
+              </Paper>
+            </Box>
+          )}
+
+          {/* TAB 3: POSTERS */}
+          {mainTab === 'posters' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+                  <Box>
+                    <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                      Official Movie Posters
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#94A3B8' }}>
+                      Fetch high-resolution artwork directly from TMDB API and set your default poster
+                    </Typography>
+                  </Box>
+                  <Chip
+                    label={`${tmdbImages?.posters?.length || 0} Posters Available`}
+                    size="small"
+                    sx={{ backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700 }}
+                  />
+                </Box>
+
+                {imagesLoading ? (
+                  <Typography variant="body2" sx={{ color: '#94A3B8', py: 4, textAlign: 'center' }}>
+                    Loading high-resolution posters from TMDB...
+                  </Typography>
+                ) : tmdbImages?.posters && tmdbImages.posters.length > 0 ? (
+                  <Grid container spacing={2.5}>
+                    {tmdbImages.posters.map((img: any, idx: number) => {
+                      const fullUrl = `https://image.tmdb.org/t/p/w500${img.file_path}`;
+                      const isCurrentPoster = movie.custom_poster_url?.includes(img.file_path) || (!movie.custom_poster_url && movie.poster_path?.includes(img.file_path));
+
+                      return (
+                        <Grid item xs={6} sm={4} md={3} key={img.file_path || idx}>
+                          <Paper
+                            sx={{
+                              p: 1.5,
+                              backgroundColor: '#07090E',
+                              border: isCurrentPoster ? '2px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.08)',
+                              borderRadius: 2,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 1.5,
+                              position: 'relative',
+                              overflow: 'hidden',
+                              transition: 'all 0.2s ease',
+                              '&:hover': { borderColor: '#38BDF8', transform: 'translateY(-2px)' },
+                            }}
+                          >
+                            <Box
+                              component="img"
+                              src={fullUrl}
+                              alt={`Poster ${idx + 1}`}
+                              sx={{
+                                width: '100%',
+                                height: 260,
+                                objectFit: 'cover',
+                                borderRadius: 1.5,
+                              }}
+                            />
+
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600 }}>
+                                {img.width}x{img.height}
+                              </Typography>
+                              {img.iso_639_1 && (
+                                <Chip
+                                  label={img.iso_639_1.toUpperCase()}
+                                  size="small"
+                                  sx={{ height: 18, fontSize: '0.65rem', backgroundColor: 'rgba(255,255,255,0.08)', color: '#94A3B8' }}
+                                />
+                              )}
+                            </Box>
+
+                            {isCurrentPoster ? (
+                              <Button
+                                fullWidth
+                                size="small"
+                                variant="contained"
+                                color="secondary"
+                                startIcon={<CheckCircleIcon />}
+                                sx={{ fontWeight: 700, textTransform: 'none', py: 0.75 }}
+                              >
+                                Active Poster
+                              </Button>
+                            ) : (
+                              <Button
+                                fullWidth
+                                size="small"
+                                variant="outlined"
+                                onClick={() => setDefaultPosterMutation.mutate(img.file_path)}
+                                disabled={setDefaultPosterMutation.isPending}
+                                sx={{ fontWeight: 600, textTransform: 'none', borderColor: 'rgba(255,255,255,0.2)', color: '#F8FAFC' }}
+                              >
+                                Set as Default
+                              </Button>
+                            )}
+                          </Paper>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                ) : (
+                  <Typography variant="body2" sx={{ color: '#64748B', textAlign: 'center', py: 4 }}>
+                    No posters available for this title on TMDB.
+                  </Typography>
+                )}
+              </Paper>
+            </Box>
+          )}
+
+          {/* TAB 4: SCREENSHOTS & BACKDROPS */}
+          {mainTab === 'screenshots' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <Paper sx={{ p: 3, backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+                  <Box>
+                    <Typography variant="h6" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                      Screenshots & Backdrop Gallery
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#94A3B8' }}>
+                      Set high-resolution keyframes or backdrops as your movie's main hero banner image
+                    </Typography>
+                  </Box>
+                  <Chip
+                    label={`${tmdbImages?.backdrops?.length || 0} Screenshots Available`}
+                    size="small"
+                    sx={{ backgroundColor: 'rgba(167, 139, 250, 0.15)', color: '#A78BFA', fontWeight: 700 }}
+                  />
+                </Box>
+
+                {imagesLoading ? (
+                  <Typography variant="body2" sx={{ color: '#94A3B8', py: 4, textAlign: 'center' }}>
+                    Loading high-resolution backdrops from TMDB...
+                  </Typography>
+                ) : tmdbImages?.backdrops && tmdbImages.backdrops.length > 0 ? (
+                  <Grid container spacing={2.5}>
+                    {tmdbImages.backdrops.map((img: any, idx: number) => {
+                      const fullUrl = `https://image.tmdb.org/t/p/w780${img.file_path}`;
+                      const isCurrentBackdrop = movie.custom_backdrop_url?.includes(img.file_path) || (!movie.custom_backdrop_url && movie.backdrop_path?.includes(img.file_path));
+
+                      return (
+                        <Grid item xs={12} sm={6} md={4} key={img.file_path || idx}>
+                          <Paper
+                            sx={{
+                              p: 1.5,
+                              backgroundColor: '#07090E',
+                              border: isCurrentBackdrop ? '2px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.08)',
+                              borderRadius: 2,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 1.5,
+                              transition: 'all 0.2s ease',
+                              '&:hover': { borderColor: '#A78BFA', transform: 'translateY(-2px)' },
+                            }}
+                          >
+                            <Box
+                              component="img"
+                              src={fullUrl}
+                              alt={`Backdrop ${idx + 1}`}
+                              sx={{
+                                width: '100%',
+                                height: 180,
+                                objectFit: 'cover',
+                                borderRadius: 1.5,
+                              }}
+                            />
+
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Typography variant="caption" sx={{ color: '#64748B', fontWeight: 600 }}>
+                                {img.width}x{img.height}
+                              </Typography>
+
+                              {img.vote_average ? (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <StarIcon sx={{ fontSize: 14, color: '#E5A93C' }} />
+                                  <Typography variant="caption" sx={{ color: '#F8FAFC', fontWeight: 700 }}>
+                                    {img.vote_average.toFixed(1)}
+                                  </Typography>
+                                </Box>
+                              ) : null}
+                            </Box>
+
+                            {isCurrentBackdrop ? (
+                              <Button
+                                fullWidth
+                                size="small"
+                                variant="contained"
+                                color="secondary"
+                                startIcon={<CheckCircleIcon />}
+                                sx={{ fontWeight: 700, textTransform: 'none', py: 0.75 }}
+                              >
+                                Active Backdrop
+                              </Button>
+                            ) : (
+                              <Button
+                                fullWidth
+                                size="small"
+                                variant="outlined"
+                                onClick={() => setDefaultBackdropMutation.mutate(img.file_path)}
+                                disabled={setDefaultBackdropMutation.isPending}
+                                sx={{ fontWeight: 600, textTransform: 'none', borderColor: 'rgba(255,255,255,0.2)', color: '#F8FAFC' }}
+                              >
+                                Set as Default Backdrop
+                              </Button>
+                            )}
+                          </Paper>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                ) : (
+                  <Typography variant="body2" sx={{ color: '#64748B', textAlign: 'center', py: 4 }}>
+                    No screenshots or backdrops available for this title on TMDB.
+                  </Typography>
                 )}
               </Paper>
             </Box>

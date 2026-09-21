@@ -28,11 +28,50 @@ export const TVNavigationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsTvMode((prev) => !prev);
   };
 
+  // Global protection: Prevent Backspace key from triggering browser back navigation when not inside an active text input
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Backspace') {
+        const target = e.target as HTMLElement | null;
+        const activeEl = document.activeElement as HTMLElement | null;
+        const isInput = (target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.getAttribute('role') === 'textbox'
+        )) || (activeEl && (
+          activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.isContentEditable ||
+          activeEl.getAttribute('role') === 'textbox'
+        ));
+
+        if (!isInput) {
+          e.preventDefault();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, []);
+
   // Keyboard and D-Pad Event Navigation listener
   useEffect(() => {
     if (!isTvMode) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.isContentEditable ||
+        activeEl.getAttribute('role') === 'textbox'
+      );
+
+      // Do not intercept keyboard events when user is typing in a text field
+      if (isInput) return;
+
       const focusableSelectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), [data-tv-item="true"]';
       const focusableElements = Array.from(document.querySelectorAll<HTMLElement>(focusableSelectors))
         .filter(el => el.offsetParent !== null && !el.hasAttribute('disabled'));
@@ -52,8 +91,8 @@ export const TVNavigationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const prevIndex = currentIndex > 0 ? currentIndex - 1 : focusableElements.length - 1;
         focusableElements[prevIndex].focus();
         focusableElements[prevIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-      } else if (e.key === 'Backspace' || e.key === 'Escape') {
-        // Back navigation on TV
+      } else if (e.key === 'Escape') {
+        // Back navigation on TV mode via Escape key only
         if (window.history.length > 1) {
           window.history.back();
         }

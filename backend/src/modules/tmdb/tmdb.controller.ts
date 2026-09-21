@@ -48,4 +48,19 @@ export class TmdbController {
       next(err);
     }
   }
+
+  static async getImages(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tmdbId = parseInt(req.params.id, 10);
+      if (isNaN(tmdbId)) {
+        throw new BadRequestError('Invalid TMDB ID');
+      }
+
+      const mediaType = (req.query.media_type || req.query.mediaType || req.query.type) as 'movie' | 'tv' || 'movie';
+      const images = await TmdbService.getMediaImages(tmdbId, mediaType);
+      return res.status(200).json({ success: true, data: images });
+    } catch (err) {
+      next(err);
+    }
+  }
 }

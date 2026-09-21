@@ -1026,4 +1026,33 @@ export class TmdbService {
     }
     return this.getMovieDetails(tmdbId);
   }
+
+  static async getMediaImages(tmdbId: number, mediaType: 'movie' | 'tv' = 'movie'): Promise<{
+    backdrops: Array<{ file_path: string; aspect_ratio?: number; width?: number; height?: number }>;
+    posters: Array<{ file_path: string; aspect_ratio?: number; width?: number; height?: number }>;
+  }> {
+    if (config.tmdb.apiKey && config.tmdb.apiKey !== 'mock-key') {
+      try {
+        const endpoint = mediaType === 'tv' ? `/tv/${tmdbId}/images` : `/movie/${tmdbId}/images`;
+        const res = await fetch(`${config.tmdb.baseUrl}${endpoint}?api_key=${config.tmdb.apiKey}&include_image_language=en,ta,hi,te,ml,kn,null`, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (res.ok) {
+          const data: any = await res.json();
+          return {
+            backdrops: Array.isArray(data.backdrops) ? data.backdrops : [],
+            posters: Array.isArray(data.posters) ? data.posters : [],
+          };
+        }
+      } catch (err: any) {
+        Logger.warn(`TMDB images API failed for ID ${tmdbId}: ${err.message}`);
+      }
+    }
+
+    const found = this.mockMovies.find(m => m.id === tmdbId);
+    return {
+      backdrops: found?.backdrop_path ? [{ file_path: found.backdrop_path, aspect_ratio: 1.78, width: 1920, height: 1080 }] : [],
+      posters: found?.poster_path ? [{ file_path: found.poster_path, aspect_ratio: 0.67, width: 1000, height: 1500 }] : [],
+    };
+  }
 }
