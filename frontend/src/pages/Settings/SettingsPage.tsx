@@ -39,6 +39,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
 import { api } from '../../api/client.js';
+import { ConfirmDeleteModal } from '../../components/ui/index.js';
 
 export const SettingsPage: React.FC = () => {
   const { user, refreshProfile } = useAuth();
@@ -56,6 +57,7 @@ export const SettingsPage: React.FC = () => {
   const [editGenreName, setEditGenreName] = useState('');
   const [editGenreColor, setEditGenreColor] = useState('#38BDF8');
   const [editGenreDesc, setEditGenreDesc] = useState('');
+  const [genreToDelete, setGenreToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const { data: genresData } = useQuery({
     queryKey: ['genres'],
@@ -776,11 +778,7 @@ export const SettingsPage: React.FC = () => {
                     <Tooltip title="Delete Genre">
                       <IconButton
                         size="small"
-                        onClick={() => {
-                          if (window.confirm(`Are you sure you want to delete the custom genre "${cg.name}"?`)) {
-                            deleteGenreMutation.mutate(cg.id);
-                          }
-                        }}
+                        onClick={() => setGenreToDelete({ id: cg.id, name: cg.name })}
                         sx={{ color: '#94A3B8', '&:hover': { color: '#EF4444' } }}
                       >
                         <DeleteOutlineIcon fontSize="small" />
@@ -1094,6 +1092,25 @@ export const SettingsPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Delete Custom Genre Confirmation Modal */}
+      <ConfirmDeleteModal
+        open={!!genreToDelete}
+        onClose={() => setGenreToDelete(null)}
+        onConfirm={() => {
+          if (genreToDelete) {
+            deleteGenreMutation.mutate(genreToDelete.id);
+            setGenreToDelete(null);
+          }
+        }}
+        isLoading={deleteGenreMutation.isPending}
+        title="Delete Custom Genre"
+        description={
+          genreToDelete
+            ? `Are you sure you want to delete the custom genre "${genreToDelete.name}"?`
+            : ''
+        }
+      />
     </Box>
   );
 };

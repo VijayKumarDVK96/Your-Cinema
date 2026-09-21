@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -39,8 +39,34 @@ import { MovieCard } from '../../components/common/MovieCard.js';
 import { FilterBar } from '../../components/common/FilterBar.js';
 import { SkeletonGrid } from '../../components/feedback/SkeletonGrid.js';
 import { EmptyState } from '../../components/feedback/EmptyState.js';
+import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+
+const STORAGE_KEY = 'my_cinema_my_movies_filters';
+
+interface StoredFilters {
+  status?: string;
+  mediaType?: 'all' | 'movie' | 'tv';
+  genreId?: string | number;
+  language?: string;
+  ott?: string;
+  tagId?: string;
+  ratingRange?: [number, number];
+  isFavorite?: boolean;
+  sortBy?: string;
+  page?: number;
+}
+
+const loadSavedFilters = (): StoredFilters => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load saved filters from localStorage', e);
+  }
+  return {};
+};
 
 export const MyMoviesPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -48,17 +74,40 @@ export const MyMoviesPage: React.FC = () => {
   const { openPlayer } = usePlayer();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [page, setPage] = useState<number>(1);
+  const saved = loadSavedFilters();
+
+  const [page, setPage] = useState<number>(saved.page || 1);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [status, setStatus] = useState<string>('all');
-  const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>('all');
-  const [genreId, setGenreId] = useState<string | number | undefined>(undefined);
-  const [language, setLanguage] = useState<string | undefined>(undefined);
-  const [ott, setOtt] = useState<string | undefined>(undefined);
-  const [tagId, setTagId] = useState<string | undefined>(undefined);
-  const [personalRating, setPersonalRating] = useState<string | undefined>(undefined);
-  const [isFavorite, setIsFavorite] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<string>('added_at');
+  const [status, setStatus] = useState<string>(saved.status || 'all');
+  const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>(saved.mediaType || 'all');
+  const [genreId, setGenreId] = useState<string | number | undefined>(saved.genreId);
+  const [language, setLanguage] = useState<string | undefined>(saved.language);
+  const [ott, setOtt] = useState<string | undefined>(saved.ott);
+  const [tagId, setTagId] = useState<string | undefined>(saved.tagId);
+  const [ratingRange, setRatingRange] = useState<[number, number]>(saved.ratingRange || [1, 5]);
+  const [isFavorite, setIsFavorite] = useState<boolean>(saved.isFavorite || false);
+  const [sortBy, setSortBy] = useState<string>(saved.sortBy || 'added_at');
+
+  // Sync filter changes to localStorage
+  useEffect(() => {
+    try {
+      const toSave: StoredFilters = {
+        status,
+        mediaType,
+        genreId,
+        language,
+        ott,
+        tagId,
+        ratingRange,
+        isFavorite,
+        sortBy,
+        page,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch (e) {
+      console.error('Failed to save filters to localStorage', e);
+    }
+  }, [status, mediaType, genreId, language, ott, tagId, ratingRange, isFavorite, sortBy, page]);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -66,6 +115,7 @@ export const MyMoviesPage: React.FC = () => {
   const [createWatchlistOpen, setCreateWatchlistOpen] = useState(false);
   const [newWatchlistNameInput, setNewWatchlistNameInput] = useState('');
   const [isBulkMode, setIsBulkMode] = useState<boolean>(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
 
   // Bulk Edit Tags & Genres state
   const [bulkTagsGenresOpen, setBulkTagsGenresOpen] = useState(false);
@@ -77,9 +127,12 @@ export const MyMoviesPage: React.FC = () => {
 
   const searchTerm = searchParams.get('search') || '';
 
+  const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
+  const ratingMax = ratingRange[1] < 5 ? ratingRange[1] : undefined;
+
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, personalRating, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
@@ -88,7 +141,8 @@ export const MyMoviesPage: React.FC = () => {
       if (language) params.append('language', language);
       if (ott) params.append('ott', ott);
       if (tagId) params.append('tagId', tagId);
-      if (personalRating) params.append('personalRating', personalRating);
+      if (ratingMin !== undefined) params.append('ratingMin', ratingMin.toString());
+      if (ratingMax !== undefined) params.append('ratingMax', ratingMax.toString());
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
       params.append('sortBy', sortBy);
@@ -378,11 +432,7 @@ export const MyMoviesPage: React.FC = () => {
               color="error"
               startIcon={<DeleteOutlineIcon />}
               disabled={selectedIds.size === 0}
-              onClick={() => {
-                if (window.confirm(`Are you sure you want to delete ${selectedIds.size} selected movies?`)) {
-                  bulkMutation.mutate('delete');
-                }
-              }}
+              onClick={() => setConfirmDeleteOpen(true)}
             >
               Delete
             </Button>
@@ -801,13 +851,13 @@ export const MyMoviesPage: React.FC = () => {
         selectedLanguage={language}
         onLanguageChange={setLanguage}
         selectedTag={tagId}
-        onTagChange={setTagId}
-        selectedPersonalRating={personalRating}
-        onPersonalRatingChange={setPersonalRating}
+        onTagChange={(val) => { setTagId(val); setPage(1); }}
+        ratingRange={ratingRange}
+        onRatingRangeChange={(range) => { setRatingRange(range); setPage(1); }}
         isFavorite={isFavorite}
-        onFavoriteToggle={() => setIsFavorite(!isFavorite)}
+        onFavoriteToggle={() => { setIsFavorite(!isFavorite); setPage(1); }}
         sortBy={sortBy}
-        onSortChange={setSortBy}
+        onSortChange={(val) => { setSortBy(val); setPage(1); }}
         availableTags={tagsData || []}
         availableGenres={genresData}
         onReset={() => {
@@ -817,10 +867,14 @@ export const MyMoviesPage: React.FC = () => {
           setOtt(undefined);
           setLanguage(undefined);
           setTagId(undefined);
-          setPersonalRating(undefined);
+          setRatingRange([1, 5]);
           setIsFavorite(false);
           setSortBy('added_at');
+          setPage(1);
           setSearchParams({});
+          try {
+            localStorage.removeItem(STORAGE_KEY);
+          } catch (e) {}
         }}
       />
 
@@ -1094,6 +1148,19 @@ export const MyMoviesPage: React.FC = () => {
           )}
         </Box>
       )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        onConfirm={() => {
+          bulkMutation.mutate('delete');
+          setConfirmDeleteOpen(false);
+        }}
+        isLoading={bulkMutation.isPending}
+        title="Delete Selected Titles"
+        description={`Are you sure you want to delete ${selectedIds.size} selected movie${selectedIds.size === 1 ? '' : 's'} from your library?`}
+      />
     </Box>
   );
 };

@@ -60,6 +60,7 @@ import { TmdbRefreshModal } from '../../components/common/TmdbRefreshModal.js';
 import { ManageSourcesModal } from '../../components/common/ManageSourcesModal.js';
 import { SelectSourceModal } from '../../components/common/SelectSourceModal.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
+import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
 
@@ -74,6 +75,7 @@ export const MovieDetailPage: React.FC = () => {
   const [refreshModalOpen, setRefreshModalOpen] = useState(false);
   const [manageSourcesOpen, setManageSourcesOpen] = useState(false);
   const [selectSourceOpen, setSelectSourceOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
 
@@ -689,11 +691,7 @@ export const MovieDetailPage: React.FC = () => {
 
                 <Tooltip title="Remove from library">
                   <IconButton
-                    onClick={() => {
-                      if (window.confirm(`Are you sure you want to remove "${movie.title}" from your personal library?`)) {
-                        deleteMutation.mutate();
-                      }
-                    }}
+                    onClick={() => setDeleteConfirmOpen(true)}
                     size="small"
                     sx={{
                       width: 36,
@@ -1530,6 +1528,19 @@ export const MovieDetailPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Remove Movie Confirmation Modal */}
+      <ConfirmDeleteModal
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          deleteMutation.mutate();
+          setDeleteConfirmOpen(false);
+        }}
+        isLoading={deleteMutation.isPending}
+        title="Remove Title from Library"
+        description={`Are you sure you want to remove "${movie.title}" from your personal library?`}
+      />
     </Box>
   );
 };

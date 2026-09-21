@@ -34,6 +34,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
 import { EmptyState } from '../../components/feedback/EmptyState.js';
+import { ConfirmDeleteModal } from '../../components/ui/index.js';
 
 export const WatchlistsPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -42,6 +43,7 @@ export const WatchlistsPage: React.FC = () => {
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [page, setPage] = useState<number>(1);
+  const [watchlistToDelete, setWatchlistToDelete] = useState<{ id: string; name: string } | null>(null);
 
   // Dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -304,9 +306,7 @@ export const WatchlistsPage: React.FC = () => {
                           size="small"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (window.confirm(`Delete watchlist "${wl.name}" and all contents?`)) {
-                              deleteMutation.mutate(wl.id);
-                            }
+                            setWatchlistToDelete({ id: wl.id, name: wl.name });
                           }}
                           sx={{ color: '#64748B', '&:hover': { color: '#EF4444' } }}
                         >
@@ -509,6 +509,25 @@ export const WatchlistsPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        open={!!watchlistToDelete}
+        onClose={() => setWatchlistToDelete(null)}
+        onConfirm={() => {
+          if (watchlistToDelete) {
+            deleteMutation.mutate(watchlistToDelete.id);
+            setWatchlistToDelete(null);
+          }
+        }}
+        isLoading={deleteMutation.isPending}
+        title="Delete Watchlist / Subfolder"
+        description={
+          watchlistToDelete
+            ? `Are you sure you want to delete "${watchlistToDelete.name}" and all its contents? This action cannot be undone.`
+            : ''
+        }
+      />
     </Box>
   );
 };

@@ -62,6 +62,7 @@ export interface MovieFilters {
   runtimeMin?: number;
   runtimeMax?: number;
   ratingMin?: number;
+  ratingMax?: number;
   personalRating?: string;
   isFavorite?: boolean;
   mediaType?: 'all' | 'movie' | 'tv';
@@ -85,6 +86,7 @@ export class MoviesService {
       runtimeMin,
       runtimeMax,
       ratingMin,
+      ratingMax,
       personalRating,
       isFavorite,
       mediaType = 'all',
@@ -115,6 +117,10 @@ export class MoviesService {
       if (ratingMin) {
         conditions.push(`um.personal_rating >= $${pIdx++}`);
         params.push(ratingMin);
+      }
+      if (ratingMax) {
+        conditions.push(`um.personal_rating <= $${pIdx++}`);
+        params.push(ratingMax);
       }
       if (personalRating) {
         if (personalRating === 'rated') {
@@ -342,6 +348,9 @@ export class MoviesService {
     }
     if (ratingMin) {
       userMoviesList = userMoviesList.filter(um => (um.personal_rating || 0) >= ratingMin);
+    }
+    if (ratingMax) {
+      userMoviesList = userMoviesList.filter(um => (um.personal_rating || 0) <= ratingMax);
     }
     if (personalRating) {
       if (personalRating === 'rated') {

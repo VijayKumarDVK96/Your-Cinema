@@ -14,6 +14,7 @@ import {
   Alert,
 } from '@mui/material';
 import { api } from '../../api/client.js';
+import { ConfirmDeleteModal } from '../ui/index.js';
 
 interface TmdbRefreshModalProps {
   open: boolean;
@@ -28,6 +29,7 @@ export const TmdbRefreshModal: React.FC<TmdbRefreshModalProps> = ({
   userMovieId,
   onRefreshed,
 }) => {
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [diffData, setDiffData] = useState<any>(null);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
@@ -138,11 +140,7 @@ export const TmdbRefreshModal: React.FC<TmdbRefreshModalProps> = ({
       <DialogActions sx={{ px: 3, pb: 2.5, justifyContent: 'space-between' }}>
         <Button
           color="error"
-          onClick={() => {
-            if (window.confirm('Are you sure you want to discard all your personal edits for this movie and replace with live TMDB data?')) {
-              handleApply(true);
-            }
-          }}
+          onClick={() => setConfirmResetOpen(true)}
           disabled={saving || loading}
         >
           Reset to TMDB
@@ -161,6 +159,20 @@ export const TmdbRefreshModal: React.FC<TmdbRefreshModalProps> = ({
           </Button>
         </Box>
       </DialogActions>
+
+      {/* Discard Edits Confirmation Modal */}
+      <ConfirmDeleteModal
+        open={confirmResetOpen}
+        onClose={() => setConfirmResetOpen(false)}
+        onConfirm={() => {
+          handleApply(true);
+          setConfirmResetOpen(false);
+        }}
+        isLoading={saving}
+        title="Discard Personal Edits"
+        description="Are you sure you want to discard all your personal edits for this movie and replace them with live TMDB data?"
+        confirmText="Reset to TMDB"
+      />
     </Dialog>
   );
 };

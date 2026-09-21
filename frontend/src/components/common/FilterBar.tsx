@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   ToggleButtonGroup,
@@ -11,11 +11,16 @@ import {
   IconButton,
   Tooltip,
   Typography,
+  Slider,
+  Popover,
+  Button,
 } from '@mui/material';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import ListSubheader from '@mui/material/ListSubheader';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { Tag, Genre } from '../../types/index.js';
 
 interface FilterBarProps {
@@ -31,8 +36,8 @@ interface FilterBarProps {
   onOttChange: (ott?: string) => void;
   selectedTag?: string;
   onTagChange: (tagId?: string) => void;
-  selectedPersonalRating?: string;
-  onPersonalRatingChange: (rating?: string) => void;
+  ratingRange?: [number, number];
+  onRatingRangeChange?: (range: [number, number]) => void;
   isFavorite?: boolean;
   onFavoriteToggle: () => void;
   sortBy: string;
@@ -77,9 +82,6 @@ const LANGUAGE_OPTIONS = [
   { code: 'ml', name: 'Malayalam' },
   { code: 'kn', name: 'Kannada' },
   { code: 'ko', name: 'Korean' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'fr', name: 'French' },
 ];
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -95,8 +97,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onLanguageChange,
   selectedTag,
   onTagChange,
-  selectedPersonalRating,
-  onPersonalRatingChange,
+  ratingRange = [1, 5],
+  onRatingRangeChange,
   isFavorite,
   onFavoriteToggle,
   sortBy,
@@ -105,6 +107,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   availableGenres,
   onReset,
 }) => {
+  const [ratingAnchorEl, setRatingAnchorEl] = useState<null | HTMLElement>(null);
   const customGenresList: Genre[] = Array.isArray(availableGenres)
     ? availableGenres.filter(g => !g.is_predefined)
     : (availableGenres?.custom || []);
@@ -359,27 +362,106 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </FormControl>
         )}
 
-        {/* My Rating filter dropdown */}
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel sx={{ color: '#94A3B8' }}>My Rating</InputLabel>
-          <Select
-            value={selectedPersonalRating || ''}
-            label="My Rating"
-            onChange={(e) => onPersonalRatingChange(e.target.value || undefined)}
-            sx={{ color: '#F8FAFC', backgroundColor: 'rgba(255,255,255,0.03)' }}
+        {/* My Rating Slider Filter */}
+        <Box>
+          <Button
+            size="small"
+            onClick={(e) => setRatingAnchorEl(e.currentTarget)}
+            sx={{
+              height: 40,
+              px: 2,
+              color: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
+              backgroundColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 'rgba(229, 169, 60, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              border: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '1px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.23)',
+              borderRadius: '4px',
+              textTransform: 'none',
+              fontSize: '0.85rem',
+              fontWeight: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 700 : 500,
+              '&:hover': {
+                backgroundColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? 'rgba(229, 169, 60, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                borderColor: (ratingRange[0] > 1 || ratingRange[1] < 5) ? '#E5A93C' : '#F8FAFC',
+              },
+            }}
           >
-            <MenuItem value=""><em>All Ratings</em></MenuItem>
-            <MenuItem value="rated">Rated Only</MenuItem>
-            <MenuItem value="unrated">Unrated Only</MenuItem>
-            <MenuItem value="4.5">⭐ 4.5 & Above</MenuItem>
-            <MenuItem value="4.0">⭐ 4.0 & Above</MenuItem>
-            <MenuItem value="3.5">⭐ 3.5 & Above</MenuItem>
-            <MenuItem value="3.0">⭐ 3.0 & Above</MenuItem>
-            <MenuItem value="2.5">⭐ 2.5 & Above</MenuItem>
-            <MenuItem value="2.0">⭐ 2.0 & Above</MenuItem>
-            <MenuItem value="1.0">⭐ 1.0 & Above</MenuItem>
-          </Select>
-        </FormControl>
+            <StarIcon sx={{ fontSize: 16, mr: 0.8, color: '#E5A93C' }} />
+            {(ratingRange[0] > 1 || ratingRange[1] < 5) ? `⭐ ${ratingRange[0].toFixed(1)} – ${ratingRange[1].toFixed(1)}` : 'My Rating'}
+          </Button>
+
+          <Popover
+            open={Boolean(ratingAnchorEl)}
+            anchorEl={ratingAnchorEl}
+            onClose={() => setRatingAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+            PaperProps={{
+              sx: {
+                p: 2.5,
+                width: 280,
+                backgroundColor: '#0F172A',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: 2.5,
+                boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+              },
+            }}
+          >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, color: '#F8FAFC' }}>
+                Filter Rating Range
+              </Typography>
+              <Chip
+                label={`⭐ ${ratingRange[0].toFixed(1)} to ${ratingRange[1].toFixed(1)}`}
+                size="small"
+                sx={{ backgroundColor: '#E5A93C', color: '#000', fontWeight: 700, fontSize: '0.72rem' }}
+              />
+            </Box>
+
+            <Box sx={{ px: 1, py: 1 }}>
+              <Slider
+                value={ratingRange}
+                onChange={(_, val) => onRatingRangeChange && onRatingRangeChange(val as [number, number])}
+                min={1.0}
+                max={5.0}
+                step={0.5}
+                valueLabelDisplay="auto"
+                marks={[
+                  { value: 1.0, label: '1' },
+                  { value: 2.0, label: '2' },
+                  { value: 3.0, label: '3' },
+                  { value: 4.0, label: '4' },
+                  { value: 5.0, label: '5' },
+                ]}
+                sx={{
+                  color: '#E5A93C',
+                  '& .MuiSlider-thumb': { backgroundColor: '#E5A93C' },
+                  '& .MuiSlider-track': { backgroundColor: '#E5A93C' },
+                  '& .MuiSlider-markLabel': { color: '#64748B', fontSize: '0.7rem' },
+                }}
+              />
+            </Box>
+
+            {/* Presets */}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 2.5 }}>
+              <Chip
+                label="All (1-5)"
+                size="small"
+                onClick={() => onRatingRangeChange && onRatingRangeChange([1, 5])}
+                sx={{ cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.06)', color: '#94A3B8' }}
+              />
+              <Chip
+                label="4.0+ Stars"
+                size="small"
+                onClick={() => onRatingRangeChange && onRatingRangeChange([4.0, 5.0])}
+                sx={{ cursor: 'pointer', backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C' }}
+              />
+              <Chip
+                label="3.0+ Stars"
+                size="small"
+                onClick={() => onRatingRangeChange && onRatingRangeChange([3.0, 5.0])}
+                sx={{ cursor: 'pointer', backgroundColor: 'rgba(229, 169, 60, 0.15)', color: '#E5A93C' }}
+              />
+            </Box>
+          </Popover>
+        </Box>
 
         {/* Sort selector */}
         <FormControl size="small" sx={{ minWidth: 170 }}>
