@@ -147,10 +147,10 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
               fullWidth
               placeholder={
                 mediaType === 'tv'
-                  ? "Search Web Series & TV Shows (e.g. Breaking Bad, Stranger Things, Dark, The Family Man)..."
+                  ? "Search by title, TMDB ID, or paste TMDB URL (e.g. Dark, Breaking Bad, 1399)..."
                   : mediaType === 'movie'
-                  ? "Search Movies by title (e.g. Interstellar, Dune, Oppenheimer)..."
-                  : "Search Movies & Web Series (e.g. Interstellar, Breaking Bad, Stranger Things)..."
+                  ? "Search by title, TMDB ID, or paste TMDB URL (e.g. Don, Interstellar, 810793)..."
+                  : "Search by title, TMDB ID, or paste TMDB URL (e.g. Don, Interstellar, Breaking Bad)..."
               }
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

@@ -21,6 +21,49 @@ export interface TmdbMovieSummary {
 export class TmdbService {
   private static mockMovies: any[] = [
     {
+      id: 810793,
+      title: 'Don',
+      original_title: 'டான்',
+      overview: 'A reluctant engineering student navigates college life, friction with his strict father, and a ruthless professor while discovering his true passion for filmmaking.',
+      release_date: '2022-05-13',
+      runtime: 163,
+      vote_average: 7.4,
+      original_language: 'ta',
+      poster_path: '/dI9Wf1Z4r47hLdO01jS62E48kL4.jpg',
+      backdrop_path: '/3V4k3a228j7X9955700.jpg',
+      director: 'Cibi Chakaravarthi',
+      genres: [{ id: 35, name: 'Comedy' }, { id: 18, name: 'Drama' }],
+      cast: [
+        { name: 'Sivakarthikeyan', character: 'Chakaravathi' },
+        { name: 'S. J. Suryah', character: 'Bhoominathan' },
+        { name: 'Priyanka Arul Mohan', character: 'Angayarkanni' },
+        { name: 'Samuthirakani', character: 'Ganesan' },
+      ],
+      keywords: ['college', 'father son', 'tamil', 'don'],
+      trailer_url: 'https://www.youtube.com/watch?v=F0fUq6-S1z8',
+    },
+    {
+      id: 2575,
+      title: 'Don',
+      original_title: 'डॉन',
+      overview: 'A simple man named Vijay is recruited by a police officer to masquerade as the ruthless criminal leader Don.',
+      release_date: '2006-10-20',
+      runtime: 171,
+      vote_average: 7.1,
+      original_language: 'hi',
+      poster_path: '/g1N4lP5g0g0c9W7bC1c9w8K9z7a.jpg',
+      backdrop_path: '/b8Wb0W8Wb0W8Wb0W8Wb0W8Wb0W8.jpg',
+      director: 'Farhan Akhtar',
+      genres: [{ id: 28, name: 'Action' }, { id: 80, name: 'Crime' }, { id: 53, name: 'Thriller' }],
+      cast: [
+        { name: 'Shah Rukh Khan', character: 'Don / Vijay' },
+        { name: 'Priyanka Chopra', character: 'Roma' },
+        { name: 'Boman Irani', character: 'DCP DeSilva' },
+      ],
+      keywords: ['action', 'hindi', 'don', 'shah rukh khan'],
+      trailer_url: 'https://www.youtube.com/watch?v=8k76V3H06rA',
+    },
+    {
       id: 1184918,
       title: 'The Greatest of All Time',
       original_title: 'தி கிரேட்டஸ்ட் ஆஃப் ஆல் டைம்',
@@ -445,6 +488,52 @@ export class TmdbService {
 
     const trimmed = query.trim().toLowerCase();
 
+    // 0. Direct TMDB URL or TMDB ID lookup (e.g. https://www.themoviedb.org/movie/810793-don or 810793)
+    const tmdbUrlMatch = trimmed.match(/(?:themoviedb\.org\/(movie|tv)\/(\d+)|^(movie|tv)\/(\d+)$)/i);
+    const rawIdMatch = trimmed.match(/^\d+$/);
+
+    if (tmdbUrlMatch || rawIdMatch) {
+      const mediaType = (tmdbUrlMatch?.[1] || tmdbUrlMatch?.[3] || (type !== 'all' ? type : 'movie')).toLowerCase() as 'movie' | 'tv';
+      const tmdbId = parseInt(tmdbUrlMatch?.[2] || tmdbUrlMatch?.[4] || rawIdMatch![0], 10);
+      try {
+        const item = mediaType === 'tv'
+          ? await this.getTvDetails(tmdbId)
+          : await this.getDetails(tmdbId);
+        if (item && item.id) {
+          return {
+            results: [{
+              id: item.id,
+              title: item.title || (item as any).name,
+              original_title: item.original_title || (item as any).original_name || item.title,
+              overview: item.overview,
+              release_date: item.release_date || item.first_air_date || '',
+              poster_path: item.poster_path,
+              backdrop_path: item.backdrop_path,
+              vote_average: item.vote_average,
+              original_language: item.original_language,
+              genre_ids: (item.genres || []).map((g: any) => g.id),
+              media_type: mediaType,
+            }],
+            total_results: 1,
+          };
+        }
+      } catch {
+        // Fall back to normal search
+      }
+    }
+
+    // Exact Match & Relevance Score Calculator
+    const scoreItem = (item: any) => {
+      const titleLower = (item.title || item.name || '').toLowerCase();
+      const origLower = (item.original_title || item.original_name || '').toLowerCase();
+      let score = 0;
+      if (titleLower === trimmed || origLower === trimmed) score += 2000;
+      else if (titleLower.startsWith(trimmed) || origLower.startsWith(trimmed)) score += 500;
+      else if (` ${titleLower} `.includes(` ${trimmed} `) || ` ${origLower} `.includes(` ${trimmed} `)) score += 200;
+      score += (item.vote_average || 0) * 10;
+      return score;
+    };
+
     // Use TMDB API if key is present
     if (config.tmdb.apiKey && config.tmdb.apiKey !== 'mock_or_demo_key') {
       try {
@@ -452,16 +541,34 @@ export class TmdbService {
         if (type === 'movie') endpoint = 'search/movie';
         else if (type === 'tv') endpoint = 'search/tv';
 
-        const url = `${config.tmdb.baseUrl}/${endpoint}?api_key=${config.tmdb.apiKey}&query=${encodeURIComponent(trimmed)}&page=${page}&include_adult=false`;
-        const res = await fetch(url);
-        if (!res.ok) {
+        const fetchUrl = (p: number) => `${config.tmdb.baseUrl}/${endpoint}?api_key=${config.tmdb.apiKey}&query=${encodeURIComponent(trimmed)}&page=${p}&include_adult=false`;
+
+        const res = await fetch(fetchUrl(page));
+        let rawResults: any[] = [];
+        if (res.ok) {
+          const data: any = await res.json();
+          rawResults = data.results || [];
+
+          // For short queries (e.g. "don", "v"), fetch page 2 as well to ensure exact title matches buried on page 2 are found
+          if (trimmed.length <= 6 && data.total_pages > 1 && page === 1) {
+            try {
+              const res2 = await fetch(fetchUrl(2));
+              if (res2.ok) {
+                const data2: any = await res2.json();
+                rawResults = [...rawResults, ...(data2.results || [])];
+              }
+            } catch {
+              // Ignore page 2 fetch error
+            }
+          }
+        } else {
           throw new Error(`TMDB HTTP error ${res.status}`);
         }
-        const data: any = await res.json();
-        const rawResults: any[] = data.results || [];
-        
+
         const filtered = rawResults.filter(item => item.media_type !== 'person');
-        const normalized = filtered.map(item => {
+        const uniqueItems = Array.from(new Map(filtered.map(i => [i.id, i])).values());
+
+        const normalized = uniqueItems.map(item => {
           const isTv = item.media_type === 'tv' || type === 'tv';
           return {
             id: item.id,
@@ -478,16 +585,19 @@ export class TmdbService {
           };
         });
 
+        // Boost exact matches (e.g. "Don" 2022) to the top
+        normalized.sort((a, b) => scoreItem(b) - scoreItem(a));
+
         return {
           results: normalized,
-          total_results: data.total_results || normalized.length,
+          total_results: normalized.length,
         };
       } catch (err: any) {
         Logger.warn(`TMDB API call failed (${err.message}). Using resilient search matcher.`);
       }
     }
 
-    // Resilient fallback matcher for local preview
+    // Resilient fallback matcher for local preview / mock mode
     let matches = this.mockMovies.filter(m =>
       m.title.toLowerCase().includes(trimmed) ||
       m.original_title.toLowerCase().includes(trimmed) ||
@@ -497,6 +607,8 @@ export class TmdbService {
     if (type !== 'all') {
       matches = matches.filter(m => (m.media_type || 'movie') === type);
     }
+
+    matches.sort((a, b) => scoreItem(b) - scoreItem(a));
 
     return {
       results: matches.map(m => ({

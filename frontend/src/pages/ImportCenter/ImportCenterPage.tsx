@@ -290,6 +290,9 @@ export const ImportCenterPage: React.FC = () => {
       });
 
       setImportResult(res.data?.data);
+      setMatches([]);
+      setSelectedIndices(new Set());
+      setInputText('');
       queryClient.invalidateQueries({ queryKey: ['movies'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
