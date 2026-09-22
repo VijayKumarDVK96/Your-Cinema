@@ -65,7 +65,33 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const list = await WatchlistsService.getWatchlistById(req.user!.id, req.params.id, { page, limit });
+    const status = req.query.status as string | undefined;
+    const mediaType = req.query.mediaType as 'all' | 'movie' | 'tv' | undefined;
+    const genreId = req.query.genreId as string | undefined;
+    const tagId = req.query.tagId as string | undefined;
+    const ott = req.query.ott as string | undefined;
+    const language = req.query.language as string | undefined;
+    const ratingMin = req.query.ratingMin ? parseFloat(req.query.ratingMin as string) : undefined;
+    const ratingMax = req.query.ratingMax ? parseFloat(req.query.ratingMax as string) : undefined;
+    const isFavorite = req.query.isFavorite === 'true' ? true : req.query.isFavorite === 'false' ? false : undefined;
+    const search = req.query.search as string | undefined;
+    const sortBy = req.query.sortBy as string | undefined;
+
+    const list = await WatchlistsService.getWatchlistById(req.user!.id, req.params.id, {
+      page,
+      limit,
+      status,
+      mediaType,
+      genreId,
+      tagId,
+      ott,
+      language,
+      ratingMin,
+      ratingMax,
+      isFavorite,
+      search,
+      sortBy,
+    });
     return res.status(200).json({ success: true, data: list });
   } catch (err) {
     next(err);

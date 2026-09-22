@@ -49,8 +49,10 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
+import { FilterBar } from '../../components/common/FilterBar.js';
 import { EmptyState } from '../../components/feedback/EmptyState.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 
@@ -171,6 +173,40 @@ export const WatchlistsPage: React.FC = () => {
     return chain;
   };
 
+  // Filter state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [status, setStatus] = useState<string>('all');
+  const [mediaType, setMediaType] = useState<'all' | 'movie' | 'tv'>('all');
+  const [genreId, setGenreId] = useState<string | number | undefined>(undefined);
+  const [language, setLanguage] = useState<string | undefined>(undefined);
+  const [ott, setOtt] = useState<string | undefined>(undefined);
+  const [tagId, setTagId] = useState<string | undefined>(undefined);
+  const [ratingRange, setRatingRange] = useState<[number, number]>([1, 5]);
+  const [isFavorite, setIsFavorite] = useState<boolean>(false);
+  const [sortBy, setSortBy] = useState<string>('added_at');
+
+  const searchTerm = searchParams.get('search') || '';
+  const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
+  const ratingMax = ratingRange[1] < 5 ? ratingRange[1] : undefined;
+
+  // Query Tags for filter bar dropdown
+  const { data: tagsData } = useQuery({
+    queryKey: ['tags'],
+    queryFn: async () => {
+      const res = await api.get('/tags');
+      return res.data?.data || [];
+    },
+  });
+
+  // Query Genres for filter bar dropdown
+  const { data: genresData } = useQuery({
+    queryKey: ['genres'],
+    queryFn: async () => {
+      const res = await api.get('/genres');
+      return res.data?.data;
+    },
+  });
+
   // Active selected folder in right content area
   const activeId = useMemo(() => {
     if (selectedListId) return selectedListId;
@@ -179,10 +215,29 @@ export const WatchlistsPage: React.FC = () => {
   }, [selectedListId, flatWatchlists]);
 
   const { data: activeList, isLoading: isActiveListLoading } = useQuery({
-    queryKey: ['watchlist', activeId, moviesPage],
+    queryKey: [
+      'watchlist',
+      activeId,
+      { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, isFavorite, sortBy, page: moviesPage, search: searchTerm },
+    ],
     queryFn: async () => {
       if (!activeId) return null;
-      const res = await api.get(`/watchlists/${activeId}?page=${moviesPage}&limit=50`);
+      const params = new URLSearchParams();
+      params.append('page', moviesPage.toString());
+      params.append('limit', '50');
+      if (status !== 'all') params.append('status', status);
+      if (mediaType !== 'all') params.append('mediaType', mediaType);
+      if (genreId !== undefined && genreId !== null) params.append('genreId', genreId.toString());
+      if (language) params.append('language', language);
+      if (ott) params.append('ott', ott);
+      if (tagId) params.append('tagId', tagId);
+      if (ratingMin !== undefined) params.append('ratingMin', ratingMin.toString());
+      if (ratingMax !== undefined) params.append('ratingMax', ratingMax.toString());
+      if (isFavorite) params.append('isFavorite', 'true');
+      if (searchTerm) params.append('search', searchTerm);
+      if (sortBy) params.append('sortBy', sortBy);
+
+      const res = await api.get(`/watchlists/${activeId}?${params.toString()}`);
       return res.data?.data;
     },
     enabled: !!activeId,
@@ -762,6 +817,43 @@ export const WatchlistsPage: React.FC = () => {
                 </Box>
               </Box>
             </Paper>
+
+            {/* Filter Bar */}
+            <FilterBar
+              status={status}
+              onStatusChange={(val) => { setStatus(val); setMoviesPage(1); }}
+              selectedMediaType={mediaType}
+              onMediaTypeChange={(val) => { setMediaType(val); setMoviesPage(1); }}
+              selectedGenre={genreId}
+              onGenreChange={(val) => { setGenreId(val); setMoviesPage(1); }}
+              selectedOtt={ott}
+              onOttChange={(val) => { setOtt(val); setMoviesPage(1); }}
+              selectedLanguage={language}
+              onLanguageChange={(val) => { setLanguage(val); setMoviesPage(1); }}
+              selectedTag={tagId}
+              onTagChange={(val) => { setTagId(val); setMoviesPage(1); }}
+              ratingRange={ratingRange}
+              onRatingRangeChange={(range) => { setRatingRange(range); setMoviesPage(1); }}
+              isFavorite={isFavorite}
+              onFavoriteToggle={() => { setIsFavorite(!isFavorite); setMoviesPage(1); }}
+              sortBy={sortBy}
+              onSortChange={(val) => { setSortBy(val); setMoviesPage(1); }}
+              availableTags={tagsData || []}
+              availableGenres={genresData}
+              onReset={() => {
+                setStatus('all');
+                setMediaType('all');
+                setGenreId(undefined);
+                setOtt(undefined);
+                setLanguage(undefined);
+                setTagId(undefined);
+                setRatingRange([1, 5]);
+                setIsFavorite(false);
+                setSortBy('added_at');
+                setMoviesPage(1);
+                setSearchParams({});
+              }}
+            />
 
             {/* Movies Content Area */}
             {isActiveListLoading ? (

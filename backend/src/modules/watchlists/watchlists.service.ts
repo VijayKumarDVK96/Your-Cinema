@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { pool, isPgConnected, inMemoryDb } from '../../db/index.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
+import { PREDEFINED_GENRES } from '../genres/genres.service.js';
 
 export class WatchlistsService {
   static async getUnassignedCounts(userId: string): Promise<{ movie_count: number; series_count: number }> {
@@ -158,22 +159,188 @@ export class WatchlistsService {
     return { watchlists, total, page, limit };
   }
 
-  static async getWatchlistById(userId: string, watchlistId: string, options: { page?: number; limit?: number } = {}) {
+  static async getWatchlistById(
+    userId: string,
+    watchlistId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      mediaType?: 'all' | 'movie' | 'tv';
+      genreId?: string | number;
+      tagId?: string;
+      ott?: string;
+      language?: string;
+      ratingMin?: number;
+      ratingMax?: number;
+      isFavorite?: boolean;
+      search?: string;
+      sortBy?: string;
+    } = {}
+  ) {
     const page = Math.max(1, options.page || 1);
     const limit = Math.max(1, options.limit || 50);
     const offset = (page - 1) * limit;
 
+    const {
+      status = 'all',
+      mediaType = 'all',
+      genreId,
+      tagId,
+      ott,
+      language,
+      ratingMin,
+      ratingMax,
+      isFavorite,
+      search,
+      sortBy = 'added_at',
+    } = options;
+
     const isUnassignedMovies = watchlistId === 'unassigned' || watchlistId === 'unassigned-movies';
     const isUnassignedSeries = watchlistId === 'unassigned-series';
+    const isSystemQueue = isUnassignedMovies || isUnassignedSeries;
 
-    if (isUnassignedMovies || isUnassignedSeries) {
-      const counts = await this.getUnassignedCounts(userId);
-      const targetCount = isUnassignedSeries ? counts.series_count : counts.movie_count;
-      const targetType = isUnassignedSeries ? 'tv' : 'movie';
-      let movies: any[] = [];
-      const totalPages = Math.max(1, Math.ceil(targetCount / limit));
+    if (isSystemQueue) {
+      const defaultTargetType = isUnassignedSeries ? 'tv' : 'movie';
+      const effectiveMediaType = mediaType !== 'all' ? mediaType : defaultTargetType;
 
       if (isPgConnected) {
+        const conditions: string[] = ['um.user_id = $1'];
+        const params: any[] = [userId];
+        let pIdx = 2;
+
+        conditions.push(`COALESCE(um.media_type, m.media_type, 'movie') = $${pIdx++}`);
+        params.push(effectiveMediaType);
+
+        conditions.push(`NOT EXISTS (SELECT 1 FROM watchlist_movies wm WHERE wm.user_movie_id = um.id)`);
+
+        if (status && status !== 'all') {
+          conditions.push(`um.watch_status = $${pIdx++}`);
+          params.push(status);
+        }
+        if (isFavorite !== undefined) {
+          conditions.push(`um.is_favorite = $${pIdx++}`);
+          params.push(isFavorite);
+        }
+        if (ratingMin !== undefined) {
+          conditions.push(`um.personal_rating >= $${pIdx++}`);
+          params.push(ratingMin);
+        }
+        if (ratingMax !== undefined) {
+          conditions.push(`um.personal_rating <= $${pIdx++}`);
+          params.push(ratingMax);
+        }
+        if (language) {
+          conditions.push(`COALESCE(m.original_language, '') = $${pIdx++}`);
+          params.push(language);
+        }
+        if (search && search.trim()) {
+          const queryTerm = search.trim().toLowerCase();
+          const searchParamIdx = pIdx++;
+          conditions.push(`(
+            LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' OR
+            LOWER(COALESCE(m.original_title, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+            LOWER(COALESCE(um.custom_director, m.director, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+            LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
+              WHERE LOWER(cm->>'name') LIKE '%' || $${searchParamIdx} || '%'
+            )
+          )`);
+          params.push(queryTerm);
+        }
+        if (ott && ott !== 'all') {
+          if (ott === 'unassigned' || ott === 'no_ott' || ott === 'none') {
+            conditions.push(`NOT EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id)`);
+          } else if (ott === 'any_ott') {
+            conditions.push(`EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id)`);
+          } else {
+            const ottLower = ott.toLowerCase();
+            const searchTokens: string[] = [ottLower];
+            if (ottLower.includes('sun')) searchTokens.push('sunnxt', 'sun_nxt', 'sun nxt');
+            else if (ottLower.includes('prime') || ottLower.includes('amazon')) searchTokens.push('prime', 'amazon');
+            else if (ottLower.includes('hotstar') || ottLower.includes('disney')) searchTokens.push('hotstar', 'disney', 'jiohotstar');
+            else if (ottLower.includes('apple')) searchTokens.push('apple', 'appletv');
+            else if (ottLower.includes('jio')) searchTokens.push('jio', 'jiocinema');
+            else if (ottLower.includes('zee')) searchTokens.push('zee5', 'zee');
+            else if (ottLower.includes('sony')) searchTokens.push('sonyliv', 'sony liv');
+            else if (ottLower.includes('vi')) searchTokens.push('vimovies', 'vi movies', 'vodafone');
+            else if (ottLower.includes('drive')) searchTokens.push('drive', 'google_drive');
+            else if (ottLower.includes('aha')) searchTokens.push('aha');
+
+            const clauses: string[] = [];
+            searchTokens.forEach(token => {
+              clauses.push(`LOWER(ms.provider_name) LIKE $${pIdx}`);
+              clauses.push(`LOWER(COALESCE(ms.provider_icon, '')) LIKE $${pIdx}`);
+              params.push(`%${token}%`);
+              pIdx++;
+            });
+            conditions.push(`EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id AND (${clauses.join(' OR ')}))`);
+          }
+        }
+        if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
+          const gidStr = String(genreId).trim();
+          const pgMatch = PREDEFINED_GENRES.find(
+            pg => pg.id === gidStr || String(pg.tmdb_id) === gidStr || pg.name.toLowerCase() === gidStr.toLowerCase()
+          );
+          const matchName = pgMatch ? pgMatch.name : gidStr;
+
+          conditions.push(`(
+            LOWER(COALESCE(um.assigned_genre, '')) = LOWER($${pIdx})
+            OR EXISTS (
+              SELECT 1 FROM user_movie_custom_genres umcg
+              JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+              WHERE umcg.user_movie_id = um.id AND (
+                cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+              )
+            )
+            OR (
+              (um.assigned_genre IS NULL OR um.assigned_genre = '') AND
+              NOT EXISTS (SELECT 1 FROM user_movie_custom_genres WHERE user_movie_id = um.id) AND
+              EXISTS (
+                SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.genres::jsonb) = 'array' THEN m.genres::jsonb ELSE '[]'::jsonb END) elem
+                WHERE (elem->>'id' = $${pIdx} OR LOWER(elem->>'name') = LOWER($${pIdx}))
+                  AND NOT (LOWER(elem->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+                  AND NOT (elem->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+              )
+            )
+          )`);
+          params.push(matchName);
+          pIdx++;
+        }
+        if (tagId && String(tagId).trim() !== '') {
+          conditions.push(`EXISTS (
+            SELECT 1 FROM user_movie_tags umt
+            WHERE umt.user_movie_id = um.id AND (
+              umt.tag_id::text = $${pIdx} OR
+              umt.tag_id::text IN (SELECT id::text FROM tags WHERE user_id = $1 AND LOWER(name) = LOWER($${pIdx}))
+            )
+          )`);
+          params.push(String(tagId).trim());
+          pIdx++;
+        }
+
+        const countSql = `
+          SELECT COUNT(*)::INT AS total
+          FROM user_movies um
+          JOIN movies m ON um.movie_id = m.id
+          WHERE ${conditions.join(' AND ')}
+        `;
+        const countRes = await pool.query(countSql, params);
+        const total = countRes.rows[0]?.total || 0;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+
+        const sortMap: Record<string, string> = {
+          added_at: 'um.added_at DESC',
+          release_date: 'm.release_date DESC',
+          rating: 'um.personal_rating DESC',
+          my_rating: 'um.personal_rating DESC',
+          tmdb_rating: 'm.vote_average DESC',
+          runtime: 'COALESCE(um.custom_runtime, m.runtime) DESC',
+          title: 'COALESCE(um.custom_title, m.title) ASC',
+        };
+        const orderClause = sortMap[sortBy] || 'um.added_at DESC';
+
         const mSql = `
           SELECT
             um.id AS user_movie_id,
@@ -192,24 +359,52 @@ export class WatchlistsService {
             um.added_at AS in_list_since
           FROM user_movies um
           JOIN movies m ON um.movie_id = m.id
-          WHERE um.user_id = $1
-          AND COALESCE(um.media_type, m.media_type, 'movie') = $2
-          AND NOT EXISTS (
-            SELECT 1 FROM watchlist_movies wm WHERE wm.user_movie_id = um.id
-          )
-          ORDER BY um.added_at DESC
-          LIMIT $3 OFFSET $4
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY ${orderClause}
+          LIMIT $${pIdx++} OFFSET $${pIdx++}
         `;
-        const res = await pool.query(mSql, [userId, targetType, limit, offset]);
-        movies = res.rows;
+        params.push(limit, offset);
+        const res = await pool.query(mSql, params);
+        const movies = res.rows;
+
+        return {
+          id: isUnassignedSeries ? 'unassigned-series' : 'unassigned-movies',
+          user_id: userId,
+          parent_id: null,
+          name: isUnassignedSeries ? 'Unassigned Web Series' : 'Unassigned Movies',
+          description: isUnassignedSeries
+            ? 'Web series & TV shows not added to any folder or collection'
+            : 'Movie titles not added to any folder or collection',
+          is_system: true,
+          system_type: isUnassignedSeries ? 'series' : 'movies',
+          is_readonly: true,
+          movie_count: total,
+          total,
+          page,
+          limit,
+          totalPages,
+          ancestors: [],
+          movies,
+        };
       } else {
         const assignedIds = new Set(Array.from(inMemoryDb.watchlistMovies.values()).map(wm => wm.user_movie_id));
-        const allUnassigned = Array.from(inMemoryDb.userMovies.values())
+        let allUnassigned = Array.from(inMemoryDb.userMovies.values())
           .filter(um => {
             if (um.user_id !== userId || assignedIds.has(um.id)) return false;
             const m = inMemoryDb.movies.get(um.movie_id);
             const mType = um.media_type || m?.media_type || 'movie';
-            return mType === targetType;
+            if (mType !== effectiveMediaType) return false;
+            if (status !== 'all' && um.watch_status !== status) return false;
+            if (isFavorite !== undefined && um.is_favorite !== isFavorite) return false;
+            if (ratingMin !== undefined && (um.personal_rating || 0) < ratingMin) return false;
+            if (ratingMax !== undefined && (um.personal_rating || 0) > ratingMax) return false;
+            if (language && m?.original_language !== language) return false;
+            if (search && search.trim()) {
+              const q = search.trim().toLowerCase();
+              const title = (um.custom_title || m?.title || '').toLowerCase();
+              if (!title.includes(q)) return false;
+            }
+            return true;
           })
           .map(um => {
             const m = inMemoryDb.movies.get(um.movie_id) || {};
@@ -230,28 +425,31 @@ export class WatchlistsService {
               in_list_since: um.added_at,
             };
           });
-        movies = allUnassigned.slice(offset, offset + limit);
-      }
 
-      return {
-        id: isUnassignedSeries ? 'unassigned-series' : 'unassigned-movies',
-        user_id: userId,
-        parent_id: null,
-        name: isUnassignedSeries ? 'Unassigned Web Series' : 'Unassigned Movies',
-        description: isUnassignedSeries
-          ? 'Web series & TV shows not added to any folder or collection'
-          : 'Movie titles not added to any folder or collection',
-        is_system: true,
-        system_type: isUnassignedSeries ? 'series' : 'movies',
-        is_readonly: true,
-        movie_count: targetCount,
-        total: targetCount,
-        page,
-        limit,
-        totalPages,
-        ancestors: [],
-        movies,
-      };
+        const total = allUnassigned.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const movies = allUnassigned.slice(offset, offset + limit);
+
+        return {
+          id: isUnassignedSeries ? 'unassigned-series' : 'unassigned-movies',
+          user_id: userId,
+          parent_id: null,
+          name: isUnassignedSeries ? 'Unassigned Web Series' : 'Unassigned Movies',
+          description: isUnassignedSeries
+            ? 'Web series & TV shows not added to any folder or collection'
+            : 'Movie titles not added to any folder or collection',
+          is_system: true,
+          system_type: isUnassignedSeries ? 'series' : 'movies',
+          is_readonly: true,
+          movie_count: total,
+          total,
+          page,
+          limit,
+          totalPages,
+          ancestors: [],
+          movies,
+        };
+      }
     }
 
     if (isPgConnected) {
@@ -268,9 +466,142 @@ export class WatchlistsService {
         currentParentId = pRes.rows[0].parent_id;
       }
 
-      const countRes = await pool.query('SELECT COUNT(*)::INT AS total FROM watchlist_movies WHERE watchlist_id = $1', [watchlistId]);
+      const conditions: string[] = ['wm.watchlist_id = $1', 'um.user_id = $2'];
+      const params: any[] = [watchlistId, userId];
+      let pIdx = 3;
+
+      if (status && status !== 'all') {
+        conditions.push(`um.watch_status = $${pIdx++}`);
+        params.push(status);
+      }
+      if (mediaType && mediaType !== 'all') {
+        conditions.push(`(COALESCE(um.media_type, m.media_type, 'movie') = $${pIdx++})`);
+        params.push(mediaType);
+      }
+      if (isFavorite !== undefined) {
+        conditions.push(`um.is_favorite = $${pIdx++}`);
+        params.push(isFavorite);
+      }
+      if (ratingMin !== undefined) {
+        conditions.push(`um.personal_rating >= $${pIdx++}`);
+        params.push(ratingMin);
+      }
+      if (ratingMax !== undefined) {
+        conditions.push(`um.personal_rating <= $${pIdx++}`);
+        params.push(ratingMax);
+      }
+      if (language) {
+        conditions.push(`COALESCE(m.original_language, '') = $${pIdx++}`);
+        params.push(language);
+      }
+      if (search && search.trim()) {
+        const queryTerm = search.trim().toLowerCase();
+        const searchParamIdx = pIdx++;
+        conditions.push(`(
+          LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(m.original_title, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(um.custom_director, m.director, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+          LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%' OR
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
+            WHERE LOWER(cm->>'name') LIKE '%' || $${searchParamIdx} || '%'
+          )
+        )`);
+        params.push(queryTerm);
+      }
+      if (ott && ott !== 'all') {
+        if (ott === 'unassigned' || ott === 'no_ott' || ott === 'none') {
+          conditions.push(`NOT EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id)`);
+        } else if (ott === 'any_ott') {
+          conditions.push(`EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id)`);
+        } else {
+          const ottLower = ott.toLowerCase();
+          const searchTokens: string[] = [ottLower];
+          if (ottLower.includes('sun')) searchTokens.push('sunnxt', 'sun_nxt', 'sun nxt');
+          else if (ottLower.includes('prime') || ottLower.includes('amazon')) searchTokens.push('prime', 'amazon');
+          else if (ottLower.includes('hotstar') || ottLower.includes('disney')) searchTokens.push('hotstar', 'disney', 'jiohotstar');
+          else if (ottLower.includes('apple')) searchTokens.push('apple', 'appletv');
+          else if (ottLower.includes('jio')) searchTokens.push('jio', 'jiocinema');
+          else if (ottLower.includes('zee')) searchTokens.push('zee5', 'zee');
+          else if (ottLower.includes('sony')) searchTokens.push('sonyliv', 'sony liv');
+          else if (ottLower.includes('vi')) searchTokens.push('vimovies', 'vi movies', 'vodafone');
+          else if (ottLower.includes('drive')) searchTokens.push('drive', 'google_drive');
+          else if (ottLower.includes('aha')) searchTokens.push('aha');
+
+          const clauses: string[] = [];
+          searchTokens.forEach(token => {
+            clauses.push(`LOWER(ms.provider_name) LIKE $${pIdx}`);
+            clauses.push(`LOWER(COALESCE(ms.provider_icon, '')) LIKE $${pIdx}`);
+            params.push(`%${token}%`);
+            pIdx++;
+          });
+          conditions.push(`EXISTS (SELECT 1 FROM movie_sources ms WHERE ms.user_movie_id = um.id AND (${clauses.join(' OR ')}))`);
+        }
+      }
+      if (genreId !== undefined && genreId !== null && String(genreId).trim() !== '') {
+        const gidStr = String(genreId).trim();
+        const pgMatch = PREDEFINED_GENRES.find(
+          pg => pg.id === gidStr || String(pg.tmdb_id) === gidStr || pg.name.toLowerCase() === gidStr.toLowerCase()
+        );
+        const matchName = pgMatch ? pgMatch.name : gidStr;
+
+        conditions.push(`(
+          LOWER(COALESCE(um.assigned_genre, '')) = LOWER($${pIdx})
+          OR EXISTS (
+            SELECT 1 FROM user_movie_custom_genres umcg
+            JOIN custom_genres cg ON cg.id = umcg.custom_genre_id
+            WHERE umcg.user_movie_id = um.id AND (
+              cg.id::text = $${pIdx} OR LOWER(cg.name) = LOWER($${pIdx})
+            )
+          )
+          OR (
+            (um.assigned_genre IS NULL OR um.assigned_genre = '') AND
+            NOT EXISTS (SELECT 1 FROM user_movie_custom_genres WHERE user_movie_id = um.id) AND
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.genres::jsonb) = 'array' THEN m.genres::jsonb ELSE '[]'::jsonb END) elem
+              WHERE (elem->>'id' = $${pIdx} OR LOWER(elem->>'name') = LOWER($${pIdx}))
+                AND NOT (LOWER(elem->>'name') = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+                AND NOT (elem->>'id' = ANY(COALESCE(um.excluded_genres, ARRAY[]::TEXT[])))
+            )
+          )
+        )`);
+        params.push(matchName);
+        pIdx++;
+      }
+      if (tagId && String(tagId).trim() !== '') {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM user_movie_tags umt
+          WHERE umt.user_movie_id = um.id AND (
+            umt.tag_id::text = $${pIdx} OR
+            umt.tag_id::text IN (SELECT id::text FROM tags WHERE user_id = $2 AND LOWER(name) = LOWER($${pIdx}))
+          )
+        )`);
+        params.push(String(tagId).trim());
+        pIdx++;
+      }
+
+      const countSql = `
+        SELECT COUNT(*)::INT AS total
+        FROM watchlist_movies wm
+        JOIN user_movies um ON wm.user_movie_id = um.id
+        JOIN movies m ON um.movie_id = m.id
+        WHERE ${conditions.join(' AND ')}
+      `;
+      const countRes = await pool.query(countSql, params);
       const total = countRes.rows[0]?.total || 0;
       const totalPages = Math.max(1, Math.ceil(total / limit));
+
+      const sortMap: Record<string, string> = {
+        added_at: 'wm.added_at DESC',
+        release_date: 'm.release_date DESC',
+        rating: 'um.personal_rating DESC',
+        my_rating: 'um.personal_rating DESC',
+        tmdb_rating: 'm.vote_average DESC',
+        runtime: 'COALESCE(um.custom_runtime, m.runtime) DESC',
+        title: 'COALESCE(um.custom_title, m.title) ASC',
+        sort_order: 'wm.sort_order ASC, wm.added_at DESC',
+      };
+      const orderClause = sortMap[sortBy] || 'wm.sort_order ASC, wm.added_at DESC';
 
       const mSql = `
         SELECT
@@ -283,6 +614,7 @@ export class WatchlistsService {
           COALESCE(um.custom_backdrop_url, m.backdrop_path) AS backdrop_path,
           COALESCE(um.custom_runtime, m.runtime) AS runtime,
           COALESCE(um.custom_director, m.director) AS director,
+          COALESCE(um.media_type, m.media_type, 'movie') AS media_type,
           m.release_date,
           m.genres,
           wm.sort_order,
@@ -290,11 +622,12 @@ export class WatchlistsService {
         FROM watchlist_movies wm
         JOIN user_movies um ON wm.user_movie_id = um.id
         JOIN movies m ON um.movie_id = m.id
-        WHERE wm.watchlist_id = $1
-        ORDER BY wm.sort_order ASC, wm.added_at DESC
-        LIMIT $2 OFFSET $3
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY ${orderClause}
+        LIMIT $${pIdx++} OFFSET $${pIdx++}
       `;
-      const { rows: movies } = await pool.query(mSql, [watchlistId, limit, offset]);
+      params.push(limit, offset);
+      const { rows: movies } = await pool.query(mSql, params);
       return { ...watchlist, ancestors, movies, total, page, limit, totalPages };
     }
 
@@ -310,9 +643,8 @@ export class WatchlistsService {
       currentParentId = parent.parent_id;
     }
 
-    const moviesInList = Array.from(inMemoryDb.watchlistMovies.values())
+    let moviesInList = Array.from(inMemoryDb.watchlistMovies.values())
       .filter(wm => wm.watchlist_id === watchlistId)
-      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
       .map(wm => {
         const um = inMemoryDb.userMovies.get(wm.user_movie_id);
         if (!um) return null;
@@ -327,13 +659,48 @@ export class WatchlistsService {
           backdrop_path: um.custom_backdrop_url || m.backdrop_path,
           runtime: um.custom_runtime || m.runtime,
           director: um.custom_director || m.director,
+          media_type: um.media_type || m.media_type || 'movie',
           release_date: m.release_date,
           genres: m.genres || [],
           sort_order: wm.sort_order,
           in_list_since: wm.added_at,
+          original_language: m.original_language,
         };
       })
-      .filter(Boolean);
+      .filter((m): m is NonNullable<typeof m> => m !== null);
+
+    if (mediaType !== 'all') {
+      moviesInList = moviesInList.filter(m => m.media_type === mediaType);
+    }
+    if (status !== 'all') {
+      moviesInList = moviesInList.filter(m => m.watch_status === status);
+    }
+    if (isFavorite !== undefined) {
+      moviesInList = moviesInList.filter(m => m.is_favorite === isFavorite);
+    }
+    if (ratingMin !== undefined) {
+      moviesInList = moviesInList.filter(m => (m.personal_rating || 0) >= ratingMin);
+    }
+    if (ratingMax !== undefined) {
+      moviesInList = moviesInList.filter(m => (m.personal_rating || 0) <= ratingMax);
+    }
+    if (language) {
+      moviesInList = moviesInList.filter(m => m.original_language === language);
+    }
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      moviesInList = moviesInList.filter(m => (m.title || '').toLowerCase().includes(q));
+    }
+
+    if (sortBy === 'title') {
+      moviesInList.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    } else if (sortBy === 'rating' || sortBy === 'my_rating') {
+      moviesInList.sort((a, b) => (b.personal_rating || 0) - (a.personal_rating || 0));
+    } else if (sortBy === 'release_date') {
+      moviesInList.sort((a, b) => (b.release_date || '').localeCompare(a.release_date || ''));
+    } else {
+      moviesInList.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    }
 
     const total = moviesInList.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
