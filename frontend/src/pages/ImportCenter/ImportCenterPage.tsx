@@ -44,6 +44,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { OttBadge } from '../../utils/ottProviders.js';
 import { buildWatchlistTreeOptions } from '../../utils/watchlistTree.js';
+import { WatchlistTreeSelect } from '../../components/common/WatchlistTreeSelect.js';
 
 interface MatchItem {
   inputTitle: string;
@@ -409,33 +410,13 @@ export const ImportCenterPage: React.FC = () => {
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            {/* Watchlist Select */}
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="global-watchlist-label" sx={{ color: '#94A3B8' }}>Select Watchlist</InputLabel>
-              <Select
-                labelId="global-watchlist-label"
-                value={selectedWatchlistId}
-                label="Select Watchlist"
-                onChange={(e) => setSelectedWatchlistId(e.target.value)}
-                sx={{ color: '#F8FAFC', backgroundColor: '#0B0F19' }}
-              >
-                <MenuItem value="none"><em>None (Library only)</em></MenuItem>
-                <MenuItem value="__new__" sx={{ color: '#38BDF8', fontWeight: 600 }}>+ Create New Watchlist...</MenuItem>
-                {watchlistOptions.map((wl) => (
-                  <MenuItem
-                    key={wl.id}
-                    value={wl.id}
-                    sx={{
-                      pl: `${wl.paddingLeft}px`,
-                      fontWeight: wl.depth === 0 ? 700 : 500,
-                      color: wl.depth === 0 ? '#F8FAFC' : '#CBD5E1',
-                    }}
-                  >
-                    {wl.displayText}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            {/* Watchlist Select with Expandable/Collapsible Tree */}
+            <WatchlistTreeSelect
+              value={selectedWatchlistId}
+              onChange={(id) => setSelectedWatchlistId(id)}
+              watchlists={watchlists}
+              minWidth={220}
+            />
 
             {selectedWatchlistId === '__new__' && (
               <TextField
@@ -798,28 +779,15 @@ export const ImportCenterPage: React.FC = () => {
 
                     {/* Watchlist selection per item */}
                     <TableCell>
-                      <Select
-                        size="small"
+                      <WatchlistTreeSelect
                         value={item.watchlistId}
-                        onChange={(e) => handleUpdateRowItem(idx, { watchlistId: e.target.value })}
-                        sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 120 }}
-                      >
-                        <MenuItem value="none"><em>None</em></MenuItem>
-                        {watchlistOptions.map((wl) => (
-                          <MenuItem
-                            key={wl.id}
-                            value={wl.id}
-                            sx={{
-                              pl: `${wl.paddingLeft}px`,
-                              fontSize: '0.8rem',
-                              fontWeight: wl.depth === 0 ? 700 : 500,
-                              color: wl.depth === 0 ? '#F8FAFC' : '#CBD5E1',
-                            }}
-                          >
-                            {wl.displayText}
-                          </MenuItem>
-                        ))}
-                      </Select>
+                        onChange={(id) => handleUpdateRowItem(idx, { watchlistId: id })}
+                        watchlists={watchlists}
+                        allowNone={true}
+                        noneLabel="None"
+                        allowCreateNew={false}
+                        minWidth={150}
+                      />
                     </TableCell>
 
                     {/* Genre selection per item */}
