@@ -33,6 +33,8 @@ import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import StarIcon from '@mui/icons-material/Star';
 import TranslateIcon from '@mui/icons-material/Translate';
+import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
+import TvIcon from '@mui/icons-material/Tv';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client.js';
@@ -184,6 +186,18 @@ export const MyMoviesPage: React.FC = () => {
   const totalMovies = data?.total ?? movies.length;
   const totalPages = Math.max(1, Math.ceil(totalMovies / 50));
 
+  // Query overall library stats for sanctuary fallback counts
+  const { data: statsData } = useQuery({
+    queryKey: ['movies', 'stats'],
+    queryFn: async () => {
+      const res = await api.get('/movies/stats');
+      return res.data?.data;
+    },
+  });
+
+  const movieCount = data?.movieCount ?? statsData?.movies ?? movies.filter((m: any) => (m.media_type || 'movie') === 'movie').length;
+  const seriesCount = data?.seriesCount ?? statsData?.series ?? movies.filter((m: any) => m.media_type === 'tv').length;
+
   // Reset page to 1 whenever search query changes or page exceeds total results
   useEffect(() => {
     setPage(1);
@@ -329,14 +343,50 @@ export const MyMoviesPage: React.FC = () => {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Page Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC', letterSpacing: '-0.5px' }}>
             My Cinema Library
           </Typography>
-          <Typography variant="body2" sx={{ color: '#94A3B8' }}>
-            {movies.length} {mediaType === 'movie' ? 'movies' : mediaType === 'tv' ? 'web series' : 'titles'} in your personal sanctuary
-            {searchTerm && ` matching "${searchTerm}"`}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+            <Typography variant="body2" sx={{ color: '#94A3B8', fontWeight: 500 }}>
+              {totalMovies} {mediaType === 'movie' ? 'movies' : mediaType === 'tv' ? 'web series' : 'titles'} in your personal sanctuary
+              {searchTerm && ` matching "${searchTerm}"`}
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip
+                icon={<LocalMoviesIcon sx={{ fontSize: '15px !important', color: '#E5A93C !important' }} />}
+                label={`${movieCount} ${movieCount === 1 ? 'Movie' : 'Movies'}`}
+                size="small"
+                sx={{
+                  backgroundColor: 'rgba(229, 169, 60, 0.12)',
+                  color: '#F8FAFC',
+                  borderColor: 'rgba(229, 169, 60, 0.35)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  height: 24,
+                  '& .MuiChip-label': { px: 1 },
+                }}
+              />
+              <Chip
+                icon={<TvIcon sx={{ fontSize: '15px !important', color: '#38BDF8 !important' }} />}
+                label={`${seriesCount} ${seriesCount === 1 ? 'Web Series' : 'Web Series'}`}
+                size="small"
+                sx={{
+                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                  color: '#F8FAFC',
+                  borderColor: 'rgba(56, 189, 248, 0.35)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  height: 24,
+                  '& .MuiChip-label': { px: 1 },
+                }}
+              />
+            </Stack>
+          </Box>
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>

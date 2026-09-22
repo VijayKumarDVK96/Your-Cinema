@@ -441,13 +441,18 @@ export class MoviesService {
       `;
 
       const countSql = `
-        SELECT COUNT(*)::INT AS total
+        SELECT
+          COUNT(*)::INT AS total,
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'movie' THEN 1 END)::INT AS movie_count,
+          COUNT(CASE WHEN COALESCE(um.media_type, m.media_type, 'movie') = 'tv' THEN 1 END)::INT AS series_count
         FROM user_movies um
         JOIN movies m ON um.movie_id = m.id
         WHERE ${conditions.join(' AND ')}
       `;
       const countRes = await pool.query(countSql, params);
       const total = countRes.rows[0]?.total || 0;
+      const movieCount = countRes.rows[0]?.movie_count || 0;
+      const seriesCount = countRes.rows[0]?.series_count || 0;
 
       params.push(limit, offset);
       const { rows } = await pool.query(sql, params);
@@ -459,7 +464,7 @@ export class MoviesService {
           custom_genres,
         };
       });
-      return { movies: cleanedRows, total, page, limit };
+      return { movies: cleanedRows, total, movieCount, seriesCount, page, limit };
     }
 
     // In-Memory resilient fallback query
@@ -663,9 +668,11 @@ export class MoviesService {
     });
 
     const total = filtered.length;
+    const movieCount = filtered.filter(m => (m.media_type || 'movie') === 'movie').length;
+    const seriesCount = filtered.filter(m => (m.media_type || 'movie') === 'tv').length;
     const offset = (page - 1) * limit;
     const paged = filtered.slice(offset, offset + limit);
-    return { movies: paged, total, page, limit };
+    return { movies: paged, total, movieCount, seriesCount, page, limit };
   }
 
   static async getMovieById(userId: string, userMovieId: string) {
