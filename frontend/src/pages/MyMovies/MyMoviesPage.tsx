@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -45,6 +45,7 @@ import { usePlayer } from '../../context/PlayerContext.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
 import { formatRuntime } from '../../utils/formatters.js';
 import { LANGUAGE_LIST } from '../../components/common/EditMovieModal.js';
+import { buildWatchlistTreeOptions } from '../../utils/watchlistTree.js';
 
 const STORAGE_KEY = 'my_cinema_my_movies_filters';
 
@@ -203,6 +204,7 @@ export const MyMoviesPage: React.FC = () => {
     },
   });
   const watchlists = Array.isArray(watchlistsData) ? watchlistsData : (watchlistsData?.watchlists || []);
+  const watchlistOptions = useMemo(() => buildWatchlistTreeOptions(watchlists), [watchlists]);
 
   // Bulk Mutation
   const bulkMutation = useMutation({
@@ -513,16 +515,20 @@ export const MyMoviesPage: React.FC = () => {
           </ListItemIcon>
           Create New Watchlist...
         </MenuItem>
-        {watchlists.map((wl: any) => (
+        {watchlistOptions.map((wl: any) => (
           <MenuItem
             key={wl.id}
             onClick={() => bulkWatchlistMutation.mutate({ watchlistId: wl.id })}
-            sx={{ color: '#F8FAFC' }}
+            sx={{
+              pl: `${wl.paddingLeft}px`,
+              color: wl.depth === 0 ? '#F8FAFC' : '#CBD5E1',
+              fontWeight: wl.depth === 0 ? 700 : 500,
+            }}
           >
-            <ListItemIcon sx={{ color: '#E5A93C' }}>
+            <ListItemIcon sx={{ color: wl.depth === 0 ? '#E5A93C' : '#38BDF8', minWidth: 28 }}>
               <PlaylistAddIcon fontSize="small" />
             </ListItemIcon>
-            {wl.name} ({wl.movie_count ?? 0})
+            {wl.displayText}
           </MenuItem>
         ))}
       </Menu>

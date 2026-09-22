@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -43,6 +43,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { OttBadge } from '../../utils/ottProviders.js';
+import { buildWatchlistTreeOptions } from '../../utils/watchlistTree.js';
 
 interface MatchItem {
   inputTitle: string;
@@ -100,11 +101,11 @@ export const ImportCenterPage: React.FC = () => {
   const [newGenreNameInput, setNewGenreNameInput] = useState('');
   const [creatingGenre, setCreatingGenre] = useState(false);
 
-  // Fetch user's existing watchlists
+  // Fetch user's existing watchlists (flat tree with subfolders)
   const { data: watchlistsData } = useQuery({
-    queryKey: ['watchlists'],
+    queryKey: ['watchlists', { parentId: 'all', limit: 1000 }],
     queryFn: async () => {
-      const res = await api.get('/watchlists');
+      const res = await api.get('/watchlists?parentId=all&limit=1000');
       return res.data?.data;
     },
   });
@@ -112,6 +113,8 @@ export const ImportCenterPage: React.FC = () => {
   const watchlists: any[] = Array.isArray(watchlistsData)
     ? watchlistsData
     : (watchlistsData?.watchlists || []);
+
+  const watchlistOptions = useMemo(() => buildWatchlistTreeOptions(watchlists), [watchlists]);
 
   // Fetch genres (predefined + custom)
   const { data: genresData, refetch: refetchGenres } = useQuery({
@@ -418,8 +421,18 @@ export const ImportCenterPage: React.FC = () => {
               >
                 <MenuItem value="none"><em>None (Library only)</em></MenuItem>
                 <MenuItem value="__new__" sx={{ color: '#38BDF8', fontWeight: 600 }}>+ Create New Watchlist...</MenuItem>
-                {watchlists.map((wl) => (
-                  <MenuItem key={wl.id} value={wl.id}>{wl.name} ({wl.movie_count ?? 0} movies)</MenuItem>
+                {watchlistOptions.map((wl) => (
+                  <MenuItem
+                    key={wl.id}
+                    value={wl.id}
+                    sx={{
+                      pl: `${wl.paddingLeft}px`,
+                      fontWeight: wl.depth === 0 ? 700 : 500,
+                      color: wl.depth === 0 ? '#F8FAFC' : '#CBD5E1',
+                    }}
+                  >
+                    {wl.displayText}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -792,8 +805,19 @@ export const ImportCenterPage: React.FC = () => {
                         sx={{ color: '#F8FAFC', fontSize: '0.8rem', minWidth: 120 }}
                       >
                         <MenuItem value="none"><em>None</em></MenuItem>
-                        {watchlists.map((wl) => (
-                          <MenuItem key={wl.id} value={wl.id}>{wl.name}</MenuItem>
+                        {watchlistOptions.map((wl) => (
+                          <MenuItem
+                            key={wl.id}
+                            value={wl.id}
+                            sx={{
+                              pl: `${wl.paddingLeft}px`,
+                              fontSize: '0.8rem',
+                              fontWeight: wl.depth === 0 ? 700 : 500,
+                              color: wl.depth === 0 ? '#F8FAFC' : '#CBD5E1',
+                            }}
+                          >
+                            {wl.displayText}
+                          </MenuItem>
                         ))}
                       </Select>
                     </TableCell>
