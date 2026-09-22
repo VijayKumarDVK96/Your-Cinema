@@ -424,7 +424,7 @@ export const MovieDetailPage: React.FC = () => {
             ? `linear-gradient(to top, #07090E 15%, rgba(7, 9, 14, 0.8) 50%, rgba(7, 9, 14, 0.3)), url(${backdropUrl})`
             : 'none',
           backgroundSize: 'cover',
-          backgroundPosition: 'initial',
+          backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
         }}
       >

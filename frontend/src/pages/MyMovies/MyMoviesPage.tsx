@@ -59,6 +59,7 @@ interface StoredFilters {
   ott?: string;
   tagId?: string;
   ratingRange?: [number, number];
+  yearRange?: [number, number];
   isFavorite?: boolean;
   sortBy?: string;
   page?: number;
@@ -91,6 +92,7 @@ export const MyMoviesPage: React.FC = () => {
   const [ott, setOtt] = useState<string | undefined>(saved.ott);
   const [tagId, setTagId] = useState<string | undefined>(saved.tagId);
   const [ratingRange, setRatingRange] = useState<[number, number]>(saved.ratingRange || [1, 5]);
+  const [yearRange, setYearRange] = useState<[number, number]>(saved.yearRange || [1950, new Date().getFullYear()]);
   const [isFavorite, setIsFavorite] = useState<boolean>(saved.isFavorite || false);
   const [sortBy, setSortBy] = useState<string>(saved.sortBy || 'added_at');
 
@@ -105,6 +107,7 @@ export const MyMoviesPage: React.FC = () => {
         ott,
         tagId,
         ratingRange,
+        yearRange,
         isFavorite,
         sortBy,
         page,
@@ -113,7 +116,7 @@ export const MyMoviesPage: React.FC = () => {
     } catch (e) {
       console.error('Failed to save filters to localStorage', e);
     }
-  }, [status, mediaType, genreId, language, ott, tagId, ratingRange, isFavorite, sortBy, page]);
+  }, [status, mediaType, genreId, language, ott, tagId, ratingRange, yearRange, isFavorite, sortBy, page]);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -139,10 +142,12 @@ export const MyMoviesPage: React.FC = () => {
 
   const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
   const ratingMax = ratingRange[1] < 5 ? ratingRange[1] : undefined;
+  const yearMin = yearRange[0] > 1950 ? yearRange[0] : undefined;
+  const yearMax = yearRange[1] < new Date().getFullYear() ? yearRange[1] : undefined;
 
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, yearMin, yearMax, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
@@ -153,6 +158,8 @@ export const MyMoviesPage: React.FC = () => {
       if (tagId) params.append('tagId', tagId);
       if (ratingMin !== undefined) params.append('ratingMin', ratingMin.toString());
       if (ratingMax !== undefined) params.append('ratingMax', ratingMax.toString());
+      if (yearMin !== undefined) params.append('yearMin', yearMin.toString());
+      if (yearMax !== undefined) params.append('yearMax', yearMax.toString());
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
       params.append('sortBy', sortBy);
@@ -944,6 +951,16 @@ export const MyMoviesPage: React.FC = () => {
 
       {/* Advanced Filter Bar */}
       <FilterBar
+        searchTerm={searchTerm}
+        onSearchChange={(term) => {
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            if (term) next.set('search', term);
+            else next.delete('search');
+            return next;
+          });
+          setPage(1);
+        }}
         status={status}
         onStatusChange={(val) => { setStatus(val); setPage(1); }}
         selectedMediaType={mediaType}
@@ -958,6 +975,8 @@ export const MyMoviesPage: React.FC = () => {
         onTagChange={(val) => { setTagId(val); setPage(1); }}
         ratingRange={ratingRange}
         onRatingRangeChange={(range) => { setRatingRange(range); setPage(1); }}
+        yearRange={yearRange}
+        onYearRangeChange={(range) => { setYearRange(range); setPage(1); }}
         isFavorite={isFavorite}
         onFavoriteToggle={() => { setIsFavorite(!isFavorite); setPage(1); }}
         sortBy={sortBy}
@@ -972,10 +991,11 @@ export const MyMoviesPage: React.FC = () => {
           setLanguage(undefined);
           setTagId(undefined);
           setRatingRange([1, 5]);
+          setYearRange([1950, new Date().getFullYear()]);
           setIsFavorite(false);
           setSortBy('added_at');
-          setPage(1);
           setSearchParams({});
+          setPage(1);
           try {
             localStorage.removeItem(STORAGE_KEY);
           } catch (e) {}

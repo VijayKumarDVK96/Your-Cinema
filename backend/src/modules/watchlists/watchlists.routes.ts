@@ -73,6 +73,8 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     const language = req.query.language as string | undefined;
     const ratingMin = req.query.ratingMin ? parseFloat(req.query.ratingMin as string) : undefined;
     const ratingMax = req.query.ratingMax ? parseFloat(req.query.ratingMax as string) : undefined;
+    const yearMin = req.query.yearMin ? parseInt(req.query.yearMin as string, 10) : undefined;
+    const yearMax = req.query.yearMax ? parseInt(req.query.yearMax as string, 10) : undefined;
     const isFavorite = req.query.isFavorite === 'true' ? true : req.query.isFavorite === 'false' ? false : undefined;
     const search = req.query.search as string | undefined;
     const sortBy = req.query.sortBy as string | undefined;
@@ -88,6 +90,8 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       language,
       ratingMin,
       ratingMax,
+      yearMin,
+      yearMax,
       isFavorite,
       search,
       sortBy,

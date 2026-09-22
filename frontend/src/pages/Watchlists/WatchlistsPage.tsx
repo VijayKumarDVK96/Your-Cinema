@@ -182,12 +182,15 @@ export const WatchlistsPage: React.FC = () => {
   const [ott, setOtt] = useState<string | undefined>(undefined);
   const [tagId, setTagId] = useState<string | undefined>(undefined);
   const [ratingRange, setRatingRange] = useState<[number, number]>([1, 5]);
+  const [yearRange, setYearRange] = useState<[number, number]>([1950, new Date().getFullYear()]);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<string>('added_at');
 
   const searchTerm = searchParams.get('search') || '';
   const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
   const ratingMax = ratingRange[1] < 5 ? ratingRange[1] : undefined;
+  const yearMin = yearRange[0] > 1950 ? yearRange[0] : undefined;
+  const yearMax = yearRange[1] < new Date().getFullYear() ? yearRange[1] : undefined;
 
   // Query Tags for filter bar dropdown
   const { data: tagsData } = useQuery({
@@ -218,7 +221,7 @@ export const WatchlistsPage: React.FC = () => {
     queryKey: [
       'watchlist',
       activeId,
-      { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, isFavorite, sortBy, page: moviesPage, search: searchTerm },
+      { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, yearMin, yearMax, isFavorite, sortBy, page: moviesPage, search: searchTerm },
     ],
     queryFn: async () => {
       if (!activeId) return null;
@@ -233,6 +236,8 @@ export const WatchlistsPage: React.FC = () => {
       if (tagId) params.append('tagId', tagId);
       if (ratingMin !== undefined) params.append('ratingMin', ratingMin.toString());
       if (ratingMax !== undefined) params.append('ratingMax', ratingMax.toString());
+      if (yearMin !== undefined) params.append('yearMin', yearMin.toString());
+      if (yearMax !== undefined) params.append('yearMax', yearMax.toString());
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
       if (sortBy) params.append('sortBy', sortBy);
@@ -820,6 +825,16 @@ export const WatchlistsPage: React.FC = () => {
 
             {/* Filter Bar */}
             <FilterBar
+              searchTerm={searchTerm}
+              onSearchChange={(term) => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  if (term) next.set('search', term);
+                  else next.delete('search');
+                  return next;
+                });
+                setMoviesPage(1);
+              }}
               status={status}
               onStatusChange={(val) => { setStatus(val); setMoviesPage(1); }}
               selectedMediaType={mediaType}
@@ -834,6 +849,8 @@ export const WatchlistsPage: React.FC = () => {
               onTagChange={(val) => { setTagId(val); setMoviesPage(1); }}
               ratingRange={ratingRange}
               onRatingRangeChange={(range) => { setRatingRange(range); setMoviesPage(1); }}
+              yearRange={yearRange}
+              onYearRangeChange={(range) => { setYearRange(range); setMoviesPage(1); }}
               isFavorite={isFavorite}
               onFavoriteToggle={() => { setIsFavorite(!isFavorite); setMoviesPage(1); }}
               sortBy={sortBy}
@@ -848,6 +865,7 @@ export const WatchlistsPage: React.FC = () => {
                 setLanguage(undefined);
                 setTagId(undefined);
                 setRatingRange([1, 5]);
+                setYearRange([1950, new Date().getFullYear()]);
                 setIsFavorite(false);
                 setSortBy('added_at');
                 setMoviesPage(1);

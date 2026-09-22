@@ -173,6 +173,8 @@ export class WatchlistsService {
       language?: string;
       ratingMin?: number;
       ratingMax?: number;
+      yearMin?: number;
+      yearMax?: number;
       isFavorite?: boolean;
       search?: string;
       sortBy?: string;
@@ -191,6 +193,8 @@ export class WatchlistsService {
       language,
       ratingMin,
       ratingMax,
+      yearMin,
+      yearMax,
       isFavorite,
       search,
       sortBy = 'added_at',
@@ -229,6 +233,14 @@ export class WatchlistsService {
         if (ratingMax !== undefined) {
           conditions.push(`um.personal_rating <= $${pIdx++}`);
           params.push(ratingMax);
+        }
+        if (yearMin) {
+          conditions.push(`SUBSTRING(m.release_date FROM 1 FOR 4)::INT >= $${pIdx++}`);
+          params.push(yearMin);
+        }
+        if (yearMax) {
+          conditions.push(`SUBSTRING(m.release_date FROM 1 FOR 4)::INT <= $${pIdx++}`);
+          params.push(yearMax);
         }
         if (language) {
           conditions.push(`COALESCE(m.original_language, '') = $${pIdx++}`);
@@ -398,6 +410,8 @@ export class WatchlistsService {
             if (isFavorite !== undefined && um.is_favorite !== isFavorite) return false;
             if (ratingMin !== undefined && (um.personal_rating || 0) < ratingMin) return false;
             if (ratingMax !== undefined && (um.personal_rating || 0) > ratingMax) return false;
+            if (yearMin && m?.release_date && parseInt(m.release_date.substring(0, 4), 10) < yearMin) return false;
+            if (yearMax && m?.release_date && parseInt(m.release_date.substring(0, 4), 10) > yearMax) return false;
             if (language && m?.original_language !== language) return false;
             if (search && search.trim()) {
               const q = search.trim().toLowerCase();
@@ -489,6 +503,14 @@ export class WatchlistsService {
       if (ratingMax !== undefined) {
         conditions.push(`um.personal_rating <= $${pIdx++}`);
         params.push(ratingMax);
+      }
+      if (yearMin) {
+        conditions.push(`SUBSTRING(m.release_date FROM 1 FOR 4)::INT >= $${pIdx++}`);
+        params.push(yearMin);
+      }
+      if (yearMax) {
+        conditions.push(`SUBSTRING(m.release_date FROM 1 FOR 4)::INT <= $${pIdx++}`);
+        params.push(yearMax);
       }
       if (language) {
         conditions.push(`COALESCE(m.original_language, '') = $${pIdx++}`);
@@ -683,6 +705,12 @@ export class WatchlistsService {
     }
     if (ratingMax !== undefined) {
       moviesInList = moviesInList.filter(m => (m.personal_rating || 0) <= ratingMax);
+    }
+    if (yearMin) {
+      moviesInList = moviesInList.filter(m => m.release_date && parseInt(m.release_date.substring(0, 4), 10) >= yearMin);
+    }
+    if (yearMax) {
+      moviesInList = moviesInList.filter(m => m.release_date && parseInt(m.release_date.substring(0, 4), 10) <= yearMax);
     }
     if (language) {
       moviesInList = moviesInList.filter(m => m.original_language === language);
