@@ -6,6 +6,7 @@ import { Sidebar } from '../components/common/Sidebar.js';
 import { BottomNav } from '../components/common/BottomNav.js';
 import { AddMovieModal } from '../components/common/AddMovieModal.js';
 import { UniversalPlayer } from '../components/player/UniversalPlayer.js';
+import { BackToTop } from '../components/common/BackToTop.js';
 
 export const AppLayout: React.FC = () => {
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -27,6 +28,7 @@ export const AppLayout: React.FC = () => {
 
         <Box
           component="main"
+          id="main-content"
           sx={{
             flexGrow: 1,
             p: { xs: 2, md: 3.5 },
@@ -43,6 +45,9 @@ export const AppLayout: React.FC = () => {
       </Box>
 
       <BottomNav />
+
+      {/* Global Back to Top Button */}
+      <BackToTop targetSelector="#main-content" />
 
       {/* Add Movie to Library Modal */}
       <AddMovieModal

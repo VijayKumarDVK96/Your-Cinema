@@ -1261,7 +1261,12 @@ export const MyMoviesPage: React.FC = () => {
             page={page}
             onChange={(_, val) => {
               setPage(val);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              const mainEl = document.querySelector('#main-content');
+              if (mainEl) {
+                mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+              } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }
             }}
             color="primary"
             sx={{
