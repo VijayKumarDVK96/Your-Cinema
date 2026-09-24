@@ -755,7 +755,15 @@ export const ImportCenterPage: React.FC = () => {
                             component="img"
                             src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
                             alt={m.title}
-                            sx={{ width: 36, height: 50, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
+                            sx={{
+                              width: 52,
+                              height: 75,
+                              borderRadius: 1.5,
+                              objectFit: 'cover',
+                              flexShrink: 0,
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.45)',
+                            }}
                           />
                           <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                             <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{m.title}</Typography>
@@ -1031,7 +1039,15 @@ export const ImportCenterPage: React.FC = () => {
                       component="img"
                       src={m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80'}
                       alt={m.title}
-                      sx={{ width: 42, height: 60, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }}
+                      sx={{
+                        width: 52,
+                        height: 75,
+                        borderRadius: 1.5,
+                        objectFit: 'cover',
+                        flexShrink: 0,
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        boxShadow: '0 4px 10px rgba(0, 0, 0, 0.35)',
+                      }}
                     />
                     <Box sx={{ minWidth: 0 }}>
                       <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
