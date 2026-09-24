@@ -656,6 +656,7 @@ export class TmdbService {
           name: c.name,
           character: c.character,
           profile_path: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+          gender: c.gender,
         }));
 
         const keyCrewRoles = [
@@ -768,6 +769,7 @@ export class TmdbService {
           name: c.name,
           character: c.character,
           profile_path: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+          gender: c.gender,
         }));
 
         const crew = (data.credits?.crew || [])

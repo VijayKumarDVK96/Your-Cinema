@@ -46,6 +46,8 @@ export class GeminiAdapter implements AIProviderAdapter {
 - Total watched: ${profileData.summary?.watchedCount}
 - Top Genres: ${profileData.movieDna?.map((d: any) => `${d.name} (${d.percentage}%)`).join(', ')}
 - Top Directors: ${profileData.topDirectors?.map((d: any) => d.name).join(', ')}
+- Top Actors: ${profileData.topActors?.map((a: any) => a.name).join(', ')}
+- Top Actresses: ${profileData.topActresses?.map((a: any) => a.name).join(', ')}
 - Average rating: ${profileData.summary?.averageRating} stars
 Provide a 2-3 sentence sophisticated, cinematic analysis of their unique viewing taste.`;
 
