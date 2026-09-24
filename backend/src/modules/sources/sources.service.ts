@@ -47,6 +47,7 @@ export function detectProviderFromUrl(url: string, fallbackName: string): string
   if (u.includes('zee5.com')) return 'Zee5';
   if (u.includes('jiocinema.com')) return 'JioCinema';
   if (u.includes('sonyliv.com')) return 'Sony LIV';
+  if (u.includes('lionsgateplay.com') || u.includes('lionsgate.com')) return 'Lionsgate Play';
   if (u.includes('aha.video')) return 'Aha';
   if (u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube';
   if (u.includes('tv.apple.com') || u.includes('apple.com')) return 'Apple TV+';

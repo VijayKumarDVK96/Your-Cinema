@@ -264,6 +264,7 @@ export class MoviesService {
           else if (ottLower.includes('vi')) searchTokens.push('vimovies', 'vi movies', 'vodafone');
           else if (ottLower.includes('drive')) searchTokens.push('drive', 'google_drive');
           else if (ottLower.includes('aha')) searchTokens.push('aha');
+          else if (ottLower.includes('lionsgate') || ottLower.includes('lions gate')) searchTokens.push('lionsgate', 'lionsgateplay', 'lions gate');
 
           const clauses: string[] = [];
           searchTokens.forEach(token => {

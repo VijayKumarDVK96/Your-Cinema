@@ -103,6 +103,14 @@ const AhaIcon = () => (
   </svg>
 );
 
+const LionsgatePlayIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="24" height="24" rx="4" fill="#0A0D14" stroke="#E5A93C" strokeWidth="1" />
+    <path d="M6 5V18H18" stroke="#E5A93C" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M12 9.5L17 12.5L12 15.5V9.5Z" fill="#F5C869" />
+  </svg>
+);
+
 const DefaultOttIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="24" height="24" rx="4" fill="#1E293B" stroke="#64748B" strokeWidth="1" />
@@ -244,6 +252,18 @@ export const getOttMeta = (providerName: string = '', iconOrUrl?: string): OttMe
       borderColor: 'rgba(255, 80, 0, 0.5)',
       icon: <AhaIcon />,
       getDefaultSearchUrl: (title) => `https://www.aha.video/search?q=${encodeURIComponent(title)}`,
+    };
+  }
+
+  if (nameLower.includes('lionsgate') || nameLower.includes('lions gate') || iconLower.includes('lionsgate') || iconLower.includes('lions_gate')) {
+    return {
+      key: 'lionsgateplay',
+      name: 'Lionsgate Play',
+      bgColor: '#0A0D14',
+      textColor: '#E5A93C',
+      borderColor: 'rgba(229, 169, 60, 0.45)',
+      icon: <LionsgatePlayIcon />,
+      getDefaultSearchUrl: (title) => `https://www.lionsgateplay.com/search/${encodeURIComponent(title)}`,
     };
   }
 

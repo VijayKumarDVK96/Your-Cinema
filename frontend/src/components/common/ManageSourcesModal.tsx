@@ -41,6 +41,7 @@ const POPULAR_PROVIDERS = [
   { name: 'JioCinema', icon: 'jiocinema', type: 'ott' as const },
   { name: 'Zee5', icon: 'zee5', type: 'ott' as const },
   { name: 'Sony LIV', icon: 'sonyliv', type: 'ott' as const },
+  { name: 'Lionsgate Play', icon: 'lionsgateplay', type: 'ott' as const },
   { name: 'Aha', icon: 'aha', type: 'ott' as const },
   { name: 'Vi Movies & TV', icon: 'vimovies', type: 'ott' as const },
   { name: 'Google Drive', icon: 'google_drive', type: 'google_drive' as const },
