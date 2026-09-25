@@ -184,7 +184,7 @@ export const WatchlistsPage: React.FC = () => {
   const [ratingRange, setRatingRange] = useState<[number, number]>([1, 5]);
   const [yearRange, setYearRange] = useState<[number, number]>([1950, new Date().getFullYear()]);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<string>('added_at');
+  const [sortBy, setSortBy] = useState<string>('release_date');
 
   const searchTerm = searchParams.get('search') || '';
   const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
@@ -867,7 +867,7 @@ export const WatchlistsPage: React.FC = () => {
                 setRatingRange([1, 5]);
                 setYearRange([1950, new Date().getFullYear()]);
                 setIsFavorite(false);
-                setSortBy('added_at');
+                setSortBy('release_date');
                 setMoviesPage(1);
                 setSearchParams({});
               }}

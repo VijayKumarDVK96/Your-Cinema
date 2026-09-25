@@ -154,7 +154,7 @@ export class MoviesService {
       isFavorite,
       mediaType = 'all',
       search,
-      sortBy = 'added_at',
+      sortBy = 'release_date',
       sortOrder = 'desc',
       page = 1,
       limit = 50,
@@ -330,7 +330,7 @@ export class MoviesService {
         runtime: 'COALESCE(um.custom_runtime, m.runtime)',
         title: 'COALESCE(um.custom_title, m.title)',
       };
-      const sortColumn = sortMap[sortBy] || 'um.added_at';
+      const sortColumn = sortMap[sortBy] || 'm.release_date';
       const direction = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
       const offset = (page - 1) * limit;
@@ -648,9 +648,9 @@ export class MoviesService {
       } else if (sortBy === 'tmdb_rating') {
         valA = a.vote_average ?? -1;
         valB = b.vote_average ?? -1;
-      } else if (sortBy === 'release_date') {
-        valA = a.release_date || '';
-        valB = b.release_date || '';
+      } else if (sortBy === 'added_at') {
+        valA = a.added_at || '';
+        valB = b.added_at || '';
       } else if (sortBy === 'title') {
         valA = (a.title || '').toLowerCase();
         valB = (b.title || '').toLowerCase();
@@ -658,8 +658,8 @@ export class MoviesService {
         valA = a.runtime || 0;
         valB = b.runtime || 0;
       } else {
-        valA = a.added_at || '';
-        valB = b.added_at || '';
+        valA = a.release_date || '';
+        valB = b.release_date || '';
       }
 
       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;

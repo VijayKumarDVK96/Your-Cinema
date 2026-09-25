@@ -197,7 +197,7 @@ export class WatchlistsService {
       yearMax,
       isFavorite,
       search,
-      sortBy = 'added_at',
+      sortBy = 'release_date',
     } = options;
 
     const isUnassignedMovies = watchlistId === 'unassigned' || watchlistId === 'unassigned-movies';
@@ -351,7 +351,7 @@ export class WatchlistsService {
           runtime: 'COALESCE(um.custom_runtime, m.runtime) DESC',
           title: 'COALESCE(um.custom_title, m.title) ASC',
         };
-        const orderClause = sortMap[sortBy] || 'um.added_at DESC';
+        const orderClause = sortMap[sortBy] || 'm.release_date DESC';
 
         const mSql = `
           SELECT
@@ -439,6 +439,16 @@ export class WatchlistsService {
               in_list_since: um.added_at,
             };
           });
+
+        if (sortBy === 'title') {
+          allUnassigned.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+        } else if (sortBy === 'rating' || sortBy === 'my_rating') {
+          allUnassigned.sort((a, b) => (b.personal_rating || 0) - (a.personal_rating || 0));
+        } else if (sortBy === 'added_at') {
+          allUnassigned.sort((a, b) => (b.in_list_since || '').localeCompare(a.in_list_since || ''));
+        } else {
+          allUnassigned.sort((a, b) => (b.release_date || '').localeCompare(a.release_date || ''));
+        }
 
         const total = allUnassigned.length;
         const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -623,7 +633,7 @@ export class WatchlistsService {
         title: 'COALESCE(um.custom_title, m.title) ASC',
         sort_order: 'wm.sort_order ASC, wm.added_at DESC',
       };
-      const orderClause = sortMap[sortBy] || 'wm.sort_order ASC, wm.added_at DESC';
+      const orderClause = sortMap[sortBy] || 'm.release_date DESC';
 
       const mSql = `
         SELECT
@@ -724,10 +734,12 @@ export class WatchlistsService {
       moviesInList.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
     } else if (sortBy === 'rating' || sortBy === 'my_rating') {
       moviesInList.sort((a, b) => (b.personal_rating || 0) - (a.personal_rating || 0));
-    } else if (sortBy === 'release_date') {
-      moviesInList.sort((a, b) => (b.release_date || '').localeCompare(a.release_date || ''));
-    } else {
+    } else if (sortBy === 'added_at') {
+      moviesInList.sort((a, b) => (b.in_list_since || '').localeCompare(a.in_list_since || ''));
+    } else if (sortBy === 'sort_order') {
       moviesInList.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    } else {
+      moviesInList.sort((a, b) => (b.release_date || '').localeCompare(a.release_date || ''));
     }
 
     const total = moviesInList.length;

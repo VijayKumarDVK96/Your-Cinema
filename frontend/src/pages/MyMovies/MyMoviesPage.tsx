@@ -94,7 +94,7 @@ export const MyMoviesPage: React.FC = () => {
   const [ratingRange, setRatingRange] = useState<[number, number]>(saved.ratingRange || [1, 5]);
   const [yearRange, setYearRange] = useState<[number, number]>(saved.yearRange || [1950, new Date().getFullYear()]);
   const [isFavorite, setIsFavorite] = useState<boolean>(saved.isFavorite || false);
-  const [sortBy, setSortBy] = useState<string>(saved.sortBy || 'added_at');
+  const [sortBy, setSortBy] = useState<string>(saved.sortBy || 'release_date');
 
   // Sync filter changes to localStorage
   useEffect(() => {
@@ -993,7 +993,7 @@ export const MyMoviesPage: React.FC = () => {
           setRatingRange([1, 5]);
           setYearRange([1950, new Date().getFullYear()]);
           setIsFavorite(false);
-          setSortBy('added_at');
+          setSortBy('release_date');
           setSearchParams({});
           setPage(1);
           try {
@@ -1229,7 +1229,7 @@ export const MyMoviesPage: React.FC = () => {
             setTagId(undefined);
             setRatingRange([1, 5]);
             setIsFavorite(false);
-            setSortBy('added_at');
+            setSortBy('release_date');
             setPage(1);
             setSearchParams({});
             try {
