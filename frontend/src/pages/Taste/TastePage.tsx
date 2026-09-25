@@ -115,11 +115,6 @@ export const TastePage: React.FC = () => {
                 <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {person.name}
                 </Typography>
-                {person.roles && person.roles.length > 0 && (
-                  <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    as {person.roles[0]}
-                  </Typography>
-                )}
               </Box>
             </Box>
 
@@ -318,7 +313,7 @@ export const TastePage: React.FC = () => {
                 <MovieFilterIcon sx={{ color: '#E5A93C' }} /> Top Directors in Sanctuary
               </Typography>
               <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>
-                Filmmakers with highest frequency in your library
+                Highest rated filmmakers across your watched films
               </Typography>
             </Box>
             {renderPersonList(topDirectors, '#E5A93C', 'No director data logged yet.')}
@@ -333,7 +328,7 @@ export const TastePage: React.FC = () => {
                 <TheaterComedyIcon sx={{ color: '#38BDF8' }} /> Top Actors in Sanctuary
               </Typography>
               <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>
-                Leading male performers across your collection
+                Highest rated male performers across your watched films
               </Typography>
             </Box>
             {renderPersonList(topActors, '#38BDF8', 'No actor data logged yet.')}
@@ -348,7 +343,7 @@ export const TastePage: React.FC = () => {
                 <FaceIcon sx={{ color: '#F472B6' }} /> Top Actresses in Sanctuary
               </Typography>
               <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>
-                Leading female performers across your collection
+                Highest rated female performers across your watched films
               </Typography>
             </Box>
             {renderPersonList(topActresses, '#F472B6', 'No actress data logged yet.')}

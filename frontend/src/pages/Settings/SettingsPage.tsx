@@ -628,7 +628,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 900 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <Box>
         <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC', mb: 0.5 }}>
           Sanctuary Settings & Integrations
@@ -639,13 +639,13 @@ export const SettingsPage: React.FC = () => {
       </Box>
 
       {/* Horizontal Tabs Navigation */}
-      <Paper sx={{ backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 2.5, p: 0.5 }}>
+      <Paper sx={{ backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 2.5, p: 0.5, width: '100%' }}>
         <Tabs
           value={activeTab}
           onChange={(_, val) => setActiveTab(val)}
-          variant="scrollable"
-          scrollButtons="auto"
+          variant="fullWidth"
           sx={{
+            width: '100%',
             minHeight: 48,
             '& .MuiTabs-indicator': {
               backgroundColor: '#E5A93C',
@@ -655,11 +655,14 @@ export const SettingsPage: React.FC = () => {
             '& .MuiTab-root': {
               color: '#94A3B8',
               fontWeight: 700,
-              fontSize: '0.88rem',
+              fontSize: { xs: '0.75rem', sm: '0.82rem', md: '0.88rem' },
               textTransform: 'none',
               minHeight: 48,
-              px: 2.5,
-              gap: 1,
+              minWidth: 0,
+              px: { xs: 0.75, sm: 1.5, md: 2 },
+              flex: 1,
+              gap: 0.75,
+              whiteSpace: 'nowrap',
               '&.Mui-selected': {
                 color: '#F8FAFC',
               },
