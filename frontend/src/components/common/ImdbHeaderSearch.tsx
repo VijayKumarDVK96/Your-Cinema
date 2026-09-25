@@ -250,7 +250,8 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
         ref={containerRef}
         sx={{
           position: 'relative',
-          width: { xs: '100%', sm: 360, md: 480, lg: 580 },
+          width: { xs: '100%', md: 260, lg: 340, xl: 460 },
+          maxWidth: '100%',
           zIndex: 1200,
         }}
       >
