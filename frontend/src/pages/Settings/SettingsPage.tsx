@@ -20,6 +20,8 @@ import {
   Tooltip,
   Tabs,
   Tab,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -55,6 +57,8 @@ export const SettingsPage: React.FC = () => {
   const { user, refreshProfile } = useAuth();
   const { isTvMode, toggleTvMode } = useTVNavigation();
   const queryClient = useQueryClient();
+  const theme = useTheme();
+  const isDesktopTabs = useMediaQuery(theme.breakpoints.up('lg'));
 
   // Progressive Import Progress & Cancellation State
   const cancelImportRef = useRef<boolean>(false);
@@ -639,11 +643,13 @@ export const SettingsPage: React.FC = () => {
       </Box>
 
       {/* Horizontal Tabs Navigation */}
-      <Paper sx={{ backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 2.5, p: 0.5, width: '100%' }}>
+      <Paper sx={{ backgroundColor: '#0B0F19', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 2.5, p: 0.5, width: '100%', overflow: 'hidden' }}>
         <Tabs
           value={activeTab}
           onChange={(_, val) => setActiveTab(val)}
-          variant="fullWidth"
+          variant={isDesktopTabs ? 'fullWidth' : 'scrollable'}
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           sx={{
             width: '100%',
             minHeight: 48,
@@ -652,15 +658,19 @@ export const SettingsPage: React.FC = () => {
               height: 3,
               borderRadius: '3px 3px 0 0',
             },
+            '& .MuiTabs-scrollButtons': {
+              color: '#E5A93C',
+              '&.Mui-disabled': { opacity: 0.3 },
+            },
             '& .MuiTab-root': {
               color: '#94A3B8',
               fontWeight: 700,
-              fontSize: { xs: '0.75rem', sm: '0.82rem', md: '0.88rem' },
+              fontSize: { xs: '0.78rem', sm: '0.84rem', md: '0.88rem' },
               textTransform: 'none',
               minHeight: 48,
-              minWidth: 0,
-              px: { xs: 0.75, sm: 1.5, md: 2 },
-              flex: 1,
+              minWidth: { xs: 'auto', sm: 110 },
+              px: { xs: 1.5, sm: 2 },
+              flex: isDesktopTabs ? 1 : 'none',
               gap: 0.75,
               whiteSpace: 'nowrap',
               '&.Mui-selected': {

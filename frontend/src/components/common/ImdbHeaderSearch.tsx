@@ -274,14 +274,14 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
           <Button
             size="small"
             onClick={(e) => setCategoryAnchorEl(e.currentTarget)}
-            endIcon={<ArrowDropDownIcon sx={{ fontSize: 18, color: '#E5A93C' }} />}
+            endIcon={<ArrowDropDownIcon sx={{ fontSize: 18, color: '#E5A93C', ml: { xs: -0.5, sm: 0 } }} />}
             sx={{
               backgroundColor: 'rgba(255, 255, 255, 0.05)',
               color: '#F8FAFC',
               fontWeight: 700,
               fontSize: '0.78rem',
               textTransform: 'none',
-              px: 1.5,
+              px: { xs: 0.8, sm: 1.5 },
               py: 0.8,
               borderRadius: 0,
               borderRight: '1px solid rgba(255, 255, 255, 0.1)',
@@ -296,7 +296,12 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
               },
             }}
           >
-            {categoryLabels[category].label}
+            <Box sx={{ display: { xs: 'flex', sm: 'none' }, color: '#E5A93C' }}>
+              {categoryLabels[category].icon}
+            </Box>
+            <Box sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              {categoryLabels[category].label}
+            </Box>
           </Button>
 
           {/* Category Menu */}
@@ -357,9 +362,10 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
             sx={{
               color: '#F8FAFC',
               fontSize: '0.85rem',
-              px: 1.5,
+              px: { xs: 1, sm: 1.5 },
               py: 0.6,
               flexGrow: 1,
+              minWidth: 0,
               '& input::placeholder': {
                 color: '#64748B',
                 opacity: 1,
@@ -387,6 +393,7 @@ export const ImdbHeaderSearch: React.FC<ImdbHeaderSearchProps> = ({ onOpenAddMod
               label="/"
               size="small"
               sx={{
+                display: { xs: 'none', sm: 'inline-flex' },
                 height: 18,
                 fontSize: '0.65rem',
                 fontWeight: 700,

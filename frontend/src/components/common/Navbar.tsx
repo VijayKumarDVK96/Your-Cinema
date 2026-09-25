@@ -273,6 +273,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <IconButton
               onClick={toggleTvMode}
               sx={{
+                display: { xs: 'none', sm: 'inline-flex' },
                 color: isTvMode ? '#38BDF8' : '#94A3B8',
                 backgroundColor: isTvMode ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.03)',
                 border: isTvMode ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
