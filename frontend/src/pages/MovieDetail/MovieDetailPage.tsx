@@ -60,6 +60,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import GroupIcon from '@mui/icons-material/Group';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
@@ -90,6 +91,7 @@ export const MovieDetailPage: React.FC = () => {
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
   const [mainTab, setMainTab] = useState<'overview' | 'cast_crew' | 'posters' | 'screenshots'>('overview');
+  const [fullscreenBackdropOpen, setFullscreenBackdropOpen] = useState(false);
 
 
 
@@ -303,9 +305,9 @@ export const MovieDetailPage: React.FC = () => {
     ? (movie.poster_path.startsWith('http') ? movie.poster_path : `https://image.tmdb.org/t/p/w500${movie.poster_path}`)
     : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=500&q=80';
 
-  const backdropUrl = movie.backdrop_path
-    ? (movie.backdrop_path.startsWith('http') ? movie.backdrop_path : `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}`)
-    : null;
+  const backdropUrl = movie.custom_backdrop_url || (movie.backdrop_path
+    ? (movie.backdrop_path.startsWith('http') ? movie.backdrop_path : `https://image.tmdb.org/t/p/original${movie.backdrop_path}`)
+    : null);
 
   // Filter similar movies ONLY from user's library
   const currentGenres = new Set((movie.genres || []).map((g: any) => g.name));
@@ -416,37 +418,75 @@ export const MovieDetailPage: React.FC = () => {
           borderRadius: 3.5,
           overflow: 'hidden',
           backgroundColor: '#0A0E18',
-          minHeight: '440px',
+          minHeight: { xs: '420px', sm: '480px', md: '560px', lg: '600px' },
           display: 'flex',
           alignItems: 'flex-end',
-          p: { xs: 2.5, md: 4.5 },
+          p: { xs: 2.5, sm: 3.5, md: 4.5 },
           backgroundImage: backdropUrl
-            ? `linear-gradient(to top, #07090E 15%, rgba(7, 9, 14, 0.8) 50%, rgba(7, 9, 14, 0.3)), url(${backdropUrl})`
+            ? `linear-gradient(to top, #07090E 0%, rgba(7, 9, 14, 0.75) 26%, rgba(7, 9, 14, 0.15) 55%, transparent 100%), linear-gradient(to right, rgba(7, 9, 14, 0.8) 0%, rgba(7, 9, 14, 0.25) 45%, transparent 80%), url(${backdropUrl})`
             : 'none',
           backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          backgroundPosition: 'center 20%',
           backgroundRepeat: 'no-repeat',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
         }}
       >
-        <Grid container spacing={4} alignItems="flex-end">
+        {/* Full Image Lightbox Button */}
+        {backdropUrl && (
+          <Box sx={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
+            <Tooltip title="View Full High-Resolution Backdrop">
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<FullscreenIcon />}
+                onClick={() => setFullscreenBackdropOpen(true)}
+                sx={{
+                  backgroundColor: 'rgba(7, 9, 14, 0.75)',
+                  backdropFilter: 'blur(12px)',
+                  color: '#F8FAFC',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  textTransform: 'none',
+                  px: 1.5,
+                  py: 0.6,
+                  borderRadius: 2,
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+                  '&:hover': {
+                    backgroundColor: 'rgba(229, 169, 60, 0.25)',
+                    borderColor: '#E5A93C',
+                    color: '#E5A93C',
+                  },
+                }}
+              >
+                Full Image
+              </Button>
+            </Tooltip>
+          </Box>
+        )}
+
+        <Grid container spacing={{ xs: 2.5, md: 4 }} alignItems="flex-end">
           {/* Poster Column */}
-          <Grid item xs={12} sm={4} md={3}>
+          <Grid item xs={12} sm={4} md={3} lg={2.6}>
             <Box
               component="img"
               src={posterUrl}
               alt={movie.title}
               sx={{
                 width: '100%',
-                objectFit: 'contain',
+                maxWidth: { xs: 200, sm: '100%' },
+                maxHeight: { xs: 290, sm: 360, md: 420 },
+                objectFit: 'cover',
                 borderRadius: 2.5,
-                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.8)',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
+                boxShadow: '0 24px 48px rgba(0, 0, 0, 0.9)',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
               }}
             />
           </Grid>
 
           {/* Details Column */}
-          <Grid item xs={12} sm={8} md={9}>
+          <Grid item xs={12} sm={8} md={9} lg={9.4}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               {/* Badges */}
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
@@ -2365,6 +2405,76 @@ export const MovieDetailPage: React.FC = () => {
                 })}
           </Grid>
         </DialogContent>
+      </Dialog>
+
+      {/* Fullscreen Backdrop Lightbox Modal */}
+      <Dialog
+        open={fullscreenBackdropOpen}
+        onClose={() => setFullscreenBackdropOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#07090E',
+            backgroundImage: 'none',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: 3,
+            overflow: 'hidden',
+            p: 0,
+            m: { xs: 1, sm: 2, md: 3 },
+            boxShadow: '0 32px 64px rgba(0, 0, 0, 0.95)',
+          },
+        }}
+      >
+        <Box sx={{ position: 'relative', width: '100%', backgroundColor: '#05070B', display: 'flex', flexDirection: 'column' }}>
+          {/* Header bar */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              px: 2.5,
+              py: 1.5,
+              backgroundColor: 'rgba(7, 9, 14, 0.95)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <MovieIcon sx={{ color: '#E5A93C', fontSize: 22 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#F8FAFC' }}>
+                {movie.title} — Full Resolution Backdrop
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setFullscreenBackdropOpen(false)} sx={{ color: '#94A3B8', '&:hover': { color: '#F8FAFC' } }}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+
+          {/* Full Image Display */}
+          {backdropUrl ? (
+            <Box sx={{ p: { xs: 1, sm: 2 }, display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+              <Box
+                component="img"
+                src={backdropUrl}
+                alt={movie.title}
+                sx={{
+                  maxWidth: '100%',
+                  maxHeight: '80vh',
+                  objectFit: 'contain',
+                  borderRadius: 1.5,
+                  display: 'block',
+                  boxShadow: '0 12px 32px rgba(0,0,0,0.8)',
+                }}
+              />
+            </Box>
+          ) : (
+            <Box sx={{ p: 6, textAlign: 'center' }}>
+              <Typography variant="body1" sx={{ color: '#94A3B8' }}>
+                No backdrop image available for this title.
+              </Typography>
+            </Box>
+          )}
+        </Box>
       </Dialog>
     </Box>
   );
