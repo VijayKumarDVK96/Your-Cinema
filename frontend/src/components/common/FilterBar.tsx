@@ -16,8 +16,8 @@ import {
   Button,
   TextField,
   InputAdornment,
-  Stack,
   Badge,
+  Collapse,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
@@ -27,6 +27,9 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import StarIcon from '@mui/icons-material/Star';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import FilterAltOffIcon from '@mui/icons-material/FilterAltOff';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { Tag, Genre } from '../../types/index.js';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -140,6 +143,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   const [yearAnchorEl, setYearAnchorEl] = useState<null | HTMLElement>(null);
   const [localYearRange, setLocalYearRange] = useState<[number, number]>(yearRange);
 
+  // Mobile filters collapse toggle (open by default, can be toggled)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState<boolean>(true);
+
   // Sync search input from parent if updated externally
   useEffect(() => {
     setSearchInput(searchTerm);
@@ -235,8 +241,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 1.75,
-        p: { xs: 1.75, sm: 2.25 },
+        gap: { xs: 1.25, md: 1.75 },
+        p: { xs: 1.5, sm: 2, md: 2.25 },
         backgroundColor: '#0B0F19',
         borderRadius: 3,
         border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -245,12 +251,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         mb: 3,
       }}
     >
-      {/* ROW 1: Search & Format/Status Quick Toggles */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
-        {/* Debounced Search Input */}
+      {/* ROW 1: Search, Toggles, and Quick Actions */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: { xs: 'nowrap', sm: 'wrap' },
+          alignItems: 'center',
+          gap: { xs: 1, sm: 1.5 },
+          width: '100%',
+        }}
+      >
+        {/* Search Input Field */}
         <TextField
           size="small"
-          placeholder="Filter titles, directors, actors..."
+          placeholder="Filter titles, directors, cast..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           InputProps={{
@@ -275,13 +289,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             ) : null,
           }}
           sx={{
-            flex: { xs: '1 1 100%', sm: '1 1 240px', md: '1 1 280px' },
-            maxWidth: { sm: 380 },
+            flex: { xs: '1 1 auto', sm: '1 1 220px', md: '1 1 260px' },
+            minWidth: 0,
+            maxWidth: { sm: 340, md: 380 },
             '& .MuiOutlinedInput-root': {
               backgroundColor: 'rgba(255, 255, 255, 0.04)',
               borderRadius: 2,
               color: '#F8FAFC',
-              fontSize: '0.875rem',
+              fontSize: { xs: '0.82rem', sm: '0.875rem' },
+              height: 38,
               '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.12)' },
               '&:hover fieldset': { borderColor: 'rgba(229, 169, 60, 0.5)' },
               '&.Mui-focused fieldset': { borderColor: '#E5A93C', borderWidth: 1 },
@@ -289,7 +305,16 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           }}
         />
 
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.25, ml: 'auto' }}>
+        {/* Desktop / Tablet Inline Toggles (Hidden on mobile xs, rendered in Row 2 on mobile) */}
+        <Box
+          sx={{
+            display: { xs: 'none', sm: 'flex' },
+            alignItems: 'center',
+            gap: 1.2,
+            flexWrap: 'wrap',
+            ml: 'auto',
+          }}
+        >
           {/* Format Toggle */}
           {onMediaTypeChange && (
             <ToggleButtonGroup
@@ -301,14 +326,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 backgroundColor: 'rgba(255, 255, 255, 0.03)',
                 borderRadius: 2,
                 p: 0.3,
+                height: 38,
                 border: '1px solid rgba(255, 255, 255, 0.06)',
                 '& .MuiToggleButton-root': {
                   color: '#94A3B8',
                   border: 'none',
-                  px: 1.6,
-                  py: 0.5,
+                  px: { sm: 1.2, md: 1.6 },
+                  py: 0.4,
                   fontWeight: 600,
-                  fontSize: '0.78rem',
+                  fontSize: { sm: '0.74rem', md: '0.78rem' },
                   textTransform: 'none',
                   borderRadius: 1.5,
                   '&.Mui-selected': {
@@ -339,14 +365,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               backgroundColor: 'rgba(255, 255, 255, 0.03)',
               borderRadius: 2,
               p: 0.3,
+              height: 38,
               border: '1px solid rgba(255, 255, 255, 0.06)',
               '& .MuiToggleButton-root': {
                 color: '#94A3B8',
                 border: 'none',
-                px: 1.6,
-                py: 0.5,
+                px: { sm: 1.2, md: 1.6 },
+                py: 0.4,
                 fontWeight: 600,
-                fontSize: '0.78rem',
+                fontSize: { sm: '0.74rem', md: '0.78rem' },
                 textTransform: 'none',
                 borderRadius: 1.5,
                 '&.Mui-selected': {
@@ -371,133 +398,304 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <IconButton
               onClick={onFavoriteToggle}
               sx={{
-                width: 34,
-                height: 34,
+                width: 38,
+                height: 38,
                 backgroundColor: isFavorite ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.04)',
                 color: isFavorite ? '#EF4444' : '#64748B',
                 border: isFavorite ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 2,
+                flexShrink: 0,
                 '&:hover': { color: '#EF4444', backgroundColor: 'rgba(239, 68, 68, 0.15)' },
               }}
             >
-              {isFavorite ? <FavoriteIcon sx={{ fontSize: 18 }} /> : <FavoriteBorderIcon sx={{ fontSize: 18 }} />}
+              {isFavorite ? <FavoriteIcon sx={{ fontSize: 19 }} /> : <FavoriteBorderIcon sx={{ fontSize: 19 }} />}
             </IconButton>
           </Tooltip>
         </Box>
-      </Box>
 
-      {/* ROW 2: Dropdowns & Detailed Filter Controls */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.25 }}>
-        {/* Genre Dropdown */}
-        <FormControl size="small" sx={{ minWidth: 130, flex: '1 1 130px', maxWidth: 180 }}>
-          <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Genre</InputLabel>
-          <Select
-            value={selectedGenre !== undefined && selectedGenre !== null ? String(selectedGenre) : ''}
-            label="Genre"
-            onChange={(e) => {
-              const val = e.target.value;
-              onGenreChange(val ? val : undefined);
-            }}
+        {/* Mobile Action Buttons on Row 1 (Favorite + Filter Expand + Reset) */}
+        <Box sx={{ display: { xs: 'flex', sm: 'none' }, alignItems: 'center', gap: 0.8, flexShrink: 0 }}>
+          {/* Favorite Button */}
+          <IconButton
+            onClick={onFavoriteToggle}
             sx={{
-              color: '#F8FAFC',
-              fontSize: '0.85rem',
-              backgroundColor: 'rgba(255,255,255,0.03)',
+              width: 38,
+              height: 38,
+              backgroundColor: isFavorite ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+              color: isFavorite ? '#EF4444' : '#64748B',
+              border: isFavorite ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: 2,
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
             }}
           >
-            <MenuItem value=""><em>All Genres</em></MenuItem>
-            {allGenresList.map((g) => (
-              <MenuItem key={g.id || g.name} value={String(g.tmdb_id || g.id || g.name)}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, width: '100%' }}>
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: g.color || '#E5A93C',
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#F8FAFC', fontSize: '0.85rem' }}>
-                    {g.name}
-                  </Typography>
-                  {g.movie_count !== undefined && (
-                    <Typography variant="caption" sx={{ color: '#64748B', ml: 'auto' }}>
-                      ({g.movie_count})
-                    </Typography>
-                  )}
-                </Box>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+            {isFavorite ? <FavoriteIcon sx={{ fontSize: 18 }} /> : <FavoriteBorderIcon sx={{ fontSize: 18 }} />}
+          </IconButton>
 
-        {/* Language Dropdown */}
-        <FormControl size="small" sx={{ minWidth: 120, flex: '1 1 120px', maxWidth: 160 }}>
-          <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Language</InputLabel>
-          <Select
-            value={selectedLanguage || ''}
-            label="Language"
-            onChange={(e) => onLanguageChange(e.target.value || undefined)}
-            sx={{
-              color: '#F8FAFC',
-              fontSize: '0.85rem',
-              backgroundColor: 'rgba(255,255,255,0.03)',
-              borderRadius: 2,
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
-            }}
-          >
-            <MenuItem value=""><em>All Languages</em></MenuItem>
-            {LANGUAGE_OPTIONS.map((lang) => (
-              <MenuItem key={lang.code} value={lang.code}>{lang.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* OTT Platform Dropdown */}
-        <FormControl size="small" sx={{ minWidth: 140, flex: '1 1 140px', maxWidth: 180 }}>
-          <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>OTT Platform</InputLabel>
-          <Select
-            value={selectedOtt || ''}
-            label="OTT Platform"
-            onChange={(e) => onOttChange(e.target.value || undefined)}
-            sx={{
-              color: '#F8FAFC',
-              fontSize: '0.85rem',
-              backgroundColor: 'rgba(255,255,255,0.03)',
-              borderRadius: 2,
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
-            }}
-          >
-            <MenuItem value=""><em>All Streaming</em></MenuItem>
-            {OTT_OPTIONS.map((ott) => (
-              <MenuItem key={ott.value} value={ott.value}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: ott.color,
-                    }}
-                  />
-                  <span>{ott.label}</span>
-                </Box>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* Year Range Button & Popover Filter */}
-        <Box>
+          {/* Filter Collapse Toggle Button */}
           <Button
             size="small"
+            onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
+            sx={{
+              height: 38,
+              minWidth: 40,
+              px: 1,
+              backgroundColor: mobileFiltersOpen ? 'rgba(229, 169, 60, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+              border: mobileFiltersOpen ? '1px solid rgba(229, 169, 60, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 2,
+              color: mobileFiltersOpen ? '#E5A93C' : '#94A3B8',
+            }}
+          >
+            <Badge badgeContent={activeFilterCount} color="warning">
+              <FilterAltIcon sx={{ fontSize: 18 }} />
+            </Badge>
+          </Button>
+
+          {/* Reset Button on Mobile */}
+          {activeFilterCount > 0 && (
+            <IconButton
+              onClick={() => {
+                setSearchInput('');
+                if (onSearchChange) onSearchChange('');
+                setLocalYearRange([MIN_YEAR, CURRENT_YEAR]);
+                setLocalRatingRange([1, 5]);
+                onReset();
+              }}
+              sx={{
+                width: 38,
+                height: 38,
+                backgroundColor: 'rgba(229, 169, 60, 0.12)',
+                color: '#E5A93C',
+                border: '1px solid rgba(229, 169, 60, 0.3)',
+                borderRadius: 2,
+              }}
+            >
+              <RestartAltIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          )}
+        </Box>
+      </Box>
+
+      {/* ROW 2 (Mobile only): Horizontal Scrollable Segmented Filter Pills */}
+      <Box
+        sx={{
+          display: { xs: 'flex', sm: 'none' },
+          alignItems: 'center',
+          gap: 1,
+          overflowX: 'auto',
+          py: 0.5,
+          width: '100%',
+          flexWrap: 'nowrap',
+          '::-webkit-scrollbar': { display: 'none' },
+        }}
+      >
+        {/* Format Toggle for Mobile */}
+        {onMediaTypeChange && (
+          <ToggleButtonGroup
+            value={selectedMediaType}
+            exclusive
+            onChange={(_, val) => val && onMediaTypeChange(val)}
+            size="small"
+            sx={{
+              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 2,
+              p: 0.3,
+              height: 34,
+              flexShrink: 0,
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+              '& .MuiToggleButton-root': {
+                color: '#94A3B8',
+                border: 'none',
+                px: 1.2,
+                py: 0.3,
+                fontWeight: 600,
+                fontSize: '0.72rem',
+                textTransform: 'none',
+                borderRadius: 1.5,
+                '&.Mui-selected': {
+                  backgroundColor: 'rgba(168, 85, 247, 0.22)',
+                  color: '#F8FAFC',
+                  fontWeight: 700,
+                  border: '1px solid rgba(168, 85, 247, 0.45)',
+                },
+              },
+            }}
+          >
+            <ToggleButton value="all">All Formats</ToggleButton>
+            <ToggleButton value="movie">Movies</ToggleButton>
+            <ToggleButton value="tv">Series</ToggleButton>
+          </ToggleButtonGroup>
+        )}
+
+        {/* Status Toggle for Mobile */}
+        <ToggleButtonGroup
+          value={status}
+          exclusive
+          onChange={(_, val) => val && onStatusChange(val)}
+          size="small"
+          sx={{
+            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            borderRadius: 2,
+            p: 0.3,
+            height: 34,
+            flexShrink: 0,
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            '& .MuiToggleButton-root': {
+              color: '#94A3B8',
+              border: 'none',
+              px: 1.2,
+              py: 0.3,
+              fontWeight: 600,
+              fontSize: '0.72rem',
+              textTransform: 'none',
+              borderRadius: 1.5,
+              '&.Mui-selected': {
+                backgroundColor: '#E5A93C',
+                color: '#090D16',
+                fontWeight: 700,
+              },
+            },
+          }}
+        >
+          <ToggleButton value="all">All</ToggleButton>
+          <ToggleButton value="unwatched">Unwatched</ToggleButton>
+          <ToggleButton value="watching">Watching</ToggleButton>
+          <ToggleButton value="watched">Watched</ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* ROW 3: Detailed Filter Grid (Genre, Language, OTT, Year, Rating, Sort By, Reset) */}
+      <Collapse in={mobileFiltersOpen} timeout="auto">
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: 'repeat(2, 1fr)',
+              sm: 'repeat(3, 1fr)',
+              md: 'repeat(4, 1fr)',
+              lg: 'repeat(auto-fit, minmax(130px, 1fr))',
+            },
+            gap: { xs: 1, sm: 1.25 },
+            alignItems: 'center',
+            width: '100%',
+          }}
+        >
+          {/* Genre Dropdown */}
+          <FormControl size="small" sx={{ width: '100%' }}>
+            <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Genre</InputLabel>
+            <Select
+              value={selectedGenre !== undefined && selectedGenre !== null ? String(selectedGenre) : ''}
+              label="Genre"
+              onChange={(e) => {
+                const val = e.target.value;
+                onGenreChange(val ? val : undefined);
+              }}
+              sx={{
+                color: '#F8FAFC',
+                fontSize: '0.82rem',
+                height: 38,
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                borderRadius: 2,
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
+              }}
+            >
+              <MenuItem value=""><em>All Genres</em></MenuItem>
+              {allGenresList.map((g) => (
+                <MenuItem key={g.id || g.name} value={String(g.tmdb_id || g.id || g.name)}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, width: '100%' }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        backgroundColor: g.color || '#E5A93C',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography noWrap variant="body2" sx={{ fontWeight: 600, color: '#F8FAFC', fontSize: '0.82rem' }}>
+                      {g.name}
+                    </Typography>
+                    {g.movie_count !== undefined && (
+                      <Typography variant="caption" sx={{ color: '#64748B', ml: 'auto' }}>
+                        ({g.movie_count})
+                      </Typography>
+                    )}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* Language Dropdown */}
+          <FormControl size="small" sx={{ width: '100%' }}>
+            <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Language</InputLabel>
+            <Select
+              value={selectedLanguage || ''}
+              label="Language"
+              onChange={(e) => onLanguageChange(e.target.value || undefined)}
+              sx={{
+                color: '#F8FAFC',
+                fontSize: '0.82rem',
+                height: 38,
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                borderRadius: 2,
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
+              }}
+            >
+              <MenuItem value=""><em>All Languages</em></MenuItem>
+              {LANGUAGE_OPTIONS.map((lang) => (
+                <MenuItem key={lang.code} value={lang.code}>{lang.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* OTT Platform Dropdown */}
+          <FormControl size="small" sx={{ width: '100%' }}>
+            <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>OTT Platform</InputLabel>
+            <Select
+              value={selectedOtt || ''}
+              label="OTT Platform"
+              onChange={(e) => onOttChange(e.target.value || undefined)}
+              sx={{
+                color: '#F8FAFC',
+                fontSize: '0.82rem',
+                height: 38,
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                borderRadius: 2,
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
+              }}
+            >
+              <MenuItem value=""><em>All Streaming</em></MenuItem>
+              {OTT_OPTIONS.map((ott) => (
+                <MenuItem key={ott.value} value={ott.value}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        backgroundColor: ott.color,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography noWrap variant="body2" sx={{ fontSize: '0.82rem' }}>
+                      {ott.label}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* Year Range Button & Popover */}
+          <Button
+            size="small"
+            fullWidth
             onClick={(e) => setYearAnchorEl(e.currentTarget)}
             sx={{
               height: 38,
-              px: 1.75,
+              px: 1.5,
               color: isYearActive ? '#38BDF8' : '#F8FAFC',
               backgroundColor: isYearActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.03)',
               border: isYearActive ? '1px solid #38BDF8' : '1px solid rgba(255, 255, 255, 0.1)',
@@ -505,6 +703,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               textTransform: 'none',
               fontSize: '0.82rem',
               fontWeight: isYearActive ? 700 : 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               '&:hover': {
                 backgroundColor: isYearActive ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)',
                 borderColor: isYearActive ? '#38BDF8' : 'rgba(255, 255, 255, 0.3)',
@@ -512,9 +713,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             }}
           >
             <CalendarMonthIcon sx={{ fontSize: 16, mr: 0.8, color: isYearActive ? '#38BDF8' : '#94A3B8' }} />
-            {isYearActive
-              ? (localYearRange[0] === localYearRange[1] ? `Year: ${localYearRange[0]}` : `Year: ${localYearRange[0]} – ${localYearRange[1]}`)
-              : 'Year'}
+            <Typography noWrap sx={{ fontSize: '0.82rem', fontWeight: isYearActive ? 700 : 500 }}>
+              {isYearActive
+                ? (localYearRange[0] === localYearRange[1] ? `${localYearRange[0]}` : `${localYearRange[0]}–${localYearRange[1]}`)
+                : 'Year'}
+            </Typography>
           </Button>
 
           <Popover
@@ -527,6 +730,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               sx: {
                 p: 2.5,
                 width: 310,
+                maxWidth: 'calc(100vw - 32px)',
                 backgroundColor: '#0F172A',
                 border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: 2.5,
@@ -642,16 +846,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               />
             </Box>
           </Popover>
-        </Box>
 
-        {/* My Rating Button & Popover Filter */}
-        <Box>
+          {/* Rating Range Button & Popover */}
           <Button
             size="small"
+            fullWidth
             onClick={(e) => setRatingAnchorEl(e.currentTarget)}
             sx={{
               height: 38,
-              px: 1.75,
+              px: 1.5,
               color: isRatingActive ? '#E5A93C' : '#F8FAFC',
               backgroundColor: isRatingActive ? 'rgba(229, 169, 60, 0.12)' : 'rgba(255, 255, 255, 0.03)',
               border: isRatingActive ? '1px solid #E5A93C' : '1px solid rgba(255, 255, 255, 0.1)',
@@ -659,6 +862,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               textTransform: 'none',
               fontSize: '0.82rem',
               fontWeight: isRatingActive ? 700 : 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               '&:hover': {
                 backgroundColor: isRatingActive ? 'rgba(229, 169, 60, 0.2)' : 'rgba(255, 255, 255, 0.08)',
                 borderColor: isRatingActive ? '#E5A93C' : 'rgba(255, 255, 255, 0.3)',
@@ -666,7 +872,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             }}
           >
             <StarIcon sx={{ fontSize: 16, mr: 0.8, color: isRatingActive ? '#E5A93C' : '#94A3B8' }} />
-            {isRatingActive ? `⭐ ${localRatingRange[0].toFixed(1)} – ${localRatingRange[1].toFixed(1)}` : 'Rating'}
+            <Typography noWrap sx={{ fontSize: '0.82rem', fontWeight: isRatingActive ? 700 : 500 }}>
+              {isRatingActive
+                ? `${localRatingRange[0].toFixed(1)}–${localRatingRange[1].toFixed(1)} ★`
+                : 'Rating'}
+            </Typography>
           </Button>
 
           <Popover
@@ -678,7 +888,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             PaperProps={{
               sx: {
                 p: 2.5,
-                width: 280,
+                width: 300,
+                maxWidth: 'calc(100vw - 32px)',
                 backgroundColor: '#0F172A',
                 border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: 2.5,
@@ -688,15 +899,16 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           >
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
               <Typography variant="body2" sx={{ fontWeight: 700, color: '#F8FAFC' }}>
-                Filter Rating Range
+                Star Rating Filter
               </Typography>
               <Chip
-                label={`⭐ ${localRatingRange[0].toFixed(1)} to ${localRatingRange[1].toFixed(1)}`}
+                label={`${localRatingRange[0].toFixed(1)} – ${localRatingRange[1].toFixed(1)} ★`}
                 size="small"
                 sx={{ backgroundColor: '#E5A93C', color: '#090D16', fontWeight: 800, fontSize: '0.72rem' }}
               />
             </Box>
 
+            {/* Slider */}
             <Box sx={{ px: 1, py: 1 }}>
               <Slider
                 value={localRatingRange}
@@ -706,16 +918,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                   setLocalRatingRange(range);
                   if (onRatingRangeChange) onRatingRangeChange(range);
                 }}
-                min={1.0}
-                max={5.0}
+                min={1}
+                max={5}
                 step={0.5}
-                valueLabelDisplay="auto"
                 marks={[
-                  { value: 1.0, label: '1' },
-                  { value: 2.0, label: '2' },
-                  { value: 3.0, label: '3' },
-                  { value: 4.0, label: '4' },
-                  { value: 5.0, label: '5' },
+                  { value: 1, label: '1 ★' },
+                  { value: 2, label: '2 ★' },
+                  { value: 3, label: '3 ★' },
+                  { value: 4, label: '4 ★' },
+                  { value: 5, label: '5 ★' },
                 ]}
                 sx={{
                   color: '#E5A93C',
@@ -760,84 +971,97 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               />
             </Box>
           </Popover>
-        </Box>
 
-        {/* Tag Dropdown */}
-        {availableTags.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 110, flex: '1 1 110px', maxWidth: 150 }}>
-            <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Tag</InputLabel>
+          {/* Tag Dropdown */}
+          {availableTags.length > 0 && (
+            <FormControl size="small" sx={{ width: '100%' }}>
+              <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Tag</InputLabel>
+              <Select
+                value={selectedTag || ''}
+                label="Tag"
+                onChange={(e) => onTagChange(e.target.value || undefined)}
+                sx={{
+                  color: '#F8FAFC',
+                  fontSize: '0.82rem',
+                  height: 38,
+                  backgroundColor: 'rgba(255,255,255,0.03)',
+                  borderRadius: 2,
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
+                }}
+              >
+                <MenuItem value=""><em>All Tags</em></MenuItem>
+                {sortedTags.map((t) => (
+                  <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {/* Sort Selector */}
+          <FormControl size="small" sx={{ width: '100%' }}>
+            <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Sort By</InputLabel>
             <Select
-              value={selectedTag || ''}
-              label="Tag"
-              onChange={(e) => onTagChange(e.target.value || undefined)}
+              value={sortBy}
+              label="Sort By"
+              onChange={(e) => onSortChange(e.target.value)}
               sx={{
                 color: '#F8FAFC',
-                fontSize: '0.85rem',
+                fontSize: '0.82rem',
+                height: 38,
                 backgroundColor: 'rgba(255,255,255,0.03)',
                 borderRadius: 2,
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
                 '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
               }}
             >
-              <MenuItem value=""><em>All Tags</em></MenuItem>
-              {sortedTags.map((t) => (
-                <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-              ))}
+              <MenuItem value="added_at">Recently Added</MenuItem>
+              <MenuItem value="my_rating">Highest My Rated</MenuItem>
+              <MenuItem value="tmdb_rating">Highest TMDB Rated</MenuItem>
+              <MenuItem value="release_date">Release Date</MenuItem>
+              <MenuItem value="title">Movie Title</MenuItem>
+              <MenuItem value="runtime">Runtime</MenuItem>
             </Select>
           </FormControl>
-        )}
 
-        {/* Sort Selector */}
-        <FormControl size="small" sx={{ minWidth: 150, flex: '1 1 150px', maxWidth: 190, ml: 'auto' }}>
-          <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Sort By</InputLabel>
-          <Select
-            value={sortBy}
-            label="Sort By"
-            onChange={(e) => onSortChange(e.target.value)}
-            sx={{
-              color: '#F8FAFC',
-              fontSize: '0.85rem',
-              backgroundColor: 'rgba(255,255,255,0.03)',
-              borderRadius: 2,
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
-              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#E5A93C' },
-            }}
-          >
-            <MenuItem value="added_at">Recently Added</MenuItem>
-            <MenuItem value="my_rating">Highest My Rated</MenuItem>
-            <MenuItem value="tmdb_rating">Highest TMDB Rated</MenuItem>
-            <MenuItem value="release_date">Release Date</MenuItem>
-            <MenuItem value="title">Movie Title</MenuItem>
-            <MenuItem value="runtime">Runtime</MenuItem>
-          </Select>
-        </FormControl>
-
-        {/* Reset Button with Active Badge */}
-        <Tooltip title={activeFilterCount > 0 ? `Reset ${activeFilterCount} active filters` : 'Reset filters'}>
-          <IconButton
-            onClick={() => {
-              setSearchInput('');
-              if (onSearchChange) onSearchChange('');
-              setLocalYearRange([MIN_YEAR, CURRENT_YEAR]);
-              setLocalRatingRange([1, 5]);
-              onReset();
-            }}
-            sx={{
-              color: activeFilterCount > 0 ? '#E5A93C' : '#64748B',
-              backgroundColor: activeFilterCount > 0 ? 'rgba(229, 169, 60, 0.1)' : 'transparent',
-              border: activeFilterCount > 0 ? '1px solid rgba(229, 169, 60, 0.3)' : '1px solid transparent',
-              height: 38,
-              width: 38,
-              borderRadius: 2,
-              '&:hover': { color: '#E5A93C', backgroundColor: 'rgba(229, 169, 60, 0.2)' },
-            }}
-          >
-            <Badge badgeContent={activeFilterCount} color="warning" overlap="circular">
-              <RestartAltIcon sx={{ fontSize: 20 }} />
-            </Badge>
-          </IconButton>
-        </Tooltip>
-      </Box>
+          {/* Desktop/Tablet Reset Button with Active Badge */}
+          <Box sx={{ display: { xs: 'none', sm: 'flex' }, alignItems: 'center', justifyContent: 'center' }}>
+            <Tooltip title={activeFilterCount > 0 ? `Reset ${activeFilterCount} active filters` : 'Reset filters'}>
+              <Button
+                size="small"
+                fullWidth
+                onClick={() => {
+                  setSearchInput('');
+                  if (onSearchChange) onSearchChange('');
+                  setLocalYearRange([MIN_YEAR, CURRENT_YEAR]);
+                  setLocalRatingRange([1, 5]);
+                  onReset();
+                }}
+                disabled={activeFilterCount === 0}
+                startIcon={
+                  <Badge badgeContent={activeFilterCount} color="warning" overlap="circular">
+                    <RestartAltIcon sx={{ fontSize: 18 }} />
+                  </Badge>
+                }
+                sx={{
+                  height: 38,
+                  color: activeFilterCount > 0 ? '#E5A93C' : '#64748B',
+                  backgroundColor: activeFilterCount > 0 ? 'rgba(229, 169, 60, 0.1)' : 'rgba(255, 255, 255, 0.03)',
+                  border: activeFilterCount > 0 ? '1px solid rgba(229, 169, 60, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 2,
+                  textTransform: 'none',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  '&:hover': { color: '#E5A93C', backgroundColor: 'rgba(229, 169, 60, 0.2)' },
+                  '&.Mui-disabled': { color: '#475569', borderColor: 'rgba(255, 255, 255, 0.04)' },
+                }}
+              >
+                Reset
+              </Button>
+            </Tooltip>
+          </Box>
+        </Box>
+      </Collapse>
     </Box>
   );
 };
