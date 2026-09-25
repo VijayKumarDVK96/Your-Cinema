@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -45,6 +46,7 @@ import { api } from '../../api/client.js';
 import { OttBadge } from '../../utils/ottProviders.js';
 import { buildWatchlistTreeOptions } from '../../utils/watchlistTree.js';
 import { WatchlistTreeSelect } from '../../components/common/WatchlistTreeSelect.js';
+import { ImportProgressModal, ImportProgressState } from '../../components/common/ImportProgressModal.js';
 
 interface MatchItem {
   inputTitle: string;
@@ -72,7 +74,22 @@ interface MatchItem {
 }
 
 export const ImportCenterPage: React.FC = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Progressive Commit / Import State
+  const cancelCommitRef = useRef<boolean>(false);
+  const [commitProgress, setCommitProgress] = useState<ImportProgressState>({
+    isOpen: false,
+    title: 'Importing Titles to Sanctuary...',
+    subtitle: 'Adding selected movies & streaming links to your library',
+    stage: 'Starting import...',
+    currentTitle: '',
+    currentPoster: null,
+    current: 0,
+    total: 0,
+    status: 'idle',
+  });
 
   // Movie & OTT Merged Import State
   const [inputText, setInputText] = useState(
@@ -304,26 +321,25 @@ export const ImportCenterPage: React.FC = () => {
   };
 
   const handleCommitImport = async () => {
-    const payloadItems = Array.from(selectedIndices)
-      .map((idx) => {
-        const item = matches[idx];
-        if (!item?.selectedMovie) return null;
-        return {
-          tmdbId: item.selectedMovie.id,
-          watchStatus: item.watchStatus,
-          personalRating: item.personalRating,
-          isFavorite: item.isFavorite,
-          watchlistId: item.watchlistId !== 'none' ? item.watchlistId : undefined,
-          genreId: item.genreId !== 'none' ? item.genreId : undefined,
-          providerName: item.providerName || undefined,
-          directUrl: item.directUrl || undefined,
-        };
-      })
-      .filter(Boolean);
-
-    if (payloadItems.length === 0) return;
+    const selectedIndicesArray = Array.from(selectedIndices);
+    if (selectedIndicesArray.length === 0) return;
 
     setCommitting(true);
+    cancelCommitRef.current = false;
+    const totalCount = selectedIndicesArray.length;
+
+    setCommitProgress({
+      isOpen: true,
+      title: 'Importing Titles to Sanctuary...',
+      subtitle: `Importing ${totalCount} selected movies with ratings, genres & OTT links`,
+      stage: 'Preparing library destination...',
+      currentTitle: '',
+      currentPoster: null,
+      current: 0,
+      total: totalCount,
+      status: 'running',
+    });
+
     try {
       let watchlistIdToUse: string | null = null;
       if (selectedWatchlistId === '__new__') {
@@ -336,29 +352,98 @@ export const ImportCenterPage: React.FC = () => {
         watchlistIdToUse = selectedWatchlistId;
       }
 
-      const res = await api.post('/import/commit', {
-        movies: payloadItems,
-        watchlistId: watchlistIdToUse,
-        newWatchlistName: selectedWatchlistId === '__new__' ? newWatchlistName.trim() : undefined,
-        customGenreIds: Array.from(selectedGenreIds),
-        genreId: globalGenreId !== 'none' ? globalGenreId : undefined,
-        watchStatus: globalWatchStatus,
-        personalRating: globalPersonalRating,
-        isFavorite: globalIsFavorite,
-        providerName: globalProviderName || undefined,
-        directUrl: globalDirectUrl || undefined,
-      });
+      let importedCount = 0;
+      const successfullyImportedIndices = new Set<number>();
 
-      setImportResult(res.data?.data);
-      setMatches([]);
+      for (let i = 0; i < selectedIndicesArray.length; i++) {
+        if (cancelCommitRef.current) {
+          setCommitProgress(prev => ({
+            ...prev,
+            status: 'cancelled',
+            stage: 'Import paused by user',
+            current: importedCount,
+            successMessage: `Import paused. Successfully imported ${importedCount} of ${totalCount} movies into your sanctuary. Remaining movies stay in the review table.`,
+          }));
+          break;
+        }
+
+        const idx = selectedIndicesArray[i];
+        const item = matches[idx];
+        if (!item?.selectedMovie) continue;
+
+        const movieTitle = item.selectedMovie.title || item.inputTitle;
+        const poster = item.selectedMovie.poster_path;
+
+        setCommitProgress(prev => ({
+          ...prev,
+          current: importedCount,
+          stage: `Importing ${i + 1} of ${totalCount}: ${movieTitle}`,
+          currentTitle: movieTitle,
+          currentPoster: poster,
+        }));
+
+        const singlePayload = {
+          tmdbId: item.selectedMovie.id,
+          watchStatus: item.watchStatus,
+          personalRating: item.personalRating,
+          isFavorite: item.isFavorite,
+          watchlistId: item.watchlistId !== 'none' ? item.watchlistId : (watchlistIdToUse || undefined),
+          genreId: item.genreId !== 'none' ? item.genreId : (globalGenreId !== 'none' ? globalGenreId : undefined),
+          providerName: item.providerName || globalProviderName || undefined,
+          directUrl: item.directUrl || globalDirectUrl || undefined,
+        };
+
+        try {
+          await api.post('/import/commit', {
+            movies: [singlePayload],
+            watchlistId: watchlistIdToUse || undefined,
+            customGenreIds: Array.from(selectedGenreIds),
+            genreId: globalGenreId !== 'none' ? globalGenreId : undefined,
+            watchStatus: globalWatchStatus,
+            personalRating: globalPersonalRating,
+            isFavorite: globalIsFavorite,
+            providerName: globalProviderName || undefined,
+            directUrl: globalDirectUrl || undefined,
+          });
+          importedCount++;
+          successfullyImportedIndices.add(idx);
+          setCommitProgress(prev => ({
+            ...prev,
+            current: importedCount,
+          }));
+        } catch (err: any) {
+          console.error('Failed to import item', movieTitle, err);
+        }
+      }
+
+      if (!cancelCommitRef.current) {
+        setCommitProgress(prev => ({
+          ...prev,
+          status: 'completed',
+          current: importedCount,
+          stage: 'All selected titles imported successfully!',
+          successMessage: `Import complete! Successfully added ${importedCount} movies with posters, metadata, ratings, and streaming sources.`,
+        }));
+      }
+
+      // Remove successfully imported items from review table, keeping unimported / skipped / remaining items
+      setMatches(prev => prev.filter((_, idx) => !successfullyImportedIndices.has(idx)));
       setSelectedIndices(new Set());
-      setInputText('');
+      if (successfullyImportedIndices.size === matches.length) {
+        setInputText('');
+      }
+
       queryClient.invalidateQueries({ queryKey: ['movies'] });
       queryClient.invalidateQueries({ queryKey: ['my-movies'] });
       queryClient.invalidateQueries({ queryKey: ['watchlists'] });
       queryClient.invalidateQueries({ queryKey: ['home'] });
-    } catch {
-      // Handled
+    } catch (err: any) {
+      setCommitProgress(prev => ({
+        ...prev,
+        status: 'error',
+        stage: 'Import encountered an error',
+        errorMessage: err.message || 'Failed to complete import.',
+      }));
     } finally {
       setCommitting(false);
     }
@@ -1076,6 +1161,20 @@ export const ImportCenterPage: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Progressive Commit Progress & Cancellation Modal */}
+      <ImportProgressModal
+        state={commitProgress}
+        onCancel={() => {
+          cancelCommitRef.current = true;
+          setCommitProgress(prev => ({ ...prev, status: 'cancelling' }));
+        }}
+        onClose={() => setCommitProgress(prev => ({ ...prev, isOpen: false }))}
+        onViewLibrary={() => {
+          setCommitProgress(prev => ({ ...prev, isOpen: false }));
+          navigate('/movies');
+        }}
+      />
     </Box>
   );
 };

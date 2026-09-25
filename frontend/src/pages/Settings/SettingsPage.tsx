@@ -42,16 +42,33 @@ import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import DisplaySettingsIcon from '@mui/icons-material/DisplaySettings';
 import BackupIcon from '@mui/icons-material/Backup';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
 import { api } from '../../api/client.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
+import { ImportProgressModal, ImportProgressState } from '../../components/common/ImportProgressModal.js';
 
 export const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { user, refreshProfile } = useAuth();
   const { isTvMode, toggleTvMode } = useTVNavigation();
   const queryClient = useQueryClient();
+
+  // Progressive Import Progress & Cancellation State
+  const cancelImportRef = useRef<boolean>(false);
+  const [importProgress, setImportProgress] = useState<ImportProgressState>({
+    isOpen: false,
+    title: 'Restoring Sanctuary Backup...',
+    subtitle: 'Importing movies, custom posters, watchlists & tags',
+    stage: 'Starting restore...',
+    currentTitle: '',
+    currentPoster: null,
+    current: 0,
+    total: 0,
+    status: 'idle',
+  });
 
   // Active Horizontal Tab: 'account' | 'ai' | 'display' | 'genres' | 'backup' | 'danger'
   const [activeTab, setActiveTab] = useState<string>('account');
@@ -329,6 +346,8 @@ export const SettingsPage: React.FC = () => {
     if (!file) return;
     setImportLoading(true);
     setImportMsg(null);
+    cancelImportRef.current = false;
+
     try {
       const text = await file.text();
       const payload = JSON.parse(text);
@@ -337,10 +356,24 @@ export const SettingsPage: React.FC = () => {
         throw new Error('Invalid backup file format. Please use a file exported from Your Cinema.');
       }
 
+      const totalMovies = payload.movies.length;
+      setImportProgress({
+        isOpen: true,
+        title: 'Restoring Sanctuary Backup...',
+        subtitle: `Restoring ${totalMovies} titles with custom metadata, posters, OTT links & watchlists`,
+        stage: 'Setting up custom genres, tags, and watchlists...',
+        currentTitle: 'Initializing database structures...',
+        currentPoster: null,
+        current: 0,
+        total: totalMovies,
+        status: 'running',
+      });
+
       // 1. Import and map custom genres
       const genreIdMap: Record<string, string> = {};
       const genreNameMap: Record<string, string> = {};
       for (const cg of (payload.customGenres || [])) {
+        if (cancelImportRef.current) break;
         try {
           const res = await api.post('/genres', { name: cg.name, color: cg.color, description: cg.description });
           if (res.data?.data?.id) {
@@ -348,7 +381,6 @@ export const SettingsPage: React.FC = () => {
             genreNameMap[cg.name.toLowerCase()] = res.data.data.id;
           }
         } catch {
-          // Genre may already exist, query to match
           try {
             const list = await api.get('/genres');
             const found = (list.data?.data?.custom || []).find((x: any) => x.name.toLowerCase() === (cg.name || '').toLowerCase());
@@ -364,6 +396,7 @@ export const SettingsPage: React.FC = () => {
       const tagIdMap: Record<string, string> = {};
       const tagNameMap: Record<string, string> = {};
       for (const tag of (payload.tags || [])) {
+        if (cancelImportRef.current) break;
         try {
           const res = await api.post('/tags', { name: tag.name, color: tag.color });
           if (res.data?.data?.id) {
@@ -385,6 +418,7 @@ export const SettingsPage: React.FC = () => {
       // 3. Import and map watchlists
       const watchlistIdMap: Record<string, string> = {};
       for (const wl of (payload.watchlists || [])) {
+        if (cancelImportRef.current) break;
         try {
           const res = await api.post('/watchlists', {
             name: wl.name,
@@ -405,7 +439,33 @@ export const SettingsPage: React.FC = () => {
 
       // 4. Import movies with all customized posters, backdrops, overrides & streaming sources
       let importedCount = 0;
-      for (const movie of (payload.movies || [])) {
+      const moviesList: any[] = payload.movies || [];
+
+      for (let i = 0; i < moviesList.length; i++) {
+        if (cancelImportRef.current) {
+          setImportProgress(prev => ({
+            ...prev,
+            status: 'cancelled',
+            stage: 'Import paused by user',
+            current: importedCount,
+            successMessage: `Import paused. Successfully restored ${importedCount} of ${totalMovies} titles before cancellation.`,
+          }));
+          break;
+        }
+
+        const movie = moviesList[i];
+        const movieTitle = movie.custom_title || movie.title || `Movie #${i + 1}`;
+        const posterToRestore = movie.custom_poster_url || (movie.poster_path?.startsWith('http') ? movie.poster_path : null);
+        const backdropToRestore = movie.custom_backdrop_url || (movie.backdrop_path?.startsWith('http') ? movie.backdrop_path : null);
+
+        setImportProgress(prev => ({
+          ...prev,
+          current: importedCount,
+          stage: `Restoring ${i + 1} of ${totalMovies}: ${movieTitle}`,
+          currentTitle: movieTitle,
+          currentPoster: posterToRestore,
+        }));
+
         try {
           const tmdbId = movie.tmdb_id || movie.id;
           const mediaType = movie.media_type || 'movie';
@@ -423,16 +483,12 @@ export const SettingsPage: React.FC = () => {
             });
             userMovieId = addRes.data?.data?.user_movie_id || addRes.data?.data?.id;
           } catch {
-            // Already in library, query list to find userMovieId
             const listRes = await api.get('/movies?limit=9999');
             const found = (listRes.data?.data?.movies || []).find((m: any) => m.tmdb_id === tmdbId);
             if (found) userMovieId = found.user_movie_id;
           }
 
           if (userMovieId) {
-            const posterToRestore = movie.custom_poster_url || (movie.poster_path?.startsWith('http') ? movie.poster_path : null);
-            const backdropToRestore = movie.custom_backdrop_url || (movie.backdrop_path?.startsWith('http') ? movie.backdrop_path : null);
-
             // 1. Restore all custom overrides (poster, backdrop, title, overview, director, runtime, etc.)
             await api.patch(`/movies/${userMovieId}`, {
               custom_title: movie.custom_title || null,
@@ -474,9 +530,7 @@ export const SettingsPage: React.FC = () => {
                     fileName: src.file_name,
                     quality: src.quality || '4K UHD',
                   });
-                } catch {
-                  // Source may already exist
-                }
+                } catch {}
               }
             }
 
@@ -512,6 +566,10 @@ export const SettingsPage: React.FC = () => {
           }
 
           importedCount++;
+          setImportProgress(prev => ({
+            ...prev,
+            current: importedCount,
+          }));
         } catch { /* ignore individual movie error */ }
       }
 
@@ -520,11 +578,28 @@ export const SettingsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['genres'] });
       queryClient.invalidateQueries({ queryKey: ['tags'] });
       queryClient.invalidateQueries({ queryKey: ['home'] });
+
+      if (!cancelImportRef.current) {
+        setImportProgress(prev => ({
+          ...prev,
+          status: 'completed',
+          current: importedCount,
+          stage: 'All titles restored successfully!',
+          successMessage: `Full sanctuary restore complete! ${importedCount} titles with custom posters, backdrops, metadata, OTT links, and progress successfully restored.`,
+        }));
+      }
+
       setImportMsg({
         type: 'success',
         text: `Full sanctuary restore complete! ${importedCount} titles with custom posters, backdrops, metadata, OTT links, and progress successfully restored.`
       });
     } catch (err: any) {
+      setImportProgress(prev => ({
+        ...prev,
+        status: 'error',
+        stage: 'Import error',
+        errorMessage: err.message || 'Import failed. Please check the file format.',
+      }));
       setImportMsg({ type: 'error', text: err.message || 'Import failed. Please check the file format.' });
     } finally {
       setImportLoading(false);
@@ -1301,6 +1376,20 @@ export const SettingsPage: React.FC = () => {
             ? `Are you sure you want to delete the custom genre "${genreToDelete.name}"?`
             : ''
         }
+      />
+
+      {/* Progressive Import & Restore Progress Modal */}
+      <ImportProgressModal
+        state={importProgress}
+        onCancel={() => {
+          cancelImportRef.current = true;
+          setImportProgress(prev => ({ ...prev, status: 'cancelling' }));
+        }}
+        onClose={() => setImportProgress(prev => ({ ...prev, isOpen: false }))}
+        onViewLibrary={() => {
+          setImportProgress(prev => ({ ...prev, isOpen: false }));
+          navigate('/movies');
+        }}
       />
     </Box>
   );
