@@ -1,0 +1,50 @@
+:root {
+  /* Brand Palette */
+  --color-bg-base: #07090E;
+  --color-bg-surface: #0B0F19;
+  --color-bg-elevated: #0F1423;
+  --color-bg-card: #111827;
+  --color-bg-overlay: rgba(7, 9, 14, 0.85);
+
+  /* Accent Colors */
+  --color-accent-gold: #E5A93C;
+  --color-accent-gold-hover: #F5C869;
+  --color-accent-gold-subtle: rgba(229, 169, 60, 0.14);
+  --color-accent-gold-border: rgba(229, 169, 60, 0.35);
+
+  --color-accent-cyan: #38BDF8;
+  --color-accent-cyan-subtle: rgba(56, 189, 248, 0.14);
+
+  --color-accent-purple: #A855F7;
+  --color-accent-purple-subtle: rgba(168, 85, 247, 0.16);
+
+  --color-accent-emerald: #10B981;
+  --color-accent-emerald-subtle: rgba(16, 185, 129, 0.16);
+
+  --color-accent-rose: #EF4444;
+  --color-accent-rose-subtle: rgba(239, 68, 68, 0.16);
+
+  /* Text Colors */
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+  --color-text-dim: #475569;
+
+  /* Border & Glass */
+  --border-subtle: 1px solid rgba(255, 255, 255, 0.08);
+  --border-medium: 1px solid rgba(255, 255, 255, 0.14);
+  --border-gold: 1px solid rgba(229, 169, 60, 0.35);
+  --glass-blur: blur(16px);
+  --glass-blur-deep: blur(24px);
+
+  /* Shadows */
+  --shadow-subtle: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-medium: 0 8px 32px rgba(0, 0, 0, 0.55);
+  --shadow-deep: 0 20px 50px rgba(0, 0, 0, 0.85);
+  --shadow-gold-glow: 0 0 20px rgba(229, 169, 60, 0.25);
+  --shadow-cyan-glow: 0 0 20px rgba(56, 189, 248, 0.25);
+
+  /* Typography */
+  --font-family-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
