@@ -26,6 +26,7 @@ import { MovieCard } from '../../components/common/MovieCard.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { formatRuntime } from '../../utils/formatters.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { isDriveSource } from '../../utils/googleDrive.js';
 import { getOttMeta } from '../../utils/ottProviders.js';
 import {
   MovieHero,
@@ -248,8 +249,9 @@ export const MovieDetailPage: React.FC = () => {
     .filter((m: any) => (m.genres || []).some((g: any) => currentGenres.has(g.name)))
     .slice(0, 6);
 
-  const ottSources = (movie.sources || []).filter((s: any) => s.source_type === 'ott');
-  const driveSource = (movie.sources || []).find((s: any) => s.source_type === 'google_drive');
+  const driveSource = (movie.sources || []).find((s: any) => isDriveSource(s));
+  const youtubeSource = (movie.sources || []).find((s: any) => isYouTubeSource(s));
+  const ottSources = (movie.sources || []).filter((s: any) => !isDriveSource(s) && !isYouTubeSource(s));
   const primaryOttSource = ottSources[0] || null;
   const hasMultipleSources = (movie.sources || []).length > 1;
 
@@ -270,14 +272,12 @@ export const MovieDetailPage: React.FC = () => {
   const handlePlayMovie = () => {
     if (hasMultipleSources) {
       setSelectSourceOpen(true);
-    } else if (primaryOttSource) {
-      if (isYouTubeSource(primaryOttSource)) {
-        openPlayer(movie, primaryOttSource);
-      } else {
-        window.open(resolveOttUrl(primaryOttSource), '_blank', 'noopener,noreferrer');
-      }
     } else if (driveSource) {
       openPlayer(movie, driveSource);
+    } else if (youtubeSource) {
+      openPlayer(movie, youtubeSource);
+    } else if (primaryOttSource) {
+      window.open(resolveOttUrl(primaryOttSource), '_blank', 'noopener,noreferrer');
     } else if (movie.trailer_url) {
       openPlayer(movie);
     } else {
@@ -303,7 +303,7 @@ export const MovieDetailPage: React.FC = () => {
 
     const resetMovie = { ...movie, playback_position_sec: 0, watch_status: 'unwatched' as const };
     const chosen =
-      (movie.sources || []).find((s: any) => s.source_type === 'google_drive' || isYouTubeSource(s)) ||
+      (movie.sources || []).find((s: any) => isDriveSource(s) || isYouTubeSource(s)) ||
       (movie.sources && movie.sources[0]) ||
       null;
     openPlayer(resetMovie, chosen || undefined);
@@ -324,7 +324,6 @@ export const MovieDetailPage: React.FC = () => {
           sx={{
             color: '#94A3B8',
             backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
             backdropFilter: 'blur(8px)',
             px: 2,
             py: 0.75,
@@ -350,7 +349,7 @@ export const MovieDetailPage: React.FC = () => {
         movie={movie}
         posterUrl={posterUrl}
         backdropUrl={backdropUrl}
-        ottSources={ottSources}
+        ottSources={movie.sources || []}
         isResumable={isResumable}
         onPlay={handlePlayMovie}
         onStartOver={handleStartOver}
@@ -482,7 +481,7 @@ export const MovieDetailPage: React.FC = () => {
             onOpenManageSources={() => setManageSourcesOpen(true)}
             onOpenEditModal={() => setEditModalOpen(true)}
             onPlaySource={(src) => {
-              if (isYouTubeSource(src)) {
+              if (isDriveSource(src) || isYouTubeSource(src)) {
                 openPlayer(movie, src);
               } else if (src.source_type === 'ott') {
                 window.open(resolveOttUrl(src), '_blank', 'noopener,noreferrer');
@@ -552,7 +551,7 @@ export const MovieDetailPage: React.FC = () => {
         onClose={() => setSelectSourceOpen(false)}
         movie={movie}
         onLaunchSource={(src) => {
-          if (isYouTubeSource(src)) {
+          if (isDriveSource(src) || isYouTubeSource(src)) {
             openPlayer(movie, src);
           } else if (src.source_type === 'ott' && src.external_url) {
             window.open(src.external_url, '_blank', 'noopener,noreferrer');

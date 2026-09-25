@@ -24,6 +24,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import { UserMovie, MovieSource } from '../../../types/index.js';
 import { OttBadge, getOttMeta } from '../../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../../utils/youtube.js';
+import { isDriveSource } from '../../../utils/googleDrive.js';
 import { StatusChip } from '../../../components/ui/index.js';
 
 export interface MovieHeroProps {
@@ -178,7 +179,7 @@ export const MovieHero: React.FC<MovieHeroProps> = ({
                   sx={{ backgroundColor: 'rgba(229, 169, 60, 0.2)', color: '#E5A93C', fontWeight: 600 }}
                 />
               )}
-              {/* Linked OTT Badges */}
+              {/* Linked OTT / Streaming Badges */}
               {ottSources.map((s) => (
                 <OttBadge
                   key={s.id}
@@ -187,7 +188,7 @@ export const MovieHero: React.FC<MovieHeroProps> = ({
                   size="medium"
                   interactive
                   onClick={() => {
-                    if (isYouTubeSource(s)) {
+                    if (isYouTubeSource(s) || isDriveSource(s)) {
                       onPlay();
                     } else {
                       window.open(resolveOttUrl(s), '_blank', 'noopener,noreferrer');

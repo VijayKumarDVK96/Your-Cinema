@@ -4,7 +4,152 @@ import { MoviesService } from '../movies/movies.service.js';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
 import { BadRequestError } from '../../utils/errors.js';
 
+const mediaInfoCache = new Map<string, { audioTracks: any[]; subtitleTracks: any[]; timestamp: number }>();
+const subtitleCache = new Map<string, string>();
+
 export class SourcesController {
+  static async getDriveMediaInfo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rawParam = req.params.fileId || (req.query.fileId as string) || '';
+      const fileId = extractDriveFileId(decodeURIComponent(rawParam));
+      if (!fileId) throw new BadRequestError('Drive file ID is required');
+
+      const cached = mediaInfoCache.get(fileId);
+      if (cached && Date.now() - cached.timestamp < 3600000) {
+        return sendSuccess(res, { audioTracks: cached.audioTracks, subtitleTracks: cached.subtitleTracks });
+      }
+
+      const directUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+      const { spawn } = await import('child_process');
+
+      const ffprobeProc = spawn('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title:format_tags=title',
+        '-of', 'json',
+        directUrl,
+      ]);
+
+      let stdout = '';
+      ffprobeProc.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+
+      const timeout = setTimeout(() => {
+        try { ffprobeProc.kill(); } catch {}
+      }, 15000);
+
+      ffprobeProc.on('close', (code) => {
+        clearTimeout(timeout);
+        try {
+          const parsed = JSON.parse(stdout || '{}');
+          const streams: any[] = parsed.streams || [];
+
+          const audioTracks = streams
+            .filter((s) => s.codec_type === 'audio')
+            .map((s, idx) => {
+              const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+              const title = s.tags?.title || s.tags?.TITLE || '';
+              const label = title || (lang ? `${lang.toUpperCase()} (${s.codec_name || 'audio'})` : `Audio Track ${idx + 1}`);
+              return {
+                id: `audio-${s.index}`,
+                index: s.index,
+                label,
+                language: lang || 'und',
+                codec: s.codec_name,
+                selected: idx === 0,
+              };
+            });
+
+          const subtitleTracks = streams
+            .filter((s) => s.codec_type === 'subtitle')
+            .map((s, idx) => {
+              const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+              const title = s.tags?.title || s.tags?.TITLE || '';
+              const label = title || (lang ? `${lang.toUpperCase()} Subtitles` : `Subtitle Track ${idx + 1}`);
+              return {
+                id: `sub-${s.index}`,
+                index: idx,
+                streamIndex: s.index,
+                label,
+                language: lang || 'en',
+                src: `/api/sources/drive/${fileId}/subtitles/${idx}`,
+                default: idx === 0,
+              };
+            });
+
+          mediaInfoCache.set(fileId, { audioTracks, subtitleTracks, timestamp: Date.now() });
+          return sendSuccess(res, { audioTracks, subtitleTracks });
+        } catch {
+          return sendSuccess(res, { audioTracks: [], subtitleTracks: [] });
+        }
+      });
+
+      ffprobeProc.on('error', () => {
+        clearTimeout(timeout);
+        return sendSuccess(res, { audioTracks: [], subtitleTracks: [] });
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getDriveSubtitleTrack(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rawParam = req.params.fileId || '';
+      const fileId = extractDriveFileId(decodeURIComponent(rawParam));
+      const trackIndex = parseInt(req.params.trackIndex || '0', 10);
+      if (!fileId) throw new BadRequestError('Drive file ID is required');
+
+      const cacheKey = `${fileId}_${trackIndex}`;
+      const cached = subtitleCache.get(cacheKey);
+      if (cached) {
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(cached);
+      }
+
+      const directUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+      const { spawn } = await import('child_process');
+
+      const ffmpegProc = spawn('ffmpeg', [
+        '-v', 'error',
+        '-i', directUrl,
+        '-map', `0:s:${trackIndex}`,
+        '-f', 'webvtt',
+        '-',
+      ]);
+
+      let output = '';
+      ffmpegProc.stdout.on('data', (chunk) => {
+        output += chunk.toString();
+      });
+
+      const timeout = setTimeout(() => {
+        try { ffmpegProc.kill(); } catch {}
+      }, 30000);
+
+      ffmpegProc.on('close', (code) => {
+        clearTimeout(timeout);
+        if (output && output.startsWith('WEBVTT')) {
+          subtitleCache.set(cacheKey, output);
+          res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.send(output);
+        }
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        return res.send('WEBVTT\n\n');
+      });
+
+      ffmpegProc.on('error', () => {
+        clearTimeout(timeout);
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        return res.send('WEBVTT\n\n');
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async streamDrive(req: Request, res: Response, next: NextFunction) {
     try {
       const rawParam = req.params.fileId || req.params[0] || (req.query.fileId as string) || req.url || '';
@@ -44,13 +189,17 @@ export class SourcesController {
       forwardHeaders.forEach((h) => {
         const val = driveRes.headers.get(h);
         if (val) {
-          if (h === 'content-type' && val.includes('octet-stream')) {
-            res.setHeader('Content-Type', 'video/mp4');
+          if (h === 'content-type' && (val.includes('octet-stream') || val.includes('text/plain'))) {
+            res.setHeader('Content-Type', 'video/x-matroska');
           } else {
             res.setHeader(h, val);
           }
         }
       });
+
+      if (!res.getHeader('Content-Type')) {
+        res.setHeader('Content-Type', 'video/x-matroska');
+      }
 
       if (!driveRes.headers.get('accept-ranges')) {
         res.setHeader('Accept-Ranges', 'bytes');

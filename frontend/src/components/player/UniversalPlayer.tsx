@@ -11,32 +11,62 @@ import {
   Tooltip,
   TextField,
   ButtonGroup,
-  Slider,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import MovieIcon from '@mui/icons-material/Movie';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CheckIcon from '@mui/icons-material/Check';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import BookmarkIcon from '@mui/icons-material/Bookmark';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
-import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+
+import '@vidstack/react/player/styles/default/theme.css';
+import '@vidstack/react/player/styles/default/layouts/video.css';
+import {
+  MediaPlayer,
+  MediaProvider,
+  Track,
+  type MediaPlayerInstance,
+} from '@vidstack/react';
+import {
+  defaultLayoutIcons,
+  DefaultVideoLayout,
+} from '@vidstack/react/player/layouts/default';
+
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { api } from '../../api/client.js';
 import { getOttMeta, OttBadge } from '../../utils/ottProviders.js';
-import { extractDriveFileId, getDrivePreviewUrl, getDriveViewUrl } from '../../utils/googleDrive.js';
+import { extractDriveFileId, getDrivePreviewUrl, getDriveViewUrl, isDriveSource } from '../../utils/googleDrive.js';
 import { extractYouTubeId, getYouTubeEmbedUrl, isYouTubeSource } from '../../utils/youtube.js';
 
 declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady: any;
-    webkitAudioContext: typeof AudioContext;
   }
+}
+
+interface AudioTrackInfo {
+  id: string;
+  label: string;
+  language: string;
+  selected: boolean;
+}
+
+interface SubtitleTrackInfo {
+  id: string;
+  index: number;
+  label: string;
+  language: string;
+  src: string;
+  default: boolean;
 }
 
 const formatPlaybackTime = (totalSeconds: number = 0): string => {
@@ -85,63 +115,49 @@ export const UniversalPlayer: React.FC = () => {
   const queryClient = useQueryClient();
 
   const initialSec = activeMovie?.playback_position_sec || 0;
-  const [currentSec, setCurrentSec] = useState<number>(initialSec);
   const currentSecRef = useRef<number>(initialSec);
+  const initialSeekDoneRef = useRef<boolean>(false);
   const [playerKey, setPlayerKey] = useState<number>(0);
   const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
   const [timeInputValue, setTimeInputValue] = useState<string>('');
-  
-  // Default to 'stream' (Direct HTML5) so video resumes playback automatically at the exact saved position
-  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>(() => {
+
+  // Audio track management
+  const [audioTracks, setAudioTracks] = useState<AudioTrackInfo[]>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState<string>('');
+  const [audioMenuAnchor, setAudioMenuAnchor] = useState<null | HTMLElement>(null);
+  const [embeddedSubtitles, setEmbeddedSubtitles] = useState<SubtitleTrackInfo[]>([]);
+
+  // Default to Google Drive built-in player ('iframe') for native CC subtitles & audio tracks
+  const [driveMode, setDriveMode] = useState<'iframe' | 'stream'>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_drive_mode');
       if (saved === 'stream' || saved === 'iframe') return saved;
     } catch {}
-    return 'stream';
+    return 'iframe';
   });
 
-  const [audioBoost, setAudioBoost] = useState<number>(100);
-  const [showBoostMenu, setShowBoostMenu] = useState<boolean>(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const mediaSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
-
-  const handleSetDriveMode = (mode: 'stream' | 'iframe') => {
+  const handleSetDriveMode = (mode: 'iframe' | 'stream') => {
     setDriveMode(mode);
     try {
       localStorage.setItem('yourcinema_drive_mode', mode);
     } catch {}
   };
 
-  const handleApplyAudioGain = (gainPercent: number) => {
-    try {
-      if (!videoRef.current) return;
-      if (!audioCtxRef.current) {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextClass) {
-          audioCtxRef.current = new AudioContextClass();
-          gainNodeRef.current = audioCtxRef.current.createGain();
-          mediaSourceNodeRef.current = audioCtxRef.current.createMediaElementSource(videoRef.current);
-          mediaSourceNodeRef.current.connect(gainNodeRef.current);
-          gainNodeRef.current.connect(audioCtxRef.current.destination);
-        }
-      }
-      if (audioCtxRef.current?.state === 'suspended') {
-        audioCtxRef.current.resume();
-      }
-      if (gainNodeRef.current) {
-        gainNodeRef.current.gain.value = gainPercent / 100;
-      }
-      setAudioBoost(gainPercent);
-    } catch (e) {
-      // AudioContext connection might fail if user hasn't interacted or cross-origin restrictions apply
-    }
-  };
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const vidstackPlayerRef = useRef<MediaPlayerInstance>(null);
   const ytPlayerRef = useRef<any>(null);
 
   const runtimeSec = Math.max((activeMovie?.runtime || 120) * 60, 600);
+
+  // Reset seek and track states when a new movie/session opens
+  useEffect(() => {
+    if (isOpen) {
+      initialSeekDoneRef.current = false;
+      currentSecRef.current = initialSec;
+      setAudioTracks([]);
+      setSelectedAudioId('');
+      setEmbeddedSubtitles([]);
+    }
+  }, [isOpen, activeMovie?.user_movie_id, initialSec]);
 
   // Fetch latest exact progress from database on mount / movie open
   useEffect(() => {
@@ -153,13 +169,12 @@ export const UniversalPlayer: React.FC = () => {
         if (!isSubscribed) return;
         const p = res.data?.data?.last_played_position_sec;
         if (typeof p === 'number' && p > 0) {
-          setCurrentSec(p);
           currentSecRef.current = p;
-          if (videoRef.current && Math.abs(videoRef.current.currentTime - p) > 3) {
-            videoRef.current.currentTime = p;
-          }
-          if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
-            ytPlayerRef.current.seekTo(p, true);
+          if (vidstackPlayerRef.current && !initialSeekDoneRef.current) {
+            try {
+              vidstackPlayerRef.current.currentTime = p;
+              initialSeekDoneRef.current = true;
+            } catch {}
           }
         }
       })
@@ -170,12 +185,12 @@ export const UniversalPlayer: React.FC = () => {
     };
   }, [isOpen, activeMovie?.user_movie_id]);
 
-  const isDrive = activeSource?.source_type === 'google_drive';
+  const isDrive = isDriveSource(activeSource);
   const isYouTube =
     activeSource?.source_type === 'youtube' ||
     isYouTubeSource(activeSource) ||
     (!activeSource && Boolean(activeMovie?.trailer_url));
-  const isOtt = activeSource?.source_type === 'ott' && !isYouTube;
+  const isOtt = activeSource?.source_type === 'ott' && !isYouTube && !isDrive;
   const ottMeta = isOtt && activeSource ? getOttMeta(activeSource.provider_name, activeSource.provider_icon) : null;
 
   // Google Drive URLs
@@ -186,27 +201,30 @@ export const UniversalPlayer: React.FC = () => {
   const driveEmbedSrc = drivePreviewUrl ? `${drivePreviewUrl}?autoplay=1` : '';
   const driveViewUrl = driveFileId ? getDriveViewUrl(driveFileId) : null;
 
-  // Robust seek effect to resume HTML5 video at the exact saved position
+  // Fetch embedded audio tracks and subtitles from backend ffprobe
   useEffect(() => {
-    if (!isOpen || !isDrive || driveMode !== 'stream') return;
-    const target = currentSecRef.current || initialSec;
-    if (target > 0) {
-      const timers = [150, 400, 800, 1500].map((delay) =>
-        setTimeout(() => {
-          if (videoRef.current && videoRef.current.readyState >= 1) {
-            try {
-              if (Math.abs(videoRef.current.currentTime - target) > 2) {
-                videoRef.current.currentTime = target;
-              }
-            } catch (e) {}
-          }
-        }, delay)
-      );
-      return () => {
-        timers.forEach(clearTimeout);
-      };
-    }
-  }, [isOpen, isDrive, driveMode, activeMovie?.user_movie_id, playerKey]);
+    if (!isOpen || !isDrive || !driveFileId) return;
+    let isSubscribed = true;
+
+    api.get(`/sources/drive/${driveFileId}/media-info`)
+      .then((res) => {
+        if (!isSubscribed) return;
+        const data = res.data?.data;
+        if (data?.audioTracks && data.audioTracks.length > 0) {
+          setAudioTracks(data.audioTracks);
+          const active = data.audioTracks.find((t: any) => t.selected) || data.audioTracks[0];
+          if (active) setSelectedAudioId(active.id);
+        }
+        if (data?.subtitleTracks && data.subtitleTracks.length > 0) {
+          setEmbeddedSubtitles(data.subtitleTracks);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [isOpen, isDrive, driveFileId]);
 
   // Save playback progress to backend
   const saveProgress = useCallback(
@@ -231,19 +249,61 @@ export const UniversalPlayer: React.FC = () => {
     [activeMovie, activeSource, queryClient]
   );
 
-  // Mount YouTube IFrame API Player for accurate forward/rewind scrubbing tracking
+  // Synchronize audio tracks from player instance
+  const syncMediaTracks = useCallback(() => {
+    const player = vidstackPlayerRef.current;
+    if (!player) return;
+
+    try {
+      const aTracks: any[] = Array.from(player.audioTracks || []).filter(Boolean);
+      if (aTracks.length > 0) {
+        const mappedAudio: AudioTrackInfo[] = aTracks.map((t: any, idx: number) => ({
+          id: t?.id || `audio-${idx}`,
+          label: t?.label || t?.language || `Track ${idx + 1}`,
+          language: t?.language || '',
+          selected: Boolean(t?.selected),
+        }));
+        setAudioTracks(mappedAudio);
+        const active = mappedAudio.find((t) => t.selected) || mappedAudio[0];
+        if (active) setSelectedAudioId(active.id);
+      }
+    } catch {}
+  }, []);
+
+  // Handle switching audio track
+  const handleSelectAudioTrack = (trackId: string) => {
+    setSelectedAudioId(trackId);
+    setAudioMenuAnchor(null);
+    if (driveMode === 'iframe') {
+      handleSetDriveMode('stream');
+    }
+    const player = vidstackPlayerRef.current;
+    if (player) {
+      try {
+        const tracks: any[] = Array.from(player.audioTracks || []).filter(Boolean);
+        tracks.forEach((t: any, idx: number) => {
+          if (!t) return;
+          const id = t.id || `audio-${idx}`;
+          t.selected = id === trackId;
+        });
+      } catch {}
+      setTimeout(syncMediaTracks, 60);
+    }
+  };
+
+  // YouTube IDs and embed URLs
   const ytRawUrl = activeSource?.external_url || activeMovie?.trailer_url || '';
   const ytId = extractYouTubeId(ytRawUrl);
   const ytEmbedUrl = ytId ? getYouTubeEmbedUrl(ytId, initialSec) : null;
   const ytContainerId = activeMovie ? `yt-embed-player-${activeMovie.user_movie_id}` : 'yt-embed-player';
 
+  // YouTube integration if YouTube source
   useEffect(() => {
     if (!isOpen || !isYouTube || !ytId) return;
 
     let isSubscribed = true;
     let checkInterval: any = null;
 
-    // Dynamically ensure YouTube API script is loaded
     if (typeof window !== 'undefined' && !window.YT) {
       if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
         const tag = document.createElement('script');
@@ -283,7 +343,6 @@ export const UniversalPlayer: React.FC = () => {
               try {
                 const cur = event.target.getCurrentTime();
                 if (typeof cur === 'number' && !isNaN(cur)) {
-                  setCurrentSec(Math.floor(cur));
                   currentSecRef.current = Math.floor(cur);
                 }
               } catch (e) {}
@@ -330,76 +389,58 @@ export const UniversalPlayer: React.FC = () => {
     }
   }, [isOpen, isYouTube, ytId, ytContainerId, playerKey]);
 
-  // Periodic timer for YouTube iframe API real-time tracking
+  // Periodic timer for backend sync
   useEffect(() => {
     if (!isOpen || !activeMovie) return;
-
-    const pollTimer = setInterval(() => {
-      if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
-        try {
-          const t = ytPlayerRef.current.getCurrentTime();
-          if (typeof t === 'number' && !isNaN(t) && t >= 0) {
-            setCurrentSec(Math.floor(t));
-            currentSecRef.current = Math.floor(t);
-          }
-        } catch (e) {}
-      } else if (isDrive && videoRef.current && !isNaN(videoRef.current.currentTime)) {
-        const t = Math.floor(videoRef.current.currentTime);
-        if (t >= 0 && t !== currentSecRef.current) {
-          setCurrentSec(t);
-          currentSecRef.current = t;
-        }
-      }
-    }, 1000);
 
     const saveTimer = setInterval(() => {
       if (currentSecRef.current > 0) {
         saveProgress(currentSecRef.current, false);
       }
-    }, 5000);
+    }, 8000);
 
     return () => {
-      clearInterval(pollTimer);
       clearInterval(saveTimer);
     };
-  }, [isOpen, activeMovie, isDrive, isYouTube, saveProgress]);
+  }, [isOpen, activeMovie, saveProgress]);
 
   if (!isOpen || !activeMovie) return null;
 
   // Handle closing player and persisting latest position
   const handleClose = () => {
-    if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
-      try {
+    try {
+      if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
         const t = ytPlayerRef.current.getCurrentTime();
         if (typeof t === 'number' && !isNaN(t) && t >= 0) {
           saveProgress(Math.floor(t), false);
         }
-      } catch (e) {}
-    } else if (isDrive && videoRef.current && !isNaN(videoRef.current.currentTime) && videoRef.current.currentTime > 0) {
-      saveProgress(Math.floor(videoRef.current.currentTime), false);
-    } else if (currentSecRef.current > 0) {
-      saveProgress(currentSecRef.current, false);
+      } else if (currentSecRef.current > 0) {
+        saveProgress(currentSecRef.current, false);
+      }
+    } catch (e) {
+      // Ignore save error on close
     }
 
-    if (ytPlayerRef.current) {
-      try {
+    try {
+      if (ytPlayerRef.current) {
         ytPlayerRef.current.destroy();
-      } catch (e) {}
-      ytPlayerRef.current = null;
-    }
+      }
+    } catch (e) {}
+    ytPlayerRef.current = null;
+
     setIsEditingTime(false);
+    setAudioMenuAnchor(null);
     closePlayer();
   };
 
-  // Save manual timestamp input for Google Drive
+  // Save manual timestamp input
   const handleSaveTimeInput = () => {
     const parsed = parsePlaybackInput(timeInputValue);
     if (parsed !== null && parsed >= 0) {
-      setCurrentSec(parsed);
       currentSecRef.current = parsed;
       saveProgress(parsed, false);
-      if (videoRef.current) {
-        videoRef.current.currentTime = parsed;
+      if (vidstackPlayerRef.current) {
+        vidstackPlayerRef.current.currentTime = parsed;
       }
       setIsEditingTime(false);
     }
@@ -407,7 +448,6 @@ export const UniversalPlayer: React.FC = () => {
 
   // Start Over handler
   const handleStartOver = () => {
-    setCurrentSec(0);
     currentSecRef.current = 0;
     saveProgress(0, false);
     setIsEditingTime(false);
@@ -416,9 +456,9 @@ export const UniversalPlayer: React.FC = () => {
         ytPlayerRef.current.seekTo(0, true);
         ytPlayerRef.current.playVideo();
       } catch (e) {}
-    } else if (isDrive && videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(() => {});
+    } else if (vidstackPlayerRef.current) {
+      vidstackPlayerRef.current.currentTime = 0;
+      vidstackPlayerRef.current.play().catch(() => {});
     } else {
       setPlayerKey((k) => k + 1);
     }
@@ -426,10 +466,13 @@ export const UniversalPlayer: React.FC = () => {
 
   // Mark Finished handler
   const handleMarkFinished = () => {
-    setCurrentSec(runtimeSec);
     currentSecRef.current = runtimeSec;
     saveProgress(runtimeSec, true);
   };
+
+  const activeAudioLabel =
+    audioTracks.find((t) => t.id === selectedAudioId)?.label ||
+    (audioTracks.length > 0 ? audioTracks[0].label : 'Default Audio');
 
   return (
     <Dialog
@@ -457,9 +500,13 @@ export const UniversalPlayer: React.FC = () => {
           )}
           {isDrive && (
             <Chip
-              label="Google Drive Stream"
+              label={driveMode === 'iframe' ? 'Google Drive Player' : 'Vidstack HD Stream'}
               size="small"
-              sx={{ backgroundColor: 'rgba(15, 157, 88, 0.2)', color: '#0F9D58', fontWeight: 700 }}
+              sx={{
+                backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.2)',
+                color: driveMode === 'iframe' ? '#34D399' : '#38BDF8',
+                fontWeight: 700,
+              }}
             />
           )}
           {isYouTube && (
@@ -471,19 +518,34 @@ export const UniversalPlayer: React.FC = () => {
             />
           )}
         </Box>
-        <IconButton onClick={handleClose} sx={{ color: '#94A3B8', '&:hover': { color: '#FFF' } }}>
+        <IconButton
+          onClick={handleClose}
+          sx={{
+            color: '#94A3B8',
+            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            '&:hover': { color: '#FFF', backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+            p: 1,
+          }}
+          aria-label="Close"
+        >
           <CloseIcon />
         </IconButton>
       </Box>
 
-      {/* Clean Single Status & Action Bar (Zero Duplicate Controls) */}
+      {/* Single Status & Action Bar */}
       {(isDrive || isYouTube) && (
         <Box
           sx={{
             px: 2,
             py: 1,
-            backgroundColor: isDrive ? 'rgba(15, 157, 88, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-            borderBottom: `1px solid ${isDrive ? 'rgba(15, 157, 88, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+            backgroundColor: isDrive
+              ? (driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.08)' : 'rgba(56, 189, 248, 0.08)')
+              : 'rgba(239, 68, 68, 0.12)',
+            borderBottom: `1px solid ${
+              isDrive
+                ? (driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.2)')
+                : 'rgba(239, 68, 68, 0.25)'
+            }`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -495,14 +557,18 @@ export const UniversalPlayer: React.FC = () => {
             <Typography
               variant="caption"
               sx={{
-                color: isDrive ? '#0F9D58' : '#F87171',
+                color: isDrive
+                  ? (driveMode === 'iframe' ? '#34D399' : '#38BDF8')
+                  : '#F87171',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 0.5,
               }}
             >
-              ▶ {isDrive ? 'Google Drive Stream' : (activeSource?.source_type === 'youtube' ? 'YouTube Stream' : 'Official Trailer')}
+              ▶ {isDrive
+                ? (driveMode === 'iframe' ? 'Google Drive Player (Default CC Subtitles & Audio)' : 'Vidstack Direct Stream')
+                : (activeSource?.source_type === 'youtube' ? 'YouTube Stream' : 'Official Trailer')}
             </Typography>
 
             <Chip
@@ -517,13 +583,7 @@ export const UniversalPlayer: React.FC = () => {
               }}
             />
 
-            {isYouTube && (
-              <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                Position: <span style={{ color: '#38BDF8', fontWeight: 700 }}>{formatPlaybackTime(currentSec)}</span> / {formatPlaybackTime(runtimeSec)}
-              </Typography>
-            )}
-
-            {isDrive && (
+            {isDrive && driveMode === 'stream' && (
               <>
                 {isEditingTime ? (
                   <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.8 }}>
@@ -542,7 +602,7 @@ export const UniversalPlayer: React.FC = () => {
                         '& .MuiInputBase-input': { py: 0.3, px: 1, fontSize: '11px', color: '#FFF' },
                         '& .MuiOutlinedInput-root': {
                           backgroundColor: 'rgba(255,255,255,0.08)',
-                          '& fieldset': { borderColor: 'rgba(15, 157, 88, 0.6)' },
+                          '& fieldset': { borderColor: 'rgba(56, 189, 248, 0.6)' },
                         },
                       }}
                     />
@@ -550,7 +610,7 @@ export const UniversalPlayer: React.FC = () => {
                       size="small"
                       variant="contained"
                       onClick={handleSaveTimeInput}
-                      sx={{ minWidth: 'auto', py: 0.2, px: 1.2, fontSize: '11px', backgroundColor: '#0F9D58', textTransform: 'none', fontWeight: 700 }}
+                      sx={{ minWidth: 'auto', py: 0.2, px: 1.2, fontSize: '11px', backgroundColor: '#0284C7', textTransform: 'none', fontWeight: 700 }}
                     >
                       Save
                     </Button>
@@ -564,27 +624,28 @@ export const UniversalPlayer: React.FC = () => {
                     </Button>
                   </Box>
                 ) : (
-                  <Tooltip title="Save your stopping point so you can resume next time">
+                  <Tooltip title="Save or adjust playback timestamp">
                     <Button
                       size="small"
                       variant="outlined"
                       onClick={() => {
-                        setTimeInputValue(currentSec > 0 ? formatPlaybackTime(currentSec) : '');
+                        const cur = vidstackPlayerRef.current?.currentTime || currentSecRef.current;
+                        setTimeInputValue(cur > 0 ? formatPlaybackTime(cur) : '');
                         setIsEditingTime(true);
                       }}
-                      startIcon={<BookmarkIcon sx={{ fontSize: '13px !important', color: '#0F9D58' }} />}
+                      startIcon={<BookmarkIcon sx={{ fontSize: '13px !important', color: '#38BDF8' }} />}
                       sx={{
-                        borderColor: 'rgba(15, 157, 88, 0.4)',
+                        borderColor: 'rgba(56, 189, 248, 0.4)',
                         color: '#E2E8F0',
                         fontSize: '11px',
                         fontWeight: 600,
                         py: 0.2,
                         px: 1.2,
                         textTransform: 'none',
-                        '&:hover': { borderColor: '#0F9D58', backgroundColor: 'rgba(15, 157, 88, 0.1)' },
+                        '&:hover': { borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)' },
                       }}
                     >
-                      {currentSec > 0 ? `Saved Spot: ${formatPlaybackTime(currentSec)}` : 'Save Spot'}
+                      Set Spot
                     </Button>
                   </Tooltip>
                 )}
@@ -592,8 +653,69 @@ export const UniversalPlayer: React.FC = () => {
             )}
           </Box>
 
-          {/* Quick Actions (No Duplicate Sliders or Buttons) */}
-          <Stack direction="row" spacing={1} alignItems="center">
+          {/* Action Buttons */}
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            {/* Audio Track Switcher for Drive movies */}
+            {isDrive && (
+              <>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={(e) => setAudioMenuAnchor(e.currentTarget)}
+                  startIcon={<VolumeUpIcon sx={{ fontSize: '14px !important', color: '#38BDF8' }} />}
+                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
+                  sx={{
+                    borderColor: 'rgba(56, 189, 248, 0.4)',
+                    color: '#E2E8F0',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    py: 0.2,
+                    px: 1.2,
+                    textTransform: 'none',
+                    '&:hover': { borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)' },
+                  }}
+                >
+                  Audio: {activeAudioLabel}
+                </Button>
+                <Menu
+                  anchorEl={audioMenuAnchor}
+                  open={Boolean(audioMenuAnchor)}
+                  onClose={() => setAudioMenuAnchor(null)}
+                  PaperProps={{
+                    sx: {
+                      backgroundColor: '#0F172A',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      color: '#FFF',
+                      minWidth: 170,
+                    },
+                  }}
+                >
+                  {audioTracks.length > 0 ? (
+                    audioTracks.map((track) => {
+                      const isSelected = track.id === selectedAudioId || (!selectedAudioId && track.selected);
+                      return (
+                        <MenuItem
+                          key={track.id}
+                          selected={isSelected}
+                          onClick={() => handleSelectAudioTrack(track.id)}
+                          sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 1 }}
+                        >
+                          <Typography variant="body2" sx={{ fontSize: '12px', color: isSelected ? '#38BDF8' : '#F8FAFC', fontWeight: isSelected ? 700 : 500 }}>
+                            {track.label || track.language || 'Audio Track'}
+                          </Typography>
+                          {isSelected && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
+                        </MenuItem>
+                      );
+                    })
+                  ) : (
+                    <MenuItem disabled sx={{ fontSize: '12px', color: '#94A3B8' }}>
+                      Default / Stereo Track
+                    </MenuItem>
+                  )}
+                </Menu>
+              </>
+            )}
+
             <Button
               size="small"
               variant="outlined"
@@ -634,7 +756,7 @@ export const UniversalPlayer: React.FC = () => {
 
             {isDrive && driveFileId && (
               <ButtonGroup size="small" variant="outlined" sx={{ backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 1.5 }}>
-                <Tooltip title="Uses Google Drive cloud-transcoding (plays AC3/EAC3/MKV audio with audible stereo sound)">
+                <Tooltip title="Google Drive Built-in Player (Supports embedded CC subtitles, audio & quality switcher)">
                   <Button
                     onClick={() => handleSetDriveMode('iframe')}
                     startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important' }} />}
@@ -642,19 +764,19 @@ export const UniversalPlayer: React.FC = () => {
                       fontSize: '11px',
                       textTransform: 'none',
                       fontWeight: driveMode === 'iframe' ? 700 : 500,
-                      backgroundColor: driveMode === 'iframe' ? 'rgba(15, 157, 88, 0.25)' : 'transparent',
+                      backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
                       color: driveMode === 'iframe' ? '#34D399' : '#94A3B8',
                       borderColor: driveMode === 'iframe' ? '#059669' : 'rgba(255,255,255,0.15)',
                       '&:hover': {
-                        backgroundColor: driveMode === 'iframe' ? 'rgba(15, 157, 88, 0.35)' : 'rgba(255,255,255,0.06)',
+                        backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.35)' : 'rgba(255,255,255,0.06)',
                         color: '#FFF',
                       },
                     }}
                   >
-                    Drive Preview (Audio)
+                    Drive Player (CC & Audio)
                   </Button>
                 </Tooltip>
-                <Tooltip title="Direct HTML5 raw video stream (supports range seek, but AC3 audio may be silent in browser)">
+                <Tooltip title="Direct HTML5 Stream Player">
                   <Button
                     onClick={() => handleSetDriveMode('stream')}
                     startIcon={<GraphicEqIcon sx={{ fontSize: '13px !important' }} />}
@@ -662,11 +784,11 @@ export const UniversalPlayer: React.FC = () => {
                       fontSize: '11px',
                       textTransform: 'none',
                       fontWeight: driveMode === 'stream' ? 700 : 500,
-                      backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                      backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
                       color: driveMode === 'stream' ? '#38BDF8' : '#94A3B8',
                       borderColor: driveMode === 'stream' ? '#0284C7' : 'rgba(255,255,255,0.15)',
                       '&:hover': {
-                        backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255,255,255,0.06)',
+                        backgroundColor: driveMode === 'stream' ? 'rgba(56, 189, 248, 0.35)' : 'rgba(255,255,255,0.06)',
                         color: '#FFF',
                       },
                     }}
@@ -675,31 +797,6 @@ export const UniversalPlayer: React.FC = () => {
                   </Button>
                 </Tooltip>
               </ButtonGroup>
-            )}
-
-            {isDrive && driveMode === 'stream' && (
-              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Tooltip title="Boost HTML5 audio volume">
-                  <Button
-                    size="small"
-                    variant="text"
-                    onClick={() => {
-                      const next = audioBoost === 100 ? 150 : audioBoost === 150 ? 200 : audioBoost === 200 ? 300 : 100;
-                      handleApplyAudioGain(next);
-                    }}
-                    startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important', color: audioBoost > 100 ? '#F59E0B' : '#94A3B8' }} />}
-                    sx={{
-                      fontSize: '11px',
-                      color: audioBoost > 100 ? '#F59E0B' : '#94A3B8',
-                      textTransform: 'none',
-                      py: 0.2,
-                      px: 0.8,
-                    }}
-                  >
-                    Boost {audioBoost}%
-                  </Button>
-                </Tooltip>
-              </Box>
             )}
 
             {isDrive && driveViewUrl && (
@@ -711,7 +808,7 @@ export const UniversalPlayer: React.FC = () => {
                 target="_blank"
                 rel="noopener noreferrer"
                 endIcon={<OpenInNewIcon sx={{ fontSize: '13px !important' }} />}
-                sx={{ color: '#0F9D58', fontSize: '11px', textTransform: 'none', py: 0.2, px: 1 }}
+                sx={{ color: '#38BDF8', fontSize: '11px', textTransform: 'none', py: 0.2, px: 1 }}
               >
                 Open in Drive
               </Button>
@@ -735,108 +832,70 @@ export const UniversalPlayer: React.FC = () => {
         </Box>
       )}
 
-      {/* Audio Helper Banner for Direct Stream */}
-      {isDrive && driveFileId && driveMode === 'stream' && (
-        <Box
-          sx={{
-            px: 2,
-            py: 0.8,
-            backgroundColor: 'rgba(234, 179, 8, 0.12)',
-            borderBottom: '1px solid rgba(234, 179, 8, 0.25)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 1,
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <VolumeOffIcon sx={{ fontSize: 16, color: '#FBBF24' }} />
-            <Typography variant="caption" sx={{ color: '#FDE047', fontWeight: 500 }}>
-              Audio not audible? Browsers cannot decode MKV/AC3 multi-channel audio directly. Switch to Drive Preview for cloud-transcoded sound.
-            </Typography>
-          </Box>
-          <Button
-            size="small"
-            variant="contained"
-            onClick={() => handleSetDriveMode('iframe')}
-            startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important' }} />}
-            sx={{
-              backgroundColor: '#D97706',
-              color: '#FFF',
-              fontSize: '11px',
-              py: 0.2,
-              px: 1.2,
-              textTransform: 'none',
-              fontWeight: 700,
-              '&:hover': { backgroundColor: '#B45309' },
-            }}
-          >
-            Switch to Drive Preview (with Audio)
-          </Button>
-        </Box>
-      )}
-
-      <DialogContent sx={{ p: 0, backgroundColor: '#000', position: 'relative', minHeight: '480px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {/* Case 1a: Google Drive Direct Video Stream with Range Seeking & Resume */}
+      <DialogContent sx={{ p: 0, backgroundColor: '#000', position: 'relative', minHeight: '520px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {/* Case 1a: Vidstack Modern Video Player for Google Drive with Subtitles, Audio Tracks & Resume */}
         {isDrive && driveFileId && driveMode === 'stream' && (
-          <Box sx={{ width: '100%', height: '540px', backgroundColor: '#000', position: 'relative' }} key={`drive-stream-${playerKey}`}>
-            <video
-              ref={videoRef}
-              src={`/api/sources/drive/${driveFileId}/stream`}
-              controls
-              autoPlay
-              playsInline
-              style={{
+          <Box
+            sx={{
+              width: '100%',
+              height: '560px',
+              backgroundColor: '#000',
+              position: 'relative',
+              '& [data-media-player]': {
                 width: '100%',
                 height: '100%',
                 backgroundColor: '#000',
-              }}
-              onLoadedMetadata={() => {
-                const target = currentSecRef.current || initialSec;
-                if (target > 0 && videoRef.current) {
-                  try {
-                    videoRef.current.currentTime = target;
-                  } catch (e) {}
-                }
-              }}
+                borderRadius: 0,
+              },
+            }}
+            key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}`}
+          >
+            <MediaPlayer
+              ref={vidstackPlayerRef}
+              title={activeMovie.title}
+              src={`/api/sources/drive/${driveFileId}/stream`}
+              storage={`yourcinema_playback_${activeMovie.user_movie_id}`}
+              autoPlay
+              playsInline
               onCanPlay={() => {
-                const target = currentSecRef.current || initialSec;
-                if (target > 0 && videoRef.current && Math.abs(videoRef.current.currentTime - target) > 1.5) {
+                if (!initialSeekDoneRef.current && initialSec > 0 && vidstackPlayerRef.current) {
                   try {
-                    videoRef.current.currentTime = target;
-                  } catch (e) {}
+                    vidstackPlayerRef.current.currentTime = initialSec;
+                    initialSeekDoneRef.current = true;
+                  } catch {}
                 }
+                syncMediaTracks();
               }}
-              onPlay={() => {
-                const target = currentSecRef.current || initialSec;
-                if (target > 0 && videoRef.current && Math.abs(videoRef.current.currentTime - target) > 1.5) {
-                  try {
-                    videoRef.current.currentTime = target;
-                  } catch (e) {}
-                }
-              }}
-              onTimeUpdate={() => {
-                if (videoRef.current) {
-                  const cur = Math.floor(videoRef.current.currentTime);
-                  if (cur !== currentSecRef.current) {
-                    currentSecRef.current = cur;
-                    setCurrentSec(cur);
-                  }
-                }
+              onAudioTracksChange={syncMediaTracks}
+              onTimeUpdate={(detail) => {
+                const cur = Math.floor(detail.currentTime);
+                currentSecRef.current = cur;
               }}
               onPause={() => {
-                if (videoRef.current) {
-                  saveProgress(Math.floor(videoRef.current.currentTime), false);
+                const cur = Math.floor(vidstackPlayerRef.current?.currentTime || currentSecRef.current);
+                if (cur > 0) {
+                  saveProgress(cur, false);
                 }
               }}
               onEnded={() => {
                 saveProgress(runtimeSec, true);
               }}
-              onError={() => {
-                handleSetDriveMode('iframe');
-              }}
-            />
+            >
+              <MediaProvider>
+                {embeddedSubtitles.map((sub) => (
+                  <Track
+                    key={sub.id}
+                    src={sub.src}
+                    kind="subtitles"
+                    label={sub.label}
+                    lang={sub.language}
+                    type="vtt"
+                    default={sub.default}
+                  />
+                ))}
+              </MediaProvider>
+              <DefaultVideoLayout icons={defaultLayoutIcons} />
+            </MediaPlayer>
           </Box>
         )}
 

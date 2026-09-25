@@ -52,9 +52,7 @@ function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGenresLis
 
   return { genres: finalGenres, custom_genres: finalCustomGenres };
 }
-
-export { MovieFilters } from '../../types/index.js';
-
+export type { MovieFilters };
 
 export class MoviesService {
   static async getLibraryStats(userId: string) {

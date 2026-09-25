@@ -18,6 +18,7 @@ import OndemandVideoIcon from '@mui/icons-material/OndemandVideo';
 import { UserMovie, MovieSource } from '../../types/index.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { isDriveSource } from '../../utils/googleDrive.js';
 
 interface SelectSourceModalProps {
   open: boolean;
@@ -76,7 +77,7 @@ export const SelectSourceModal: React.FC<SelectSourceModalProps> = ({
             <Stack spacing={1.5}>
               {availableSources.map((src) => {
                 const meta = getOttMeta(src.provider_name, src.provider_icon);
-                const isDrive = src.source_type === 'google_drive';
+                const isDrive = isDriveSource(src);
                 const isYouTube = isYouTubeSource(src);
                 return (
                   <Box

@@ -40,6 +40,7 @@ function formatPlaybackTime(sec: number): string {
 
 export function detectProviderFromUrl(url: string, fallbackName: string): string {
   const u = (url || '').toLowerCase();
+  if (u.includes('drive.google.com') || u.includes('drive.usercontent.google.com') || u.includes('docs.google.com/file')) return 'Google Drive';
   if (u.includes('primevideo.com') || u.includes('amazon.com')) return 'Prime Video';
   if (u.includes('netflix.com')) return 'Netflix';
   if (u.includes('hotstar.com') || u.includes('jiohotstar.com') || u.includes('disneyplus.com')) return 'JioHotstar';
@@ -69,16 +70,36 @@ export class SourcesService {
 
   static async addSource(userId: string, input: AddSourceInput) {
     const sourceId = uuidv4();
-    const icon = input.providerIcon || input.sourceType;
 
-    if (input.sourceType === 'google_drive') {
-      const raw = input.externalFileId || input.externalUrl || '';
-      const cleanId = extractDriveFileId(raw);
-      input.externalFileId = cleanId;
-      if (!input.externalUrl && cleanId) {
-        input.externalUrl = `https://drive.google.com/file/d/${cleanId}/view`;
+    const raw = input.externalFileId || input.externalUrl || '';
+    const cleanId = extractDriveFileId(raw);
+    const isDrive = input.sourceType === 'google_drive' ||
+      (input.providerName || '').toLowerCase().includes('drive') ||
+      (input.externalUrl || '').includes('drive.google.com') ||
+      (input.externalUrl || '').includes('drive.usercontent.google.com');
+
+    if (isDrive) {
+      input.sourceType = 'google_drive';
+      input.providerName = input.providerName || 'Google Drive';
+      input.providerIcon = 'google_drive';
+      if (cleanId) {
+        input.externalFileId = cleanId;
+        if (!input.externalUrl) {
+          input.externalUrl = `https://drive.google.com/file/d/${cleanId}/view`;
+        }
       }
+    } else if (
+      input.sourceType === 'youtube' ||
+      (input.providerName || '').toLowerCase().includes('youtube') ||
+      (input.externalUrl || '').includes('youtube.com') ||
+      (input.externalUrl || '').includes('youtu.be')
+    ) {
+      input.sourceType = 'youtube';
+      input.providerName = input.providerName || 'YouTube';
+      input.providerIcon = 'youtube';
     }
+
+    const icon = input.providerIcon || input.sourceType;
 
     if (isPgConnected) {
       const { rows } = await pool.query(`

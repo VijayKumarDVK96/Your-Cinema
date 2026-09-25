@@ -45,6 +45,7 @@ import { EmptyState } from '../../components/feedback/EmptyState.js';
 import { ConfirmDeleteModal } from '../../components/ui/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { isDriveSource } from '../../utils/googleDrive.js';
 import { formatRuntime } from '../../utils/formatters.js';
 import { LANGUAGE_LIST } from '../../components/common/EditMovieModal.js';
 import { buildWatchlistTreeOptions } from '../../utils/watchlistTree.js';
@@ -1042,7 +1043,7 @@ export const MyMoviesPage: React.FC = () => {
                 ? (movie.poster_path.startsWith('http') ? movie.poster_path : `https://image.tmdb.org/t/p/w200${movie.poster_path}`)
                 : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=200&q=80';
               const year = movie.release_date ? movie.release_date.substring(0, 4) : '';
-              const primarySource = (movie.sources || []).find((s: any) => s.source_type === 'ott' || s.source_type === 'google_drive' || s.source_type === 'youtube') ||
+              const primarySource = (movie.sources || []).find((s: any) => isDriveSource(s) || isYouTubeSource(s) || s.source_type === 'ott') ||
                 (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
 
               return (
@@ -1184,9 +1185,7 @@ export const MyMoviesPage: React.FC = () => {
                       startIcon={<PlayCircleOutlineIcon />}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (primarySource && isYouTubeSource(primarySource)) {
-                          openPlayer(movie, primarySource);
-                        } else if (primarySource?.source_type === 'google_drive') {
+                        if (primarySource && (isYouTubeSource(primarySource) || isDriveSource(primarySource))) {
                           openPlayer(movie, primarySource);
                         } else if (primarySource?.source_type === 'ott' && primarySource.external_url) {
                           window.open(primarySource.external_url, '_blank', 'noopener,noreferrer');

@@ -11,6 +11,7 @@ import { UserMovie } from '../../types/index.js';
 import { usePlayer } from '../../context/PlayerContext.js';
 import { OttBadge, getOttMeta } from '../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../utils/youtube.js';
+import { isDriveSource } from '../../utils/googleDrive.js';
 import { formatRuntime } from '../../utils/formatters.js';
 
 interface MovieCardProps {
@@ -59,7 +60,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
   }
 
   if (!primarySource) {
-    primarySource = (movie.sources || []).find((s: any) => s.source_type === 'ott' || s.source_type === 'google_drive') ||
+    primarySource = (movie.sources || []).find((s: any) => isDriveSource(s) || isYouTubeSource(s) || s.source_type === 'ott') ||
       (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
   }
 
@@ -78,9 +79,7 @@ export const MovieCard: React.FC<MovieCardProps> = ({
 
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (primarySource && isYouTubeSource(primarySource)) {
-      openPlayer(movie, primarySource);
-    } else if (primarySource?.source_type === 'google_drive') {
+    if (primarySource && (isYouTubeSource(primarySource) || isDriveSource(primarySource))) {
       openPlayer(movie, primarySource);
     } else if (ottInfo?.url && primarySource?.source_type === 'ott') {
       window.open(ottInfo.url, '_blank', 'noopener,noreferrer');

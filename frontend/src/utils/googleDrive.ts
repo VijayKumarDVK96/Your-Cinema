@@ -52,12 +52,37 @@ export function getDriveViewUrl(fileIdOrUrl?: string | null): string {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : '';
 }
 
-function getDriveDirectStreamUrl(fileIdOrUrl?: string | null): string {
+export function isDriveSource(source?: {
+  source_type?: string | null;
+  provider_name?: string | null;
+  provider_icon?: string | null;
+  external_url?: string | null;
+  external_file_id?: string | null;
+} | null): boolean {
+  if (!source) return false;
+  if (source.source_type === 'google_drive') return true;
+  const name = (source.provider_name || '').toLowerCase();
+  const icon = (source.provider_icon || '').toLowerCase();
+  const url = (source.external_url || '').toLowerCase();
+  const fileId = source.external_file_id || '';
+  return (
+    name.includes('google drive') ||
+    name.includes('gdrive') ||
+    name === 'drive' ||
+    icon.includes('google_drive') ||
+    icon === 'drive' ||
+    url.includes('drive.google.com') ||
+    url.includes('drive.usercontent.google.com') ||
+    Boolean(extractDriveFileId(url || fileId))
+  );
+}
+
+export function getDriveDirectStreamUrl(fileIdOrUrl?: string | null): string {
   const fileId = extractDriveFileId(fileIdOrUrl);
   return fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t` : '';
 }
 
-function getDriveProxyStreamUrl(fileIdOrUrl?: string | null): string {
+export function getDriveProxyStreamUrl(fileIdOrUrl?: string | null): string {
   const fileId = extractDriveFileId(fileIdOrUrl);
   return fileId ? `/api/sources/drive/${fileId}/stream` : '';
 }

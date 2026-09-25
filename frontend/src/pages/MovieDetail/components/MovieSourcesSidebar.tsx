@@ -14,6 +14,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { UserMovie, MovieSource } from '../../../types/index.js';
 import { OttBadge, getOttMeta } from '../../../utils/ottProviders.js';
 import { isYouTubeSource } from '../../../utils/youtube.js';
+import { isDriveSource } from '../../../utils/googleDrive.js';
 
 export interface MovieSourcesSidebarProps {
   movie: UserMovie;
@@ -63,7 +64,9 @@ export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
         {movie.sources && movie.sources.length > 0 ? (
           <Stack spacing={1.5}>
             {movie.sources.map((src: any) => {
-              const isOtt = src.source_type === 'ott';
+              const isDrive = isDriveSource(src);
+              const isYt = isYouTubeSource(src);
+              const isOtt = src.source_type === 'ott' && !isDrive && !isYt;
               return (
                 <Box
                   key={src.id}
@@ -81,7 +84,7 @@ export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
                     <OttBadge providerName={src.provider_name} providerIcon={src.provider_icon} size="small" />
                     <Box>
                       <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block' }}>
-                        {src.source_type.replace('_', ' ').toUpperCase()} • {src.quality || '1080p'}
+                        {isDrive ? 'GOOGLE DRIVE' : isYt ? 'YOUTUBE' : src.source_type.replace('_', ' ').toUpperCase()} • {src.quality || '1080p'}
                       </Typography>
                     </Box>
                   </Box>
@@ -89,10 +92,10 @@ export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
                     size="small"
                     variant="contained"
                     color="primary"
-                    endIcon={isOtt && !isYouTubeSource(src) && src.external_url ? <OpenInNewIcon sx={{ fontSize: '14px !important' }} /> : undefined}
+                    endIcon={isOtt && src.external_url ? <OpenInNewIcon sx={{ fontSize: '14px !important' }} /> : undefined}
                     onClick={() => onPlaySource(src)}
                   >
-                    {isOtt && !isYouTubeSource(src) ? 'Stream' : (isResumable ? 'Resume' : 'Play')}
+                    {isOtt ? 'Stream' : (isResumable ? 'Resume' : 'Play')}
                   </Button>
                 </Box>
               );
