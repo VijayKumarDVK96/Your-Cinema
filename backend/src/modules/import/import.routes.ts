@@ -1,6 +1,6 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
-import { ImportService } from './import.service.js';
+import { ImportController } from './import.controller.js';
 import { authenticate } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 
@@ -37,34 +37,7 @@ const commitSchema = z.object({
   isFavorite: z.boolean().optional(),
 });
 
-router.post('/match', validate(matchSchema), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const results = await ImportService.matchTitles(req.body.titles);
-    return res.status(200).json({ success: true, data: results });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/commit', validate(commitSchema), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const items = req.body.movies || req.body.items || req.body.selectedTmdbIds || [];
-    const results = await ImportService.commitBatch(req.user!.id, items, {
-      watchlistId: req.body.watchlistId,
-      newWatchlistName: req.body.newWatchlistName,
-      customGenreIds: req.body.customGenreIds,
-      genreId: req.body.genreId,
-      genreIds: req.body.genreIds,
-      watchStatus: req.body.watchStatus,
-      personalRating: req.body.personalRating,
-      isFavorite: req.body.isFavorite,
-      providerName: req.body.providerName,
-      directUrl: req.body.directUrl,
-    });
-    return res.status(200).json({ success: true, data: results });
-  } catch (err) {
-    next(err);
-  }
-});
+router.post('/match', validate(matchSchema), ImportController.match);
+router.post('/commit', validate(commitSchema), ImportController.commit);
 
 export default router;

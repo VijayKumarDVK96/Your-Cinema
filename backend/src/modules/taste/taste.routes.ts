@@ -1,17 +1,10 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import { TasteService } from './taste.service.js';
+import { Router } from 'express';
+import { TasteController } from './taste.controller.js';
 import { authenticate } from '../../middlewares/auth.js';
 
 const router = Router();
 router.use(authenticate);
 
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const profile = await TasteService.getTasteProfile(req.user!.id);
-    return res.status(200).json({ success: true, data: profile });
-  } catch (err) {
-    next(err);
-  }
-});
+router.get('/', TasteController.getProfile);
 
 export default router;

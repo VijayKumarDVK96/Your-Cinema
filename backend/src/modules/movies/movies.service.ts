@@ -5,6 +5,8 @@ import { WatchlistsService } from '../watchlists/watchlists.service.js';
 import { GenresService, PREDEFINED_GENRES } from '../genres/genres.service.js';
 import { TagsService } from '../tags/tags.service.js';
 import { NotFoundError, BadRequestError } from '../../utils/errors.js';
+import { MovieFilters } from '../../types/index.js';
+
 
 export function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGenresList?: any[]) {
   const excluded = Array.isArray(row.excluded_genres) ? row.excluded_genres : [];
@@ -51,27 +53,8 @@ export function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGe
   return { genres: finalGenres, custom_genres: finalCustomGenres };
 }
 
-export interface MovieFilters {
-  status?: 'all' | 'unwatched' | 'watching' | 'watched';
-  genreId?: number | string;
-  tagId?: string;
-  ott?: string;
-  language?: string;
-  yearMin?: number;
-  yearMax?: number;
-  runtimeMin?: number;
-  runtimeMax?: number;
-  ratingMin?: number;
-  ratingMax?: number;
-  personalRating?: string;
-  isFavorite?: boolean;
-  mediaType?: 'all' | 'movie' | 'tv';
-  search?: string;
-  sortBy?: 'added_at' | 'release_date' | 'rating' | 'my_rating' | 'tmdb_rating' | 'runtime' | 'title';
-  sortOrder?: 'asc' | 'desc';
-  page?: number;
-  limit?: number;
-}
+export { MovieFilters } from '../../types/index.js';
+
 
 export class MoviesService {
   static async getLibraryStats(userId: string) {

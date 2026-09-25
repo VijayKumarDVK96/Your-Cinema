@@ -1,12 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { TmdbService } from './tmdb.service.js';
 import { BadRequestError } from '../../utils/errors.js';
+import { sendSuccess } from '../../utils/response.js';
+import { parseInteger } from '../../utils/query.js';
 
 export class TmdbController {
   static async search(req: Request, res: Response, next: NextFunction) {
     try {
       const query = req.query.query as string;
-      const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const page = parseInteger(req.query.page, 1) || 1;
       const type = (req.query.type as 'all' | 'movie' | 'tv') || 'all';
 
       if (!query || query.trim().length === 0) {
@@ -14,7 +16,7 @@ export class TmdbController {
       }
 
       const results = await TmdbService.searchMovies(query, page, type);
-      return res.status(200).json({ success: true, data: results });
+      return sendSuccess(res, results);
     } catch (err) {
       next(err);
     }
@@ -22,14 +24,14 @@ export class TmdbController {
 
   static async getDetails(req: Request, res: Response, next: NextFunction) {
     try {
-      const tmdbId = parseInt(req.params.id, 10);
-      if (isNaN(tmdbId)) {
+      const tmdbId = parseInteger(req.params.id);
+      if (!tmdbId) {
         throw new BadRequestError('Invalid TMDB ID');
       }
 
       const mediaType = (req.query.media_type || req.query.mediaType || req.query.type) as 'movie' | 'tv' || 'movie';
       const details = await TmdbService.getMediaDetails(tmdbId, mediaType);
-      return res.status(200).json({ success: true, data: details });
+      return sendSuccess(res, details);
     } catch (err) {
       next(err);
     }
@@ -37,13 +39,13 @@ export class TmdbController {
 
   static async getTvDetails(req: Request, res: Response, next: NextFunction) {
     try {
-      const tmdbId = parseInt(req.params.id, 10);
-      if (isNaN(tmdbId)) {
+      const tmdbId = parseInteger(req.params.id);
+      if (!tmdbId) {
         throw new BadRequestError('Invalid TMDB ID');
       }
 
       const details = await TmdbService.getTvDetails(tmdbId);
-      return res.status(200).json({ success: true, data: details });
+      return sendSuccess(res, details);
     } catch (err) {
       next(err);
     }
@@ -51,14 +53,14 @@ export class TmdbController {
 
   static async getImages(req: Request, res: Response, next: NextFunction) {
     try {
-      const tmdbId = parseInt(req.params.id, 10);
-      if (isNaN(tmdbId)) {
+      const tmdbId = parseInteger(req.params.id);
+      if (!tmdbId) {
         throw new BadRequestError('Invalid TMDB ID');
       }
 
       const mediaType = (req.query.media_type || req.query.mediaType || req.query.type) as 'movie' | 'tv' || 'movie';
       const images = await TmdbService.getMediaImages(tmdbId, mediaType);
-      return res.status(200).json({ success: true, data: images });
+      return sendSuccess(res, images);
     } catch (err) {
       next(err);
     }

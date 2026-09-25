@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from './auth.service.js';
+import { sendSuccess, sendCreated } from '../../utils/response.js';
 
 export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
@@ -11,7 +12,7 @@ export class AuthController {
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
-      return res.status(201).json({ success: true, data: result });
+      return sendCreated(res, result);
     } catch (err) {
       next(err);
     }
@@ -28,7 +29,7 @@ export class AuthController {
         sameSite: 'lax',
         maxAge,
       });
-      return res.status(200).json({ success: true, data: result });
+      return sendSuccess(res, result);
     } catch (err) {
       next(err);
     }
@@ -36,14 +37,14 @@ export class AuthController {
 
   static async logout(req: Request, res: Response, next: NextFunction) {
     res.clearCookie('refresh_token');
-    return res.status(200).json({ success: true, message: 'Logged out successfully.' });
+    return sendSuccess(res, undefined, 'Logged out successfully.');
   }
 
   static async getMe(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
       const profile = await AuthService.getProfile(userId);
-      return res.status(200).json({ success: true, data: profile });
+      return sendSuccess(res, profile);
     } catch (err) {
       next(err);
     }
@@ -53,7 +54,7 @@ export class AuthController {
     try {
       const userId = req.user!.id;
       const updated = await AuthService.updateProfile(userId, req.body);
-      return res.status(200).json({ success: true, data: updated });
+      return sendSuccess(res, updated);
     } catch (err) {
       next(err);
     }
@@ -63,7 +64,7 @@ export class AuthController {
     try {
       const userId = req.user!.id;
       const result = await AuthService.changePassword(userId, req.body);
-      return res.status(200).json({ success: true, data: result });
+      return sendSuccess(res, result);
     } catch (err) {
       next(err);
     }
