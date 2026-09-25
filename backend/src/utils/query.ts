@@ -16,7 +16,7 @@ export function parseBoolean(val: any): boolean | undefined {
   return undefined;
 }
 
-export function parsePagination(query: any, defaultLimit = 50): { page: number; limit: number; offset: number } {
+function parsePagination(query: any, defaultLimit = 50): { page: number; limit: number; offset: number } {
   const page = Math.max(1, parseInteger(query.page, 1) || 1);
   const limit = Math.max(1, Math.min(parseInteger(query.limit, defaultLimit) || defaultLimit, 1000));
   const offset = (page - 1) * limit;

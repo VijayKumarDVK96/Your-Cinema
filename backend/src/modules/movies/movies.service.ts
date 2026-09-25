@@ -8,7 +8,7 @@ import { NotFoundError, BadRequestError } from '../../utils/errors.js';
 import { MovieFilters } from '../../types/index.js';
 
 
-export function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGenresList?: any[]) {
+function resolveMovieSingleGenre(row: any, customGenreObj?: any, customGenresList?: any[]) {
   const excluded = Array.isArray(row.excluded_genres) ? row.excluded_genres : [];
   const rawGenres = Array.isArray(row.genres) ? row.genres : [];
   const filteredGenres = rawGenres.filter(

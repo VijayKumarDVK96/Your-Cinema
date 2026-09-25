@@ -1,11 +1,11 @@
-export type AiProvider = 'gemini' | 'openrouter';
+type AiProvider = 'gemini' | 'openrouter';
 
-export interface AiSettingsConfig {
+interface AiSettingsConfig {
   provider: AiProvider;
   model_name: string;
 }
 
-export interface AiTestResult {
+interface AiTestResult {
   success: boolean;
   message?: string;
   provider?: string;
@@ -14,7 +14,7 @@ export interface AiTestResult {
   latencyMs?: number;
 }
 
-export interface AiExplanationRequest {
+interface AiExplanationRequest {
   userMovieId: string;
   movieTitle: string;
   overview?: string;
@@ -22,9 +22,11 @@ export interface AiExplanationRequest {
   director?: string;
 }
 
-export interface AiRecommendationPrompt {
+interface AiRecommendationPrompt {
   userTasteSummary: string;
   favoriteGenres: string[];
   watchedCount: number;
   recentFavorites: string[];
 }
+
+export {};

@@ -18,7 +18,7 @@ export interface PaginatedResult<T> {
   hasMore: boolean;
 }
 
-export interface PaginationQuery {
+interface PaginationQuery {
   page?: number;
   limit?: number;
   sortBy?: string;

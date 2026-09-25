@@ -22,7 +22,7 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 
-export interface WatchlistNode {
+interface WatchlistNode {
   id: string;
   name: string;
   parent_id: string | null;

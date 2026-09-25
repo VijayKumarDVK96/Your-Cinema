@@ -27,7 +27,7 @@ export function extractDriveFileId(input?: string | null): string {
   return trimmed;
 }
 
-export function formatPlaybackTime(sec: number): string {
+function formatPlaybackTime(sec: number): string {
   if (!sec || sec <= 0) return '0s';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);

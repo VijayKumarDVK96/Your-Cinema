@@ -1,10 +1,10 @@
-export interface AuthUser {
+interface AuthUser {
   id: string;
   email: string;
   name: string;
 }
 
-export interface RegisterDto {
+interface RegisterDto {
   email: string;
   password: string;
   name: string;
@@ -14,20 +14,20 @@ export interface RegisterDto {
   preferredRuntimeMax?: number;
 }
 
-export interface LoginDto {
+interface LoginDto {
   email: string;
   password: string;
   rememberMe?: boolean;
 }
 
-export interface ChangePasswordDto {
+interface ChangePasswordDto {
   currentPassword?: string;
   newPassword?: string;
   current_password?: string;
   new_password?: string;
 }
 
-export interface ProfileUpdateDto {
+interface ProfileUpdateDto {
   name?: string;
   avatar_url?: string;
   preferred_languages?: string[];
@@ -37,7 +37,7 @@ export interface ProfileUpdateDto {
   exclude_watched_default?: boolean;
 }
 
-export interface AuthTokens {
+interface AuthTokens {
   accessToken: string;
   refreshToken: string;
   user: {
@@ -52,3 +52,5 @@ export interface AuthTokens {
     exclude_watched_default?: boolean;
   };
 }
+
+export {};

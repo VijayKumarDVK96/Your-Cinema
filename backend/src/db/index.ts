@@ -533,7 +533,7 @@ class InMemoryStore {
 export const inMemoryDb = new InMemoryStore();
 
 // Universal Query Executor that prioritizes PostgreSQL and falls back safely
-export async function query(text: string, params: any[] = []): Promise<{ rows: any[]; rowCount: number }> {
+async function query(text: string, params: any[] = []): Promise<{ rows: any[]; rowCount: number }> {
   if (isPgConnected) {
     try {
       const result = await pool.query(text, params);

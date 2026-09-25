@@ -1,25 +1,25 @@
 import { Tag, UserMovie } from './movie.js';
 
-export interface TasteDnaItem {
+interface TasteDnaItem {
   name: string;
   count: number;
   percentage: number;
 }
 
-export interface DirectorStat {
+interface DirectorStat {
   name: string;
   movieCount: number;
   avgRating: number | null;
 }
 
-export interface RuntimeBuckets {
+interface RuntimeBuckets {
   under90: number;
   between90and120: number;
   between120and150: number;
   over150: number;
 }
 
-export interface TasteSummary {
+interface TasteSummary {
   totalMovies: number;
   watchedCount: number;
   unwatchedCount: number;
@@ -29,7 +29,7 @@ export interface TasteSummary {
   totalHoursWatched: number;
 }
 
-export interface TasteProfile {
+interface TasteProfile {
   summary: TasteSummary;
   movieDna: TasteDnaItem[];
   topDirectors: DirectorStat[];

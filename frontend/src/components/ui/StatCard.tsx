@@ -1,7 +1,7 @@
 import React from 'react';
 import { Paper, Typography, Box } from '@mui/material';
 
-export interface StatCardProps {
+interface StatCardProps {
   label: string;
   value: string | number;
   subValue?: string;
@@ -10,7 +10,7 @@ export interface StatCardProps {
   onClick?: () => void;
 }
 
-export const StatCard: React.FC<StatCardProps> = ({
+const StatCard: React.FC<StatCardProps> = ({
   label,
   value,
   subValue,

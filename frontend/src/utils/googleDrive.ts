@@ -52,12 +52,12 @@ export function getDriveViewUrl(fileIdOrUrl?: string | null): string {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : '';
 }
 
-export function getDriveDirectStreamUrl(fileIdOrUrl?: string | null): string {
+function getDriveDirectStreamUrl(fileIdOrUrl?: string | null): string {
   const fileId = extractDriveFileId(fileIdOrUrl);
   return fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t` : '';
 }
 
-export function getDriveProxyStreamUrl(fileIdOrUrl?: string | null): string {
+function getDriveProxyStreamUrl(fileIdOrUrl?: string | null): string {
   const fileId = extractDriveFileId(fileIdOrUrl);
   return fileId ? `/api/sources/drive/${fileId}/stream` : '';
 }

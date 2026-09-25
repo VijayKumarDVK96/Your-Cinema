@@ -10,19 +10,19 @@ export interface User {
   exclude_watched_default: boolean;
 }
 
-export interface AuthTokens {
+interface AuthTokens {
   accessToken: string;
   refreshToken?: string;
 }
 
-export interface AuthResponse {
+interface AuthResponse {
   user: User;
   token?: string;
   accessToken?: string;
   refreshToken?: string;
 }
 
-export interface UserProfileUpdate {
+interface UserProfileUpdate {
   name?: string;
   preferred_languages?: string[];
   favorite_genres?: number[];

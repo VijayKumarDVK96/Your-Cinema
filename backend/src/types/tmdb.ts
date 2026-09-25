@@ -1,4 +1,4 @@
-export interface TmdbSearchResult {
+interface TmdbSearchResult {
   id: number;
   title?: string;
   name?: string;
@@ -16,7 +16,7 @@ export interface TmdbSearchResult {
   inLibrary?: boolean;
 }
 
-export interface TmdbImageItem {
+interface TmdbImageItem {
   file_path: string;
   width: number;
   height: number;
@@ -26,9 +26,11 @@ export interface TmdbImageItem {
   iso_639_1?: string | null;
 }
 
-export interface TmdbImagesResponse {
+interface TmdbImagesResponse {
   id: number;
   backdrops: TmdbImageItem[];
   posters: TmdbImageItem[];
   logos?: TmdbImageItem[];
 }
+
+export {};

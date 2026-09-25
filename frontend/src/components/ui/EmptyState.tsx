@@ -2,7 +2,7 @@ import React from 'react';
 import { Paper, Box, Typography, Button } from '@mui/material';
 import MovieFilterIcon from '@mui/icons-material/MovieFilter';
 
-export interface EmptyStateProps {
+interface EmptyStateProps {
   icon?: React.ReactNode;
   title: string;
   description?: string;
@@ -12,7 +12,7 @@ export interface EmptyStateProps {
   secondaryAction?: React.ReactNode;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({
+const EmptyState: React.FC<EmptyStateProps> = ({
   icon,
   title,
   description,

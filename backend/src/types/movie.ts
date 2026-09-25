@@ -1,5 +1,5 @@
-export type WatchStatus = 'all' | 'unwatched' | 'watching' | 'watched';
-export type MediaType = 'all' | 'movie' | 'tv';
+type WatchStatus = 'all' | 'unwatched' | 'watching' | 'watched';
+type MediaType = 'all' | 'movie' | 'tv';
 
 export interface MovieFilters {
   status?: WatchStatus;
@@ -23,7 +23,7 @@ export interface MovieFilters {
   limit?: number;
 }
 
-export interface CastMember {
+interface CastMember {
   name: string;
   character: string;
   profile_path?: string | null;
@@ -31,7 +31,7 @@ export interface CastMember {
   order?: number;
 }
 
-export interface CrewMember {
+interface CrewMember {
   name: string;
   job: string;
   department?: string;
@@ -39,7 +39,7 @@ export interface CrewMember {
   gender?: number;
 }
 
-export interface SeasonInfo {
+interface SeasonInfo {
   id: number;
   season_number: number;
   name: string;
@@ -49,7 +49,7 @@ export interface SeasonInfo {
   overview?: string | null;
 }
 
-export interface Tag {
+interface Tag {
   id: string;
   user_id?: string;
   name: string;
@@ -58,7 +58,7 @@ export interface Tag {
   created_at?: string;
 }
 
-export interface Genre {
+interface Genre {
   id: string | number;
   user_id?: string;
   tmdb_id?: number;
@@ -70,7 +70,7 @@ export interface Genre {
   created_at?: string;
 }
 
-export interface MovieSource {
+interface MovieSource {
   id: string;
   user_movie_id: string;
   source_type: 'google_drive' | 'youtube' | 'ott' | 'custom_url';
@@ -83,7 +83,7 @@ export interface MovieSource {
   created_at?: string;
 }
 
-export interface Movie {
+interface Movie {
   id: string;
   tmdb_id: number;
   media_type: MediaType;
@@ -144,7 +144,7 @@ export interface UserMovie extends Movie {
   sources?: MovieSource[];
 }
 
-export interface LibraryStats {
+interface LibraryStats {
   total: number;
   watched: number;
   unwatched: number;

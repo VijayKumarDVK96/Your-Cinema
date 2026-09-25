@@ -1,17 +1,17 @@
-export interface TasteDnaItem {
+interface TasteDnaItem {
   name: string;
   count: number;
   percentage: number;
 }
 
-export interface DirectorStat {
+interface DirectorStat {
   name: string;
   count: number;
   avgRating: number;
   movies: string[];
 }
 
-export interface ActorStat {
+interface ActorStat {
   name: string;
   count: number;
   avgRating: number;
@@ -19,14 +19,14 @@ export interface ActorStat {
   photoUrl?: string | null;
 }
 
-export interface RuntimeBuckets {
+interface RuntimeBuckets {
   short: number;    // < 90m
   medium: number;   // 90 - 120m
   feature: number;  // 120 - 150m
   epic: number;     // 150m+
 }
 
-export interface TasteProfile {
+interface TasteProfile {
   totalWatched: number;
   totalHoursWatched: number;
   avgRating: number;
@@ -38,3 +38,5 @@ export interface TasteProfile {
   topDecades: { decade: string; count: number }[];
   summary: string;
 }
+
+export {};

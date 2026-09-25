@@ -1,6 +1,6 @@
 import { UserMovie } from './movie.js';
 
-export interface Watchlist {
+interface Watchlist {
   id: string;
   name: string;
   description?: string | null;
@@ -14,7 +14,7 @@ export interface Watchlist {
   children?: Watchlist[];
 }
 
-export interface WatchlistFolder {
+interface WatchlistFolder {
   id: string;
   name: string;
   parent_id?: string | null;

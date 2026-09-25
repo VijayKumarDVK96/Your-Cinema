@@ -30,7 +30,7 @@ export function sendCreated<T>(
   return sendSuccess(res, data, message, 201);
 }
 
-export function sendPaginated<T>(
+function sendPaginated<T>(
   res: Response,
   result: PaginatedResult<T>,
   message?: string,

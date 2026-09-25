@@ -27,20 +27,20 @@ export interface MovieSource {
   quality?: string;
 }
 
-export interface CastMember {
+interface CastMember {
   name: string;
   character: string;
   profile_path?: string | null;
 }
 
-export interface CrewMember {
+interface CrewMember {
   name: string;
   job: string;
   department?: string;
   profile_path?: string | null;
 }
 
-export interface SeasonInfo {
+interface SeasonInfo {
   id: number;
   season_number: number;
   name: string;
@@ -104,7 +104,7 @@ export interface UserMovie {
   sources?: MovieSource[];
 }
 
-export interface TmdbSearchResult {
+interface TmdbSearchResult {
   id: number;
   title: string;
   name?: string;

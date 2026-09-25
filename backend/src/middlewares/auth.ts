@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
 import { UnauthorizedError } from '../utils/errors.js';
 
-export interface AuthUser {
+interface AuthUser {
   id: string;
   email: string;
   name: string;

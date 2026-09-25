@@ -30,7 +30,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 
-export type SearchCategory = 'all' | 'movie' | 'tv' | 'watchlist' | 'tmdb';
+type SearchCategory = 'all' | 'movie' | 'tv' | 'watchlist' | 'tmdb';
 
 interface ImdbHeaderSearchProps {
   onOpenAddModalWithQuery?: (initialQuery: string) => void;

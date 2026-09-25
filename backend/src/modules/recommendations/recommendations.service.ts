@@ -1,7 +1,7 @@
 import { MoviesService } from '../movies/movies.service.js';
 import { AuthService } from '../auth/auth.service.js';
 
-export interface ScoredRecommendation {
+interface ScoredRecommendation {
   movie: any;
   score: number; // 0 - 100
   category: 'best_match' | 'because_you_loved' | 'hidden_gem' | 'wild_card';

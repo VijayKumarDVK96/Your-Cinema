@@ -51,7 +51,7 @@ export function isYouTubeSource(source?: {
   );
 }
 
-export function formatYouTubeAutoplayUrl(rawUrl?: string | null, fallbackTitle?: string): string {
+function formatYouTubeAutoplayUrl(rawUrl?: string | null, fallbackTitle?: string): string {
   const cleanUrl = (rawUrl || '').trim();
 
   if (!cleanUrl && fallbackTitle) {
@@ -104,7 +104,7 @@ export function formatYouTubeAutoplayUrl(rawUrl?: string | null, fallbackTitle?:
   return cleanUrl;
 }
 
-export function openYouTubeAutoplay(url?: string | null, fallbackTitle?: string): void {
+function openYouTubeAutoplay(url?: string | null, fallbackTitle?: string): void {
   const targetUrl = formatYouTubeAutoplayUrl(url, fallbackTitle);
   window.open(targetUrl, '_blank', 'noopener,noreferrer');
 }

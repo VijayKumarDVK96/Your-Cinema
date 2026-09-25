@@ -1,6 +1,6 @@
 import { Genre } from './movie.js';
 
-export interface AiSettingsConfig {
+interface AiSettingsConfig {
   provider: 'gemini' | 'openrouter';
   model_name: string;
 }
@@ -14,7 +14,7 @@ export interface AiTestResult {
   latencyMs?: number;
 }
 
-export interface SanctuaryBackupData {
+interface SanctuaryBackupData {
   version: string;
   exported_at: string;
   user_preferences: {

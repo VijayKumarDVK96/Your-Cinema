@@ -1,14 +1,14 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 
-export interface PageHeaderProps {
+interface PageHeaderProps {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
   badges?: React.ReactNode;
 }
 
-export const PageHeader: React.FC<PageHeaderProps> = ({
+const PageHeader: React.FC<PageHeaderProps> = ({
   title,
   subtitle,
   action,
