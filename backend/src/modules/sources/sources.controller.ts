@@ -24,7 +24,9 @@ export class SourcesController {
 
       const ffprobeProc = spawn('ffprobe', [
         '-v', 'error',
-        '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title:format_tags=title',
+        '-probesize', '32M',
+        '-analyzeduration', '32M',
+        '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title',
         '-of', 'json',
         directUrl,
       ]);
@@ -36,7 +38,7 @@ export class SourcesController {
 
       const timeout = setTimeout(() => {
         try { ffprobeProc.kill(); } catch {}
-      }, 15000);
+      }, 25000);
 
       ffprobeProc.on('close', (code) => {
         clearTimeout(timeout);
@@ -44,40 +46,50 @@ export class SourcesController {
           const parsed = JSON.parse(stdout || '{}');
           const streams: any[] = parsed.streams || [];
 
+          // Use audio-relative index (0, 1, 2...) not global stream index
+          let audioRelIdx = 0;
           const audioTracks = streams
             .filter((s) => s.codec_type === 'audio')
-            .map((s, idx) => {
+            .map((s) => {
               const lang = s.tags?.language || s.tags?.LANGUAGE || '';
               const title = s.tags?.title || s.tags?.TITLE || '';
-              const label = title || (lang ? `${lang.toUpperCase()} (${s.codec_name || 'audio'})` : `Audio Track ${idx + 1}`);
-              return {
-                id: `audio-${s.index}`,
-                index: s.index,
+              const label = title || (lang ? `${lang.toUpperCase()} (${s.codec_name || 'audio'})` : `Audio Track ${audioRelIdx + 1}`);
+              const track = {
+                id: `audio-${audioRelIdx}`,
+                index: audioRelIdx,
+                globalIndex: s.index,
                 label,
                 language: lang || 'und',
                 codec: s.codec_name,
-                selected: idx === 0,
+                selected: audioRelIdx === 0,
               };
+              audioRelIdx++;
+              return track;
             });
 
+          let subRelIdx = 0;
           const subtitleTracks = streams
             .filter((s) => s.codec_type === 'subtitle')
-            .map((s, idx) => {
+            .map((s) => {
               const lang = s.tags?.language || s.tags?.LANGUAGE || '';
               const title = s.tags?.title || s.tags?.TITLE || '';
-              const label = title || (lang ? `${lang.toUpperCase()} Subtitles` : `Subtitle Track ${idx + 1}`);
-              return {
-                id: `sub-${s.index}`,
-                index: idx,
+              const label = title || (lang ? `${lang.toUpperCase()} Subtitles` : `Subtitle Track ${subRelIdx + 1}`);
+              const track = {
+                id: `sub-${subRelIdx}`,
+                index: subRelIdx,
                 streamIndex: s.index,
                 label,
                 language: lang || 'en',
-                src: `/api/sources/drive/${fileId}/subtitles/${idx}`,
-                default: idx === 0,
+                src: `/api/sources/drive/${fileId}/subtitles/${subRelIdx}`,
+                default: subRelIdx === 0,
               };
+              subRelIdx++;
+              return track;
             });
 
-          mediaInfoCache.set(fileId, { audioTracks, subtitleTracks, timestamp: Date.now() });
+          if (audioTracks.length > 0 || subtitleTracks.length > 0) {
+            mediaInfoCache.set(fileId, { audioTracks, subtitleTracks, timestamp: Date.now() });
+          }
           return sendSuccess(res, { audioTracks, subtitleTracks });
         } catch {
           return sendSuccess(res, { audioTracks: [], subtitleTracks: [] });
@@ -162,58 +174,77 @@ export class SourcesController {
         return res.redirect(302, directUrl);
       }
 
-      const headers: Record<string, string> = {};
-      if (req.headers.range) {
-        headers['Range'] = req.headers.range;
-      }
+      const audioTrackParam = req.query.audioTrack || req.query.audioIndex;
+      const audioIndex = audioTrackParam !== undefined && audioTrackParam !== '' ? parseInt(String(audioTrackParam), 10) : null;
+      const seekSec = Math.max(0, parseInt(String(req.query.t || req.query.time || req.query.start || '0'), 10) || 0);
 
-      const controller = new AbortController();
-      req.on('close', () => controller.abort());
+      // Always transmux through ffmpeg for browser-compatible MP4 output
+      // This handles MKV, AVI, and other formats that browsers can't play natively
+      const { spawn } = await import('child_process');
+      const audioMap = (audioIndex !== null && !isNaN(audioIndex) && audioIndex > 0)
+        ? `0:a:${audioIndex}`
+        : '0:a:0';
 
-      const driveRes = await fetch(directUrl, {
-        headers,
-        signal: controller.signal,
-      });
-
-      res.status(driveRes.status);
-
-      const forwardHeaders = [
-        'content-type',
-        'content-length',
-        'content-range',
-        'accept-ranges',
-        'last-modified',
-        'etag',
+      const ffmpegArgs = [
+        '-v', 'error',
+        '-hide_banner',
+        // Input seeking BEFORE -i for fast keyframe-level seeking (near-instant)
+        ...(seekSec > 0 ? ['-ss', String(seekSec)] : []),
+        '-i', directUrl,
+        '-map', '0:v:0',
+        '-map', audioMap,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-ac', '2',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        '-f', 'mp4',
+        'pipe:1',
       ];
 
-      forwardHeaders.forEach((h) => {
-        const val = driveRes.headers.get(h);
-        if (val) {
-          if (h === 'content-type' && (val.includes('octet-stream') || val.includes('text/plain'))) {
-            res.setHeader('Content-Type', 'video/x-matroska');
-          } else {
-            res.setHeader(h, val);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'none');
+      res.setHeader('Cache-Control', 'no-cache');
+
+      const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
+      let hasData = false;
+      let hasEnded = false;
+
+      req.on('close', () => {
+        try { ffmpegProc.kill('SIGKILL'); } catch {}
+      });
+
+      ffmpegProc.stderr.on('data', (data) => {
+        const errStr = data.toString();
+        if (errStr.includes('403') || errStr.includes('Server returned') || errStr.includes('HTTP error')) {
+          // Drive quota/access error - send error response
+          if (!hasData && !hasEnded && !res.headersSent) {
+            hasEnded = true;
+            try { ffmpegProc.kill(); } catch {}
+            res.status(503).json({
+              error: 'Google Drive access error. Try Drive Player mode.',
+              previewUrl: `https://drive.google.com/file/d/${fileId}/preview`,
+            });
           }
         }
       });
 
-      if (!res.getHeader('Content-Type')) {
-        res.setHeader('Content-Type', 'video/x-matroska');
-      }
+      ffmpegProc.stdout.on('data', () => {
+        hasData = true;
+      });
 
-      if (!driveRes.headers.get('accept-ranges')) {
-        res.setHeader('Accept-Ranges', 'bytes');
-      }
+      ffmpegProc.on('error', () => {
+        if (!res.headersSent) res.status(500).end();
+      });
 
-      if (!driveRes.body) {
-        return res.end();
-      }
+      ffmpegProc.on('close', (code) => {
+        hasEnded = true;
+        if (!hasData && !res.headersSent) {
+          res.status(500).json({ error: 'Transcoding failed. The file may be unavailable.' });
+        }
+      });
 
-      const { Readable } = await import('stream');
-      const nodeReadable = Readable.fromWeb(driveRes.body as any);
-      nodeReadable.on('error', () => {});
-      res.on('error', () => {});
-      nodeReadable.pipe(res);
+      ffmpegProc.stdout.pipe(res);
     } catch (err: any) {
       if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || req.destroyed) {
         return;
@@ -221,6 +252,7 @@ export class SourcesController {
       next(err);
     }
   }
+
 
   static async detect(req: Request, res: Response, next: NextFunction) {
     try {
