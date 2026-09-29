@@ -154,14 +154,14 @@ export const UniversalPlayer: React.FC = () => {
 
   // Subtitle track management & Default Subtitles toggle
   const [embeddedSubtitles, setEmbeddedSubtitles] = useState<SubtitleTrackInfo[]>([]);
-  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string>('off');
+  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string>('default');
   const [subtitleMenuAnchor, setSubtitleMenuAnchor] = useState<null | HTMLElement>(null);
   const [defaultSubtitlesEnabled, setDefaultSubtitlesEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_default_subtitles_enabled');
-      return saved === null ? false : saved === 'true';
+      return saved === null ? true : saved === 'true';
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -277,7 +277,8 @@ export const UniversalPlayer: React.FC = () => {
         if (data?.subtitleTracks && data.subtitleTracks.length > 0) {
           setEmbeddedSubtitles(data.subtitleTracks);
           if (defaultSubtitlesEnabled) {
-            setSelectedSubtitleId(data.subtitleTracks[0].id);
+            const defTrack = data.subtitleTracks.find((t: any) => t.default) || data.subtitleTracks[0];
+            setSelectedSubtitleId(defTrack.id);
           } else {
             setSelectedSubtitleId('off');
           }
@@ -1211,6 +1212,24 @@ export const UniversalPlayer: React.FC = () => {
               '& video': {
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'contain' : 'contain'),
               },
+              /* OTT Premium Subtitle Cue Styling (Netflix / Apple TV+ style) */
+              '& ::cue, & [data-part="cue"], & .vds-captions [data-part="cue"], & [data-media-captions] [data-part="cue"]': {
+                color: '#FFFFFF !important',
+                backgroundColor: 'rgba(10, 15, 26, 0.78) !important',
+                backgroundImage: 'none !important',
+                fontFamily: '"Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important',
+                fontWeight: '700 !important',
+                fontSize: 'clamp(1rem, 2.2vw, 1.45rem) !important',
+                lineHeight: '1.4 !important',
+                padding: '5px 14px !important',
+                borderRadius: '6px !important',
+                textShadow: '0 2px 4px rgba(0,0,0,0.9), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000 !important',
+                boxShadow: '0 4px 14px rgba(0,0,0,0.5) !important',
+                backdropFilter: 'blur(4px) !important',
+              },
+              '& [data-part="captions"], & .vds-captions, & media-captions': {
+                bottom: '44px !important',
+              },
             }}
             key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}`}
           >
@@ -1256,7 +1275,9 @@ export const UniversalPlayer: React.FC = () => {
             >
               <MediaProvider>
                 {embeddedSubtitles.map((sub) => {
-                  const isDefaultTrack = selectedSubtitleId === sub.id || (selectedSubtitleId === 'default' && sub.default);
+                  const isDefaultTrack =
+                    selectedSubtitleId === sub.id ||
+                    (selectedSubtitleId === 'default' && (sub.default || sub.id === embeddedSubtitles[0]?.id));
                   return (
                     <Track
                       key={sub.id}
