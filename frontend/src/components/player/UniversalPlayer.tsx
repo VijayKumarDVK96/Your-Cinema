@@ -169,20 +169,11 @@ export const UniversalPlayer: React.FC = () => {
   const [viewMode, setViewMode] = useState<'contain' | 'vertical-fit' | 'fill'>('contain');
 
   // Direct Stream player (Vidstack) defaults to 'stream' for full OTT features
-  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>(() => {
-    try {
-      const saved = localStorage.getItem('yourcinema_drive_mode');
-      if (saved === 'stream' || saved === 'iframe') return saved;
-    } catch {}
-    return 'stream';
-  });
+  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>('stream');
 
   const handleSetDriveMode = (mode: 'stream' | 'iframe') => {
     setDriveMode(mode);
     setStreamError(null);
-    try {
-      localStorage.setItem('yourcinema_drive_mode', mode);
-    } catch {}
   };
 
   const vidstackPlayerRef = useRef<MediaPlayerInstance>(null);
@@ -201,6 +192,7 @@ export const UniversalPlayer: React.FC = () => {
       setSelectedAudioIndex(0);
       setEmbeddedSubtitles([]);
       setSelectedSubtitleId(defaultSubtitlesEnabled ? 'default' : 'off');
+      setDriveMode('stream');
     }
     return () => {
       if (seekRetryTimerRef.current) {
@@ -1208,6 +1200,17 @@ export const UniversalPlayer: React.FC = () => {
                 backgroundColor: '#000',
                 borderRadius: 0,
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'scale-down' : 'contain'),
+                '--media-captions-offset': '52px',
+                '--media-cue-color': '#FFFFFF',
+                '--media-cue-bg': 'rgba(10, 15, 26, 0.82)',
+                '--media-cue-font-family': '"Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                '--media-cue-font-size': 'clamp(1.05rem, 2.2vw, 1.45rem)',
+                '--media-cue-font-weight': '700',
+                '--media-cue-line-height': '1.4',
+                '--media-cue-padding': '6px 14px',
+                '--media-cue-border-radius': '8px',
+                '--media-cue-text-shadow': '0 2px 6px rgba(0,0,0,0.95), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000',
+                '--media-cue-box-shadow': '0 4px 14px rgba(0,0,0,0.5)',
               },
               '& video': {
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'contain' : 'contain'),
@@ -1215,20 +1218,20 @@ export const UniversalPlayer: React.FC = () => {
               /* OTT Premium Subtitle Cue Styling (Netflix / Apple TV+ style) */
               '& ::cue, & [data-part="cue"], & .vds-captions [data-part="cue"], & [data-media-captions] [data-part="cue"]': {
                 color: '#FFFFFF !important',
-                backgroundColor: 'rgba(10, 15, 26, 0.78) !important',
+                backgroundColor: 'rgba(10, 15, 26, 0.82) !important',
                 backgroundImage: 'none !important',
                 fontFamily: '"Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important',
                 fontWeight: '700 !important',
-                fontSize: 'clamp(1rem, 2.2vw, 1.45rem) !important',
+                fontSize: 'clamp(1.05rem, 2.2vw, 1.45rem) !important',
                 lineHeight: '1.4 !important',
-                padding: '5px 14px !important',
-                borderRadius: '6px !important',
-                textShadow: '0 2px 4px rgba(0,0,0,0.9), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000 !important',
+                padding: '6px 14px !important',
+                borderRadius: '8px !important',
+                textShadow: '0 2px 6px rgba(0,0,0,0.95), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000 !important',
                 boxShadow: '0 4px 14px rgba(0,0,0,0.5) !important',
                 backdropFilter: 'blur(4px) !important',
               },
               '& [data-part="captions"], & .vds-captions, & media-captions': {
-                bottom: '44px !important',
+                bottom: '52px !important',
               },
             }}
             key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}`}
