@@ -127,16 +127,16 @@ export const UniversalPlayer: React.FC = () => {
   const [audioMenuAnchor, setAudioMenuAnchor] = useState<null | HTMLElement>(null);
   const [embeddedSubtitles, setEmbeddedSubtitles] = useState<SubtitleTrackInfo[]>([]);
 
-  // Default to Google Drive built-in player ('iframe') for native CC subtitles & audio tracks
-  const [driveMode, setDriveMode] = useState<'iframe' | 'stream'>(() => {
+  // Direct Stream player (Vidstack) is always active by default for full audio track switching & subtitles
+  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_drive_mode');
       if (saved === 'stream' || saved === 'iframe') return saved;
     } catch {}
-    return 'iframe';
+    return 'stream';
   });
 
-  const handleSetDriveMode = (mode: 'iframe' | 'stream') => {
+  const handleSetDriveMode = (mode: 'stream' | 'iframe') => {
     setDriveMode(mode);
     try {
       localStorage.setItem('yourcinema_drive_mode', mode);

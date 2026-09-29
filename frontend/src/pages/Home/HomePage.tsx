@@ -1,33 +1,37 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Box,
   Typography,
   Button,
   Grid,
   Chip,
-  Paper,
-  Stack,
-  LinearProgress,
+  IconButton,
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
 import TvIcon from '@mui/icons-material/Tv';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { MovieCard } from '../../components/common/MovieCard.js';
 import { SkeletonGrid } from '../../components/feedback/SkeletonGrid.js';
-import { usePlayer } from '../../context/PlayerContext.js';
 import { useAuth } from '../../context/AuthContext.js';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { openPlayer } = usePlayer();
+  const continueWatchingRef = useRef<HTMLDivElement>(null);
+
+  const scrollContinueWatching = (direction: 'left' | 'right') => {
+    if (continueWatchingRef.current) {
+      const scrollAmount = direction === 'left' ? -480 : 480;
+      continueWatchingRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Dynamic time greeting
   const getGreeting = () => {
@@ -56,11 +60,11 @@ export const HomePage: React.FC = () => {
     favorites: 0,
   };
 
-  // Fetch Watching Titles specifically for Continue Watching Hero & Rail
+  // Fetch Watching Titles for Continue Watching Carousel
   const { data: watchingData } = useQuery({
     queryKey: ['movies', 'watching', 'home'],
     queryFn: async () => {
-      const res = await api.get('/movies?status=watching&limit=10');
+      const res = await api.get('/movies?status=watching&limit=50');
       return res.data?.data;
     },
   });
@@ -94,25 +98,6 @@ export const HomePage: React.FC = () => {
 
   const allMovies = moviesData?.movies || [];
   const watchingList = watchingData?.movies || [];
-
-  // Currently watching candidate for resume hero
-  const continueWatchingMovie = watchingList.length > 0 ? watchingList[0] : null;
-  const otherWatching = watchingList.slice(1, 7);
-
-  const queryClient = useQueryClient();
-
-  const handleStartOver = async (movieToReset: any) => {
-    try {
-      await api.post(`/sources/movie/${movieToReset.user_movie_id}/progress`, {
-        positionSec: 0,
-        completed: false,
-      });
-      queryClient.invalidateQueries({ queryKey: ['movies'] });
-      queryClient.invalidateQueries({ queryKey: ['home'] });
-      queryClient.invalidateQueries({ queryKey: ['my-movies'] });
-    } catch (e) {}
-    openPlayer({ ...movieToReset, playback_position_sec: 0, watch_status: 'unwatched' });
-  };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -166,85 +151,8 @@ export const HomePage: React.FC = () => {
         </Button>
       </Box>
 
-      {/* Continue Watching Spotlight (If user has an active paused movie) */}
-      {continueWatchingMovie && (
-        <Paper
-          sx={{
-            p: { xs: 2.5, md: 3.5 },
-            borderRadius: 3,
-            backgroundColor: '#0F1523',
-            border: '1px solid rgba(56, 189, 248, 0.25)',
-            backgroundImage: continueWatchingMovie.backdrop_path
-              ? `linear-gradient(to right, #0F1523 35%, rgba(15, 21, 35, 0.85) 60%, rgba(15, 21, 35, 0.4)), url(${
-                  continueWatchingMovie.backdrop_path.startsWith('http')
-                    ? continueWatchingMovie.backdrop_path
-                    : `https://image.tmdb.org/t/p/w1280${continueWatchingMovie.backdrop_path}`
-                })`
-              : 'none',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-          }}
-        >
-          <Box sx={{ maxWidth: 600 }}>
-            <Chip
-              label="CONTINUE WATCHING"
-              size="small"
-              sx={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38BDF8', fontWeight: 700, mb: 1.5 }}
-            />
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#F8FAFC', mb: 1 }}>
-              {continueWatchingMovie.title}
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#94A3B8', mb: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-              {continueWatchingMovie.overview}
-            </Typography>
-
-            {/* Resume Progress Bar */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-              <LinearProgress
-                variant="determinate"
-                value={Math.min(
-                  Math.round(((continueWatchingMovie.playback_position_sec || 0) / ((continueWatchingMovie.runtime || 120) * 60)) * 100),
-                  95
-                )}
-                sx={{
-                  flexGrow: 1,
-                  height: 6,
-                  borderRadius: 3,
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  '& .MuiLinearProgress-bar': { backgroundColor: '#38BDF8' },
-                }}
-              />
-              <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 600 }}>
-                {continueWatchingMovie.last_played_time_formatted ? `${continueWatchingMovie.last_played_time_formatted} watched` : `${Math.floor((continueWatchingMovie.playback_position_sec || 0) / 60)}m watched`}
-              </Typography>
-            </Box>
-
-            <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<PlayArrowIcon />}
-                onClick={() => openPlayer(continueWatchingMovie)}
-                sx={{ fontWeight: 700, px: 3, py: 1 }}
-              >
-                Resume Playback
-              </Button>
-              <Button
-                variant="outlined"
-                color="inherit"
-                startIcon={<RestartAltIcon />}
-                onClick={() => handleStartOver(continueWatchingMovie)}
-                sx={{ fontWeight: 600, px: 2.2, py: 1, borderColor: 'rgba(255, 255, 255, 0.25)', color: '#F8FAFC' }}
-              >
-                Start Over
-              </Button>
-            </Stack>
-          </Box>
-        </Paper>
-      )}
-
-      {/* Rail: More In Progress / Continue Watching */}
-      {otherWatching && otherWatching.length > 0 && (
+      {/* Rail: Continue Watching Carousel */}
+      {watchingList.length > 0 && (
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box>
@@ -255,14 +163,60 @@ export const HomePage: React.FC = () => {
                 Pick up where you left off across your active titles
               </Typography>
             </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <IconButton
+                size="small"
+                onClick={() => scrollContinueWatching('left')}
+                sx={{
+                  color: '#94A3B8',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+                }}
+              >
+                <ChevronLeftIcon />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={() => scrollContinueWatching('right')}
+                sx={{
+                  color: '#94A3B8',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  '&:hover': { color: '#F8FAFC', backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+                }}
+              >
+                <ChevronRightIcon />
+              </IconButton>
+            </Box>
           </Box>
-          <Grid container spacing={2}>
-            {otherWatching.map((m: any) => (
-              <Grid item xs={6} sm={4} md={3} lg={2} key={m.user_movie_id}>
+          <Box
+            ref={continueWatchingRef}
+            sx={{
+              display: 'flex',
+              gap: 2,
+              overflowX: 'auto',
+              scrollBehavior: 'smooth',
+              pb: 2,
+              pt: 0.5,
+              px: 0.5,
+              '&::-webkit-scrollbar': { height: 6 },
+              '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: 3 },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(255, 255, 255, 0.15)', borderRadius: 3, '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.25)' } },
+            }}
+          >
+            {watchingList.map((m: any) => (
+              <Box
+                key={m.user_movie_id}
+                sx={{
+                  flex: '0 0 auto',
+                  width: { xs: 155, sm: 180, md: 200, lg: 215 },
+                }}
+              >
                 <MovieCard movie={m} />
-              </Grid>
+              </Box>
             ))}
-          </Grid>
+          </Box>
         </Box>
       )}
 
