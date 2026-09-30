@@ -177,6 +177,7 @@ export class SourcesController {
       const audioTrackParam = req.query.audioTrack || req.query.audioIndex;
       const audioIndex = audioTrackParam !== undefined && audioTrackParam !== '' ? parseInt(String(audioTrackParam), 10) : null;
       const seekSec = Math.max(0, parseInt(String(req.query.t || req.query.time || req.query.start || '0'), 10) || 0);
+      const quality = String(req.query.quality || req.query.res || '').toLowerCase();
 
       // Always transmux through ffmpeg for browser-compatible MP4 output
       // This handles MKV, AVI, and other formats that browsers can't play natively
@@ -184,6 +185,50 @@ export class SourcesController {
       const audioMap = (audioIndex !== null && !isNaN(audioIndex) && audioIndex > 0)
         ? `0:a:${audioIndex}`
         : '0:a:0';
+
+      const is360p = quality === '360p' || quality === 'lowest';
+      const is480p = quality === '480p' || quality === 'low' || quality === 'sd';
+      const is720p = quality === '720p' || quality === 'hd';
+
+      let videoCodecArgs: string[];
+      let audioBitrate = '192k';
+
+      if (is360p) {
+        videoCodecArgs = [
+          '-vf', 'scale=-2:360',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'zerolatency',
+          '-b:v', '450k',
+          '-maxrate', '600k',
+          '-bufsize', '1000k',
+        ];
+        audioBitrate = '96k';
+      } else if (is480p) {
+        videoCodecArgs = [
+          '-vf', 'scale=-2:480',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'zerolatency',
+          '-b:v', '750k',
+          '-maxrate', '1000k',
+          '-bufsize', '1500k',
+        ];
+        audioBitrate = '128k';
+      } else if (is720p) {
+        videoCodecArgs = [
+          '-vf', 'scale=-2:720',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'zerolatency',
+          '-b:v', '1800k',
+          '-maxrate', '2200k',
+          '-bufsize', '3000k',
+        ];
+        audioBitrate = '160k';
+      } else {
+        videoCodecArgs = ['-c:v', 'copy'];
+      }
 
       const ffmpegArgs = [
         '-v', 'error',
@@ -193,9 +238,9 @@ export class SourcesController {
         '-i', directUrl,
         '-map', '0:v:0',
         '-map', audioMap,
-        '-c:v', 'copy',
+        ...videoCodecArgs,
         '-c:a', 'aac',
-        '-b:a', '192k',
+        '-b:a', audioBitrate,
         '-ac', '2',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
         '-f', 'mp4',

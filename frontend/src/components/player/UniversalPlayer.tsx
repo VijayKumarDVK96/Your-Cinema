@@ -42,6 +42,7 @@ import ScreenRotationIcon from '@mui/icons-material/ScreenRotation';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AudiotrackIcon from '@mui/icons-material/Audiotrack';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import SpeedIcon from '@mui/icons-material/Speed';
 
 import '@vidstack/react/player/styles/default/theme.css';
 import '@vidstack/react/player/styles/default/layouts/video.css';
@@ -167,6 +168,17 @@ export const UniversalPlayer: React.FC = () => {
 
   // Mobile / Tablet vertical view mode: 'contain' | 'vertical-fit' | 'fill'
   const [viewMode, setViewMode] = useState<'contain' | 'vertical-fit' | 'fill'>('contain');
+
+  // Stream quality state for low-bandwidth mode: 'auto' | '360p' | '480p' | '720p'
+  const [streamQuality, setStreamQuality] = useState<'auto' | '360p' | '480p' | '720p'>(() => {
+    try {
+      const saved = localStorage.getItem('yourcinema_stream_quality');
+      return (saved as any) || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+  const [qualityMenuAnchor, setQualityMenuAnchor] = useState<null | HTMLElement>(null);
 
   // Direct Stream player (Vidstack) defaults to 'stream' for full OTT features
   const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>('stream');
@@ -359,6 +371,29 @@ export const UniversalPlayer: React.FC = () => {
       saveProgress(safePos, false);
     }
   }, [driveMode, saveProgress]);
+
+  // Handle switching video stream quality preset
+  const handleSelectQuality = useCallback((quality: 'auto' | '360p' | '480p' | '720p') => {
+    const player = vidstackPlayerRef.current;
+    const currentPos = player?.currentTime || currentSecRef.current;
+    const safePos = Math.max(0, Math.floor(currentPos));
+
+    setStreamQuality(quality);
+    setQualityMenuAnchor(null);
+    setStreamError(null);
+
+    try {
+      localStorage.setItem('yourcinema_stream_quality', quality);
+    } catch {}
+
+    currentSecRef.current = safePos;
+    initialSeekDoneRef.current = false;
+    setPlayerKey((k) => k + 1);
+
+    if (safePos > 0) {
+      saveProgress(safePos, false);
+    }
+  }, [saveProgress]);
 
   // Handle default subtitles setting toggle
   const handleToggleDefaultSubtitles = (enabled: boolean) => {
@@ -623,17 +658,19 @@ export const UniversalPlayer: React.FC = () => {
   const activeAudioTrack = effectiveAudioTracks.find((t) => t.index === selectedAudioIndex) || effectiveAudioTracks[0];
   const activeAudioLabel = activeAudioTrack?.label || 'Default Audio';
 
-  // Build stream URL with audio track and seek position for audio switching
+  // Build stream URL with audio track, quality setting, and seek position for audio/quality switching
   const buildStreamSrc = (): string => {
     if (!driveFileId) return '';
     const params = new URLSearchParams();
     if (selectedAudioIndex > 0) {
       params.set('audioIndex', String(selectedAudioIndex));
-      // Pass current time for server-side seeking during audio switch
-      const seekPos = Math.floor(currentSecRef.current || 0);
-      if (seekPos > 0) {
-        params.set('t', String(seekPos));
-      }
+    }
+    const seekPos = Math.floor(currentSecRef.current || 0);
+    if ((selectedAudioIndex > 0 || streamQuality !== 'auto') && seekPos > 0) {
+      params.set('t', String(seekPos));
+    }
+    if (streamQuality !== 'auto') {
+      params.set('quality', streamQuality);
     }
     const qs = params.toString();
     return `/api/sources/drive/${driveFileId}/stream${qs ? `?${qs}` : ''}`;
@@ -702,6 +739,20 @@ export const UniversalPlayer: React.FC = () => {
                 fontSize: '0.72rem',
                 backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.2)',
                 color: driveMode === 'iframe' ? '#34D399' : '#38BDF8',
+                fontWeight: 700,
+              }}
+            />
+          )}
+
+          {isDrive && driveMode === 'stream' && streamQuality !== 'auto' && (
+            <Chip
+              label={`Data Saver (${streamQuality})`}
+              size="small"
+              sx={{
+                height: 22,
+                fontSize: '0.72rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                color: '#F59E0B',
                 fontWeight: 700,
               }}
             />
@@ -853,6 +904,94 @@ export const UniversalPlayer: React.FC = () => {
 
           {/* Right: Audio Track Switcher + Subtitles Switcher + Start Over + Drive Mode */}
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            {/* Quality / Low Bandwidth Selector for Drive stream */}
+            {isDrive && driveMode === 'stream' && (
+              <>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={(e) => setQualityMenuAnchor(e.currentTarget)}
+                  startIcon={<SpeedIcon sx={{ fontSize: '14px !important', color: streamQuality === 'auto' ? '#94A3B8' : '#F59E0B' }} />}
+                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
+                  sx={{
+                    borderColor: streamQuality === 'auto' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(245, 158, 11, 0.5)',
+                    color: streamQuality === 'auto' ? '#CBD5E1' : '#F59E0B',
+                    backgroundColor: streamQuality === 'auto' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(245, 158, 11, 0.1)',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    py: 0.2,
+                    px: 1.2,
+                    textTransform: 'none',
+                    '&:hover': { borderColor: '#F59E0B', backgroundColor: 'rgba(245, 158, 11, 0.2)' },
+                  }}
+                >
+                  Quality: {streamQuality === 'auto' ? 'Auto (Original)' : `${streamQuality} Data Saver`}
+                </Button>
+                <Menu
+                  anchorEl={qualityMenuAnchor}
+                  open={Boolean(qualityMenuAnchor)}
+                  onClose={() => setQualityMenuAnchor(null)}
+                  PaperProps={{
+                    sx: {
+                      backgroundColor: '#0B1120',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      color: '#FFF',
+                      minWidth: 230,
+                      borderRadius: 2,
+                    },
+                  }}
+                >
+                  <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+                    STREAM QUALITY / DATA SAVER
+                  </Typography>
+                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+
+                  <MenuItem
+                    selected={streamQuality === 'auto'}
+                    onClick={() => handleSelectQuality('auto')}
+                    sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+                  >
+                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'auto' ? '#38BDF8' : '#F8FAFC', fontWeight: streamQuality === 'auto' ? 700 : 500 }}>
+                      Auto (Original Direct Stream)
+                    </Typography>
+                    {streamQuality === 'auto' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
+                  </MenuItem>
+
+                  <MenuItem
+                    selected={streamQuality === '480p'}
+                    onClick={() => handleSelectQuality('480p')}
+                    sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+                  >
+                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '480p' ? '#F59E0B' : '#F8FAFC', fontWeight: streamQuality === '480p' ? 700 : 500 }}>
+                      Low Data (480p - Slow Internet)
+                    </Typography>
+                    {streamQuality === '480p' && <CheckIcon sx={{ fontSize: 15, color: '#F59E0B', ml: 1.5 }} />}
+                  </MenuItem>
+
+                  <MenuItem
+                    selected={streamQuality === '360p'}
+                    onClick={() => handleSelectQuality('360p')}
+                    sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+                  >
+                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '360p' ? '#EF4444' : '#F8FAFC', fontWeight: streamQuality === '360p' ? 700 : 500 }}>
+                      Very Low (360p - Data Saver)
+                    </Typography>
+                    {streamQuality === '360p' && <CheckIcon sx={{ fontSize: 15, color: '#EF4444', ml: 1.5 }} />}
+                  </MenuItem>
+
+                  <MenuItem
+                    selected={streamQuality === '720p'}
+                    onClick={() => handleSelectQuality('720p')}
+                    sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+                  >
+                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '720p' ? '#34D399' : '#F8FAFC', fontWeight: streamQuality === '720p' ? 700 : 500 }}>
+                      HD (720p - Balanced)
+                    </Typography>
+                    {streamQuality === '720p' && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
+                  </MenuItem>
+                </Menu>
+              </>
+            )}
             {/* Audio Track Selector for Drive (only show if multiple tracks detected) */}
             {isDrive && hasMultipleAudio && (
               <>
