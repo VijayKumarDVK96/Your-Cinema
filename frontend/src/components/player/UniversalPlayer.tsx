@@ -99,7 +99,7 @@ interface SubtitleTrackInfo {
   default: boolean;
 }
 
-export type PlayerThemeMode = 'jellyfin' | 'plex' | 'cinema';
+export type PlayerThemeMode = 'jellyfin' | 'plex';
 
 // Format time in 00:00:00 or 00:00
 const formatPlaybackTime = (totalSeconds: number = 0): string => {
@@ -161,11 +161,11 @@ export const UniversalPlayer: React.FC = () => {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isAudioSwitching, setIsAudioSwitching] = useState<boolean>(false);
 
-  // Player Theme mode: 'jellyfin' (cyan/purple glow) | 'plex' (amber/gold glow) | 'cinema' (dark obsidian)
+  // Player Theme mode: 'jellyfin' (cyan/purple glow) | 'plex' (amber/gold glow)
   const [playerThemeMode, setPlayerThemeMode] = useState<PlayerThemeMode>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_player_theme');
-      return (saved as PlayerThemeMode) || 'jellyfin';
+      return saved === 'plex' ? 'plex' : 'jellyfin';
     } catch {
       return 'jellyfin';
     }
@@ -196,8 +196,8 @@ export const UniversalPlayer: React.FC = () => {
   // Mobile / Tablet vertical view mode: 'contain' | 'vertical-fit' | 'fill'
   const [viewMode, setViewMode] = useState<'contain' | 'vertical-fit' | 'fill'>('contain');
 
-  // Stream quality state: 'auto' | '1080p' | '720p' | '480p' | '360p'
-  const [streamQuality, setStreamQuality] = useState<'auto' | '1080p' | '720p' | '480p' | '360p'>(() => {
+  // Stream quality state: 'auto' | '1080p' | '720p' | '480p' | '360p' | 'direct'
+  const [streamQuality, setStreamQuality] = useState<'auto' | '1080p' | '720p' | '480p' | '360p' | 'direct'>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_stream_quality');
       return (saved as any) || 'auto';
@@ -212,9 +212,6 @@ export const UniversalPlayer: React.FC = () => {
   const [speedMenuAnchor, setSpeedMenuAnchor] = useState<null | HTMLElement>(null);
   const [themeMenuAnchor, setThemeMenuAnchor] = useState<null | HTMLElement>(null);
 
-  // Direct Stream player (Vidstack) vs iFrame player
-  const [driveMode, setDriveMode] = useState<'stream' | 'iframe'>('stream');
-
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
@@ -225,10 +222,11 @@ export const UniversalPlayer: React.FC = () => {
   // Ripple feedback for double tap seek
   const [seekFeedback, setSeekFeedback] = useState<{ type: 'rewind' | 'forward'; id: number } | null>(null);
 
-  const handleSetDriveMode = (mode: 'stream' | 'iframe') => {
-    setDriveMode(mode);
-    setStreamError(null);
-  };
+  // Weak connection and buffer stall detection
+  const [isBuffering, setIsBuffering] = useState<boolean>(false);
+  const [showWeakNetworkHint, setShowWeakNetworkHint] = useState<boolean>(false);
+  const bufferTimerRef = useRef<any>(null);
+  const streamRecoveryAttemptsRef = useRef<number>(0);
 
   const handleThemeChange = (mode: PlayerThemeMode) => {
     setPlayerThemeMode(mode);
@@ -250,11 +248,13 @@ export const UniversalPlayer: React.FC = () => {
       currentSecRef.current = initialSec;
       setStreamError(null);
       setIsAudioSwitching(false);
+      setIsBuffering(false);
+      setShowWeakNetworkHint(false);
+      streamRecoveryAttemptsRef.current = 0;
       setAudioTracks([]);
       setSelectedAudioIndex(0);
       setEmbeddedSubtitles([]);
       setSelectedSubtitleId(defaultSubtitlesEnabled ? 'default' : 'off');
-      setDriveMode('stream');
       setShowStatsForNerds(false);
       setShowShortcutsHelp(false);
     }
@@ -262,6 +262,10 @@ export const UniversalPlayer: React.FC = () => {
       if (seekRetryTimerRef.current) {
         clearTimeout(seekRetryTimerRef.current);
         seekRetryTimerRef.current = null;
+      }
+      if (bufferTimerRef.current) {
+        clearTimeout(bufferTimerRef.current);
+        bufferTimerRef.current = null;
       }
     };
   }, [isOpen, activeMovie?.user_movie_id, initialSec, defaultSubtitlesEnabled]);
@@ -306,7 +310,6 @@ export const UniversalPlayer: React.FC = () => {
     ? extractDriveFileId(activeSource?.external_file_id || activeSource?.external_url)
     : '';
   const drivePreviewUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
-  const driveEmbedSrc = drivePreviewUrl ? `${drivePreviewUrl}?autoplay=1` : '';
 
   // Fetch embedded audio tracks and subtitles from backend ffprobe
   useEffect(() => {
@@ -401,10 +404,6 @@ export const UniversalPlayer: React.FC = () => {
       } catch {}
     }
 
-    if (driveMode === 'iframe') {
-      handleSetDriveMode('stream');
-    }
-
     currentSecRef.current = safePos;
     initialSeekDoneRef.current = false;
     setPlayerKey((k) => k + 1);
@@ -412,10 +411,10 @@ export const UniversalPlayer: React.FC = () => {
     if (safePos > 0) {
       saveProgress(safePos, false);
     }
-  }, [driveMode, saveProgress]);
+  }, [saveProgress]);
 
-  // Stream quality switcher
-  const handleSelectQuality = useCallback((quality: 'auto' | '1080p' | '720p' | '480p' | '360p') => {
+  // Stream quality switcher (Optimized transcode / weak internet / data saver presets)
+  const handleSelectQuality = useCallback((quality: 'auto' | '1080p' | '720p' | '480p' | '360p' | 'direct') => {
     const player = vidstackPlayerRef.current;
     const currentPos = player?.currentTime || currentSecRef.current;
     const safePos = Math.max(0, Math.floor(currentPos));
@@ -423,6 +422,8 @@ export const UniversalPlayer: React.FC = () => {
     setStreamQuality(quality);
     setQualityMenuAnchor(null);
     setStreamError(null);
+    setIsBuffering(false);
+    setShowWeakNetworkHint(false);
 
     try {
       localStorage.setItem('yourcinema_stream_quality', quality);
@@ -794,13 +795,13 @@ export const UniversalPlayer: React.FC = () => {
 
   const streamSrc = buildStreamSrc();
 
-  // Dynamic Theme Colors: Jellyfin Cyan/Purple vs Plex Amber/Gold vs Dark Cinema
+  // Dynamic Theme Colors: Jellyfin Cyan/Purple vs Plex Amber/Gold
   const themeStyles = {
     jellyfin: {
       accentColor: '#00A4DC',
       secondaryAccent: '#AA5CC3',
       headerBg: 'linear-gradient(135deg, #0B0E17 0%, #151B2B 100%)',
-      dialogBorder: '1px solid rgba(0, 164, 220, 0.3)',
+      dialogBorder: '1px solid rgba(0, 164, 220, 0.35)',
       badgeBg: 'rgba(0, 164, 220, 0.2)',
       badgeText: '#00A4DC',
       glow: '0 0 20px rgba(0, 164, 220, 0.4)',
@@ -813,15 +814,6 @@ export const UniversalPlayer: React.FC = () => {
       badgeBg: 'rgba(229, 160, 13, 0.2)',
       badgeText: '#E5A00D',
       glow: '0 0 20px rgba(229, 160, 13, 0.4)',
-    },
-    cinema: {
-      accentColor: '#38BDF8',
-      secondaryAccent: '#0284C7',
-      headerBg: 'linear-gradient(135deg, #04060A 0%, #0F172A 100%)',
-      dialogBorder: '1px solid rgba(56, 189, 248, 0.25)',
-      badgeBg: 'rgba(56, 189, 248, 0.2)',
-      badgeText: '#38BDF8',
-      glow: '0 0 20px rgba(56, 189, 248, 0.35)',
     },
   }[playerThemeMode];
 
@@ -906,28 +898,21 @@ export const UniversalPlayer: React.FC = () => {
 
           {isDrive && (
             <Chip
-              label={driveMode === 'iframe' ? 'Drive Web Player' : 'Direct Stream'}
+              label={
+                streamQuality === 'auto'
+                  ? 'Adaptive OTT Stream'
+                  : streamQuality === 'direct'
+                  ? 'Direct Pass-Through'
+                  : `${streamQuality} Stream`
+              }
               size="small"
               sx={{
                 height: 22,
                 fontSize: '0.72rem',
-                backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.2)',
-                color: driveMode === 'iframe' ? '#34D399' : '#38BDF8',
+                backgroundColor: themeStyles.badgeBg,
+                color: themeStyles.badgeText,
                 fontWeight: 700,
-              }}
-            />
-          )}
-
-          {isDrive && driveMode === 'stream' && streamQuality !== 'auto' && (
-            <Chip
-              label={`${streamQuality} Data Saver`}
-              size="small"
-              sx={{
-                height: 22,
-                fontSize: '0.72rem',
-                backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                color: '#F59E0B',
-                fontWeight: 700,
+                border: `1px solid ${themeStyles.accentColor}30`,
               }}
             />
           )}
@@ -947,6 +932,21 @@ export const UniversalPlayer: React.FC = () => {
             />
           )}
 
+          {isDrive && isBuffering && (
+            <Chip
+              icon={<CircularProgress size={10} sx={{ color: '#F59E0B !important' }} />}
+              label="Buffering..."
+              size="small"
+              sx={{
+                height: 22,
+                fontSize: '0.72rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                color: '#F59E0B',
+                fontWeight: 700,
+              }}
+            />
+          )}
+
           {isYouTube && (
             <Chip
               icon={<MovieIcon sx={{ fontSize: '13px !important', color: '#EF4444 !important' }} />}
@@ -960,7 +960,7 @@ export const UniversalPlayer: React.FC = () => {
         {/* Right Header Action Icons */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
           {/* Theme Switcher Button */}
-          <Tooltip title="Switch Player Theme (Jellyfin / Plex / Cinema)">
+          <Tooltip title="Switch Player Theme (Jellyfin / Plex)">
             <IconButton
               size="small"
               onClick={(e) => setThemeMenuAnchor(e.currentTarget)}
@@ -984,7 +984,7 @@ export const UniversalPlayer: React.FC = () => {
             }}
           >
             <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-              PLAYER THEME CLONE
+              PLAYER THEME
             </Typography>
             <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
 
@@ -1000,13 +1000,6 @@ export const UniversalPlayer: React.FC = () => {
                 Plex Cinema Player (Gold / Amber)
               </Typography>
               {playerThemeMode === 'plex' && <CheckIcon sx={{ fontSize: 15, color: '#E5A00D', ml: 1 }} />}
-            </MenuItem>
-
-            <MenuItem selected={playerThemeMode === 'cinema'} onClick={() => handleThemeChange('cinema')}>
-              <Typography variant="body2" sx={{ color: playerThemeMode === 'cinema' ? '#38BDF8' : '#F8FAFC', fontWeight: playerThemeMode === 'cinema' ? 700 : 500 }}>
-                Dark Cinema (Sky Blue)
-              </Typography>
-              {playerThemeMode === 'cinema' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1 }} />}
             </MenuItem>
           </Menu>
 
@@ -1111,7 +1104,7 @@ export const UniversalPlayer: React.FC = () => {
           {/* Right: Audio Track + Subtitles + Speed + Quality + Start Over + Drive Mode */}
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
             {/* Playback Speed Switcher */}
-            {isDrive && driveMode === 'stream' && (
+            {isDrive && (
               <>
                 <Button
                   size="small"
@@ -1158,27 +1151,27 @@ export const UniversalPlayer: React.FC = () => {
             )}
 
             {/* Quality / Low Bandwidth Selector for Drive stream */}
-            {isDrive && driveMode === 'stream' && (
+            {isDrive && (
               <>
                 <Button
                   size="small"
                   variant="outlined"
                   onClick={(e) => setQualityMenuAnchor(e.currentTarget)}
-                  startIcon={<SettingsIcon sx={{ fontSize: '14px !important', color: streamQuality === 'auto' ? '#94A3B8' : '#F59E0B' }} />}
+                  startIcon={<SettingsIcon sx={{ fontSize: '14px !important', color: streamQuality === 'auto' ? '#38BDF8' : (streamQuality === '480p' || streamQuality === '360p' ? '#F59E0B' : themeStyles.accentColor) }} />}
                   endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
                   sx={{
-                    borderColor: streamQuality === 'auto' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(245, 158, 11, 0.5)',
-                    color: streamQuality === 'auto' ? '#CBD5E1' : '#F59E0B',
-                    backgroundColor: streamQuality === 'auto' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(245, 158, 11, 0.1)',
+                    borderColor: streamQuality === 'auto' ? 'rgba(56, 189, 248, 0.4)' : (streamQuality === '480p' || streamQuality === '360p' ? 'rgba(245, 158, 11, 0.5)' : `${themeStyles.accentColor}60`),
+                    color: streamQuality === 'auto' ? '#38BDF8' : (streamQuality === '480p' || streamQuality === '360p' ? '#F59E0B' : '#F8FAFC'),
+                    backgroundColor: streamQuality === 'auto' ? 'rgba(56, 189, 248, 0.08)' : (streamQuality === '480p' || streamQuality === '360p' ? 'rgba(245, 158, 11, 0.1)' : themeStyles.badgeBg),
                     fontSize: '11px',
                     fontWeight: 700,
                     py: 0.2,
                     px: 1.2,
                     textTransform: 'none',
-                    '&:hover': { borderColor: '#F59E0B', backgroundColor: 'rgba(245, 158, 11, 0.2)' },
+                    '&:hover': { borderColor: themeStyles.accentColor, backgroundColor: themeStyles.badgeBg },
                   }}
                 >
-                  Quality: {streamQuality === 'auto' ? 'Auto (Original)' : `${streamQuality}`}
+                  Quality: {streamQuality === 'auto' ? 'Auto (Adaptive)' : (streamQuality === 'direct' ? 'Direct Pass-Through' : streamQuality)}
                 </Button>
                 <Menu
                   anchorEl={qualityMenuAnchor}
@@ -1187,51 +1180,90 @@ export const UniversalPlayer: React.FC = () => {
                   PaperProps={{
                     sx: {
                       backgroundColor: '#0B1120',
-                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      border: `1px solid ${themeStyles.accentColor}40`,
                       color: '#FFF',
-                      minWidth: 230,
+                      minWidth: 260,
                       borderRadius: 2,
                     },
                   }}
                 >
                   <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-                    STREAM QUALITY / TRANSCODE
+                    STREAM QUALITY / BANDWIDTH PRESETS
                   </Typography>
                   <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
 
                   <MenuItem selected={streamQuality === 'auto'} onClick={() => handleSelectQuality('auto')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'auto' ? themeStyles.accentColor : '#F8FAFC', fontWeight: streamQuality === 'auto' ? 700 : 500 }}>
-                      Auto (Direct Pass-Through)
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'auto' ? themeStyles.accentColor : '#F8FAFC', fontWeight: streamQuality === 'auto' ? 700 : 500 }}>
+                        ⚡ Auto (Fast Load & Smooth Stream)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                        Adapts for weak & fast connections
+                      </Typography>
+                    </Box>
                     {streamQuality === 'auto' && <CheckIcon sx={{ fontSize: 15, color: themeStyles.accentColor, ml: 1.5 }} />}
                   </MenuItem>
 
-                  <MenuItem selected={streamQuality === '1080p'} onClick={() => handleSelectQuality('1080p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '1080p' ? '#38BDF8' : '#F8FAFC', fontWeight: streamQuality === '1080p' ? 700 : 500 }}>
-                      1080p Full HD (Transcode)
-                    </Typography>
-                    {streamQuality === '1080p' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
-                  </MenuItem>
-
                   <MenuItem selected={streamQuality === '720p'} onClick={() => handleSelectQuality('720p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '720p' ? '#34D399' : '#F8FAFC', fontWeight: streamQuality === '720p' ? 700 : 500 }}>
-                      720p HD (Balanced)
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '720p' ? '#34D399' : '#F8FAFC', fontWeight: streamQuality === '720p' ? 700 : 500 }}>
+                        🎬 720p HD (Balanced & Crisp)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                        Ideal for normal broadband/WiFi
+                      </Typography>
+                    </Box>
                     {streamQuality === '720p' && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
                   </MenuItem>
 
+                  <MenuItem selected={streamQuality === '1080p'} onClick={() => handleSelectQuality('1080p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '1080p' ? '#38BDF8' : '#F8FAFC', fontWeight: streamQuality === '1080p' ? 700 : 500 }}>
+                        📺 1080p Full HD (High Quality)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                        Maximum fidelity transcode
+                      </Typography>
+                    </Box>
+                    {streamQuality === '1080p' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
+                  </MenuItem>
+
                   <MenuItem selected={streamQuality === '480p'} onClick={() => handleSelectQuality('480p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '480p' ? '#F59E0B' : '#F8FAFC', fontWeight: streamQuality === '480p' ? 700 : 500 }}>
-                      480p SD (Low Data)
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '480p' ? '#F59E0B' : '#F8FAFC', fontWeight: streamQuality === '480p' ? 700 : 500 }}>
+                        📶 480p SD (Weak Connection)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#F59E0B' }}>
+                        Buffers instantly on slow internet
+                      </Typography>
+                    </Box>
                     {streamQuality === '480p' && <CheckIcon sx={{ fontSize: 15, color: '#F59E0B', ml: 1.5 }} />}
                   </MenuItem>
 
                   <MenuItem selected={streamQuality === '360p'} onClick={() => handleSelectQuality('360p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '360p' ? '#EF4444' : '#F8FAFC', fontWeight: streamQuality === '360p' ? 700 : 500 }}>
-                      360p (Data Saver Mode)
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '360p' ? '#EF4444' : '#F8FAFC', fontWeight: streamQuality === '360p' ? 700 : 500 }}>
+                        📉 360p Data Saver (Extreme Low Data)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                        For 3G/throttled hotspot networks
+                      </Typography>
+                    </Box>
                     {streamQuality === '360p' && <CheckIcon sx={{ fontSize: 15, color: '#EF4444', ml: 1.5 }} />}
+                  </MenuItem>
+
+                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+
+                  <MenuItem selected={streamQuality === 'direct'} onClick={() => handleSelectQuality('direct')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'direct' ? '#A855F7' : '#F8FAFC', fontWeight: streamQuality === 'direct' ? 700 : 500 }}>
+                        🚀 Direct Pass-Through (Raw Source)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                        Original file copy (Requires high-speed connection)
+                      </Typography>
+                    </Box>
+                    {streamQuality === 'direct' && <CheckIcon sx={{ fontSize: 15, color: '#A855F7', ml: 1.5 }} />}
                   </MenuItem>
                 </Menu>
               </>
@@ -1462,43 +1494,6 @@ export const UniversalPlayer: React.FC = () => {
               </Button>
             </Tooltip>
 
-            {/* Drive Mode switcher */}
-            {isDrive && driveFileId && !isMobileOrTablet && (
-              <ButtonGroup size="small" variant="outlined" sx={{ backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 1.5 }}>
-                <Tooltip title="Jellyfin/Plex OTT Stream with Audio Tracks & Subtitles">
-                  <Button
-                    onClick={() => handleSetDriveMode('stream')}
-                    startIcon={<GraphicEqIcon sx={{ fontSize: '13px !important' }} />}
-                    sx={{
-                      fontSize: '11px',
-                      textTransform: 'none',
-                      fontWeight: driveMode === 'stream' ? 700 : 500,
-                      backgroundColor: driveMode === 'stream' ? themeStyles.badgeBg : 'transparent',
-                      color: driveMode === 'stream' ? themeStyles.accentColor : '#94A3B8',
-                      borderColor: driveMode === 'stream' ? themeStyles.accentColor : 'rgba(255,255,255,0.15)',
-                    }}
-                  >
-                    Direct Stream
-                  </Button>
-                </Tooltip>
-                <Tooltip title="Google Drive Built-in Web Player">
-                  <Button
-                    onClick={() => handleSetDriveMode('iframe')}
-                    startIcon={<VolumeUpIcon sx={{ fontSize: '13px !important' }} />}
-                    sx={{
-                      fontSize: '11px',
-                      textTransform: 'none',
-                      fontWeight: driveMode === 'iframe' ? 700 : 500,
-                      backgroundColor: driveMode === 'iframe' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-                      color: driveMode === 'iframe' ? '#34D399' : '#94A3B8',
-                      borderColor: driveMode === 'iframe' ? '#059669' : 'rgba(255,255,255,0.15)',
-                    }}
-                  >
-                    Drive Player
-                  </Button>
-                </Tooltip>
-              </ButtonGroup>
-            )}
           </Stack>
         </Box>
       )}
@@ -1600,7 +1595,13 @@ export const UniversalPlayer: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Stream Quality Preset:</Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#34D399' }}>{streamQuality === 'auto' ? 'Original Direct Pass-Through' : streamQuality}</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#34D399' }}>{streamQuality === 'auto' ? 'Auto (Adaptive Low-Latency)' : (streamQuality === 'direct' ? 'Direct Pass-Through (Raw Source)' : streamQuality)}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="caption" sx={{ color: '#94A3B8' }}>Network Buffer Health:</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: isBuffering ? '#F59E0B' : '#34D399' }}>
+                    {isBuffering ? 'Buffering (Adapting chunk)' : 'Stable (Continuous streaming)'}
+                  </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Active Audio Stream:</Typography>
@@ -1685,42 +1686,106 @@ export const UniversalPlayer: React.FC = () => {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: 'rgba(0,0,0,0.88)',
-              zIndex: 20,
+              backgroundColor: 'rgba(0,0,0,0.92)',
+              zIndex: 35,
               p: 3,
             }}
           >
-            <ErrorOutlineIcon sx={{ fontSize: 48, color: '#F87171', mb: 2 }} />
+            <ErrorOutlineIcon sx={{ fontSize: 52, color: '#F87171', mb: 2 }} />
             <Typography variant="h6" sx={{ color: '#F8FAFC', mb: 1, fontWeight: 700, textAlign: 'center' }}>
-              Stream Error
+              Stream Interrupted
             </Typography>
-            <Typography variant="body2" sx={{ color: '#94A3B8', mb: 3, textAlign: 'center', maxWidth: 400 }}>
+            <Typography variant="body2" sx={{ color: '#94A3B8', mb: 3, textAlign: 'center', maxWidth: 440, lineHeight: 1.6 }}>
               {streamError}
             </Typography>
-            <Stack direction="row" spacing={2}>
+            <Stack direction="row" spacing={2} flexWrap="wrap" justifyContent="center">
               <Button
                 variant="contained"
                 onClick={() => {
                   setStreamError(null);
+                  setIsBuffering(false);
+                  streamRecoveryAttemptsRef.current = 0;
                   setPlayerKey((k) => k + 1);
                 }}
-                sx={{ backgroundColor: themeStyles.accentColor, fontWeight: 700, textTransform: 'none' }}
+                sx={{ backgroundColor: themeStyles.accentColor, fontWeight: 700, textTransform: 'none', px: 3 }}
               >
-                Retry Stream
+                Retry Playback
               </Button>
               <Button
                 variant="outlined"
-                onClick={() => handleSetDriveMode('iframe')}
-                sx={{ borderColor: '#34D399', color: '#34D399', fontWeight: 700, textTransform: 'none' }}
+                onClick={() => {
+                  setStreamError(null);
+                  handleSelectQuality('480p');
+                }}
+                sx={{ borderColor: '#F59E0B', color: '#F59E0B', fontWeight: 700, textTransform: 'none', px: 2.5 }}
               >
-                Use Drive Player
+                Switch to 480p (Data Saver)
               </Button>
             </Stack>
           </Box>
         )}
 
-        {/* Case 1a: Vidstack Modern OTT Video Player for Google Drive with Subtitles, Audio Tracks & Auto Vertical Adaptor */}
-        {isDrive && driveFileId && driveMode === 'stream' && (
+        {/* Weak Connection Floating Hint / Quick Quality Switch Pill */}
+        {showWeakNetworkHint && isBuffering && (
+          <Fade in={showWeakNetworkHint}>
+            <Paper
+              elevation={16}
+              sx={{
+                position: 'absolute',
+                bottom: 80,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 35,
+                backgroundColor: 'rgba(15, 23, 42, 0.94)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid rgba(245, 158, 11, 0.6)',
+                borderRadius: 4,
+                px: 2,
+                py: 0.8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                boxShadow: '0 8px 30px rgba(0,0,0,0.85)',
+              }}
+            >
+              <CircularProgress size={16} sx={{ color: '#F59E0B' }} />
+              <Typography variant="caption" sx={{ color: '#F8FAFC', fontWeight: 600 }}>
+                Weak connection detected
+              </Typography>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => {
+                  setShowWeakNetworkHint(false);
+                  handleSelectQuality('480p');
+                }}
+                sx={{
+                  backgroundColor: '#F59E0B',
+                  color: '#000',
+                  fontWeight: 800,
+                  fontSize: '11px',
+                  py: 0.2,
+                  px: 1.2,
+                  borderRadius: 2,
+                  textTransform: 'none',
+                  '&:hover': { backgroundColor: '#D97706' },
+                }}
+              >
+                Switch to 480p SD
+              </Button>
+              <IconButton
+                size="small"
+                onClick={() => setShowWeakNetworkHint(false)}
+                sx={{ color: '#94A3B8', p: 0.2 }}
+              >
+                <CloseIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Paper>
+          </Fade>
+        )}
+
+        {/* Jellyfin & Plex Modern OTT Video Player for Google Drive with Subtitles, Audio Tracks & Auto Vertical Adaptor */}
+        {isDrive && driveFileId && (
           <Box
             sx={{
               width: '100%',
@@ -1780,14 +1845,34 @@ export const UniversalPlayer: React.FC = () => {
               storage={`yourcinema_playback_${activeMovie.user_movie_id}`}
               autoPlay
               playsInline
+              load="eager"
+              streamType="on-demand"
               onCanPlay={() => {
                 setIsAudioSwitching(false);
+                setIsBuffering(false);
+                setShowWeakNetworkHint(false);
+                streamRecoveryAttemptsRef.current = 0;
                 if (!initialSeekDoneRef.current && currentSecRef.current > 0) {
                   if (selectedAudioIndex > 0) {
                     initialSeekDoneRef.current = true;
                   } else {
                     performSeek(currentSecRef.current);
                   }
+                }
+              }}
+              onWaiting={() => {
+                setIsBuffering(true);
+                if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current);
+                bufferTimerRef.current = setTimeout(() => {
+                  setShowWeakNetworkHint(true);
+                }, 4000);
+              }}
+              onPlaying={() => {
+                setIsBuffering(false);
+                setShowWeakNetworkHint(false);
+                if (bufferTimerRef.current) {
+                  clearTimeout(bufferTimerRef.current);
+                  bufferTimerRef.current = null;
                 }
               }}
               onTimeUpdate={(detail) => {
@@ -1807,7 +1892,15 @@ export const UniversalPlayer: React.FC = () => {
               }}
               onError={() => {
                 setIsAudioSwitching(false);
-                setStreamError('Failed to load video stream. The file may be unavailable or the format is unsupported.');
+                setIsBuffering(false);
+                if (streamRecoveryAttemptsRef.current < 2) {
+                  streamRecoveryAttemptsRef.current += 1;
+                  setTimeout(() => {
+                    setPlayerKey((k) => k + 1);
+                  }, 1200);
+                } else {
+                  setStreamError('Playback interrupted due to a network timeout or connection drop. You can retry or switch to Data Saver (480p SD).');
+                }
               }}
             >
               <MediaProvider>
@@ -1830,21 +1923,6 @@ export const UniversalPlayer: React.FC = () => {
               </MediaProvider>
               <DefaultVideoLayout icons={defaultLayoutIcons} />
             </MediaPlayer>
-          </Box>
-        )}
-
-        {/* Case 1b: Google Drive Fallback Preview Iframe */}
-        {isDrive && driveFileId && driveMode === 'iframe' && driveEmbedSrc && (
-          <Box sx={{ width: '100%', height: '100%', minHeight: '560px', backgroundColor: '#000' }} key={`drive-iframe-${playerKey}`}>
-            <iframe
-              src={driveEmbedSrc}
-              title={`${activeMovie.title} Google Drive Stream`}
-              width="100%"
-              height="100%"
-              style={{ border: 'none', backgroundColor: '#000', width: '100%', height: '100%', minHeight: '560px' }}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
           </Box>
         )}
 

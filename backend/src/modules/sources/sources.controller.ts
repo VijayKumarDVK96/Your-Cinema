@@ -24,8 +24,14 @@ export class SourcesController {
 
       const ffprobeProc = spawn('ffprobe', [
         '-v', 'error',
-        '-probesize', '32M',
-        '-analyzeduration', '32M',
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '4',
+        '-rw_timeout', '15000000',
+        '-probesize', '8M',
+        '-analyzeduration', '8M',
         '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title',
         '-of', 'json',
         directUrl,
@@ -125,6 +131,14 @@ export class SourcesController {
 
       const ffmpegProc = spawn('ffmpeg', [
         '-v', 'error',
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '4',
+        '-rw_timeout', '20000000',
+        '-probesize', '8M',
+        '-analyzeduration', '8M',
         '-i', directUrl,
         '-map', `0:s:${trackIndex}`,
         '-f', 'webvtt',
@@ -177,71 +191,126 @@ export class SourcesController {
       const audioTrackParam = req.query.audioTrack || req.query.audioIndex;
       const audioIndex = audioTrackParam !== undefined && audioTrackParam !== '' ? parseInt(String(audioTrackParam), 10) : null;
       const seekSec = Math.max(0, parseInt(String(req.query.t || req.query.time || req.query.start || '0'), 10) || 0);
-      const quality = String(req.query.quality || req.query.res || '').toLowerCase();
+      const quality = String(req.query.quality || req.query.res || 'auto').toLowerCase();
 
-      // Always transmux through ffmpeg for browser-compatible MP4 output
-      // This handles MKV, AVI, and other formats that browsers can't play natively
       const { spawn } = await import('child_process');
       const audioMap = (audioIndex !== null && !isNaN(audioIndex) && audioIndex > 0)
         ? `0:a:${audioIndex}`
         : '0:a:0';
 
+      const isDirect = quality === 'direct' || quality === 'original' || quality === 'passthrough';
       const is360p = quality === '360p' || quality === 'lowest';
       const is480p = quality === '480p' || quality === 'low' || quality === 'sd';
       const is720p = quality === '720p' || quality === 'hd';
+      const is1080p = quality === '1080p' || quality === 'fhd';
 
       let videoCodecArgs: string[];
-      let audioBitrate = '192k';
+      let audioBitrate = '128k';
 
-      if (is360p) {
+      if (isDirect) {
+        // Direct stream pass-through for unmetered high-speed broadband
+        videoCodecArgs = ['-c:v', 'copy'];
+        audioBitrate = '192k';
+      } else if (is360p) {
+        // Ultra low bandwidth mode (3G / extreme throttled internet)
         videoCodecArgs = [
           '-vf', 'scale=-2:360',
           '-c:v', 'libx264',
-          '-preset', 'ultrafast',
+          '-preset', 'veryfast',
           '-tune', 'zerolatency',
-          '-b:v', '450k',
-          '-maxrate', '600k',
-          '-bufsize', '1000k',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '360k',
+          '-maxrate', '480k',
+          '-bufsize', '750k',
+          '-g', '48',
+          '-keyint_min', '24',
         ];
-        audioBitrate = '96k';
+        audioBitrate = '64k';
       } else if (is480p) {
+        // Weak internet / data saver mode (1-2 Mbps connections)
         videoCodecArgs = [
           '-vf', 'scale=-2:480',
           '-c:v', 'libx264',
-          '-preset', 'ultrafast',
+          '-preset', 'veryfast',
           '-tune', 'zerolatency',
-          '-b:v', '750k',
-          '-maxrate', '1000k',
-          '-bufsize', '1500k',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '650k',
+          '-maxrate', '850k',
+          '-bufsize', '1200k',
+          '-g', '48',
+          '-keyint_min', '24',
         ];
-        audioBitrate = '128k';
+        audioBitrate = '96k';
       } else if (is720p) {
+        // 720p HD balanced mode
         videoCodecArgs = [
           '-vf', 'scale=-2:720',
           '-c:v', 'libx264',
-          '-preset', 'ultrafast',
+          '-preset', 'veryfast',
           '-tune', 'zerolatency',
-          '-b:v', '1800k',
-          '-maxrate', '2200k',
-          '-bufsize', '3000k',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '1400k',
+          '-maxrate', '1800k',
+          '-bufsize', '2500k',
+          '-g', '48',
+          '-keyint_min', '24',
+        ];
+        audioBitrate = '128k';
+      } else if (is1080p) {
+        // 1080p Full HD mode
+        videoCodecArgs = [
+          '-vf', 'scale=-2:1080',
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'zerolatency',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '3000k',
+          '-maxrate', '3800k',
+          '-bufsize', '5000k',
+          '-g', '48',
+          '-keyint_min', '24',
         ];
         audioBitrate = '160k';
       } else {
-        videoCodecArgs = ['-c:v', 'copy'];
+        // 'auto' Default: Smart Adaptive Streaming for reliable playback on ANY connection
+        // Capped at 720p to guarantee fast keyframe loading and eliminate endless buffering on weak networks
+        videoCodecArgs = [
+          '-vf', 'scale=-2:\'min(720,ih)\'',
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'zerolatency',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '1300k',
+          '-maxrate', '1700k',
+          '-bufsize', '2400k',
+          '-g', '48',
+          '-keyint_min', '24',
+        ];
+        audioBitrate = '128k';
       }
 
       const ffmpegArgs = [
         '-v', 'error',
         '-hide_banner',
-        // Input seeking BEFORE -i for fast keyframe-level seeking (near-instant)
+        // High-resilience network args to survive weak / unstable connections
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '4',
+        '-rw_timeout', '25000000',
+        '-probesize', '8M',
+        '-analyzeduration', '8M',
+        // Fast keyframe-level input seek before -i
         ...(seekSec > 0 ? ['-ss', String(seekSec)] : []),
         '-i', directUrl,
         '-map', '0:v:0',
-        '-map', audioMap,
+        '-map', `${audioMap}?`,
         ...videoCodecArgs,
         '-c:a', 'aac',
         '-b:a', audioBitrate,
         '-ac', '2',
+        ...(seekSec > 0 ? ['-avoid_negative_ts', 'make_zero'] : []),
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
         '-f', 'mp4',
         'pipe:1',
@@ -249,26 +318,40 @@ export class SourcesController {
 
       res.setHeader('Content-Type', 'video/mp4');
       res.setHeader('Accept-Ranges', 'none');
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
 
       const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
       let hasData = false;
-      let hasEnded = false;
+      let isCleanedUp = false;
 
-      req.on('close', () => {
-        try { ffmpegProc.kill('SIGKILL'); } catch {}
-      });
+      const cleanupProcess = () => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        try {
+          if (!ffmpegProc.killed) {
+            ffmpegProc.kill();
+            if (process.platform === 'win32' && ffmpegProc.pid) {
+              import('child_process').then(({ exec }) => {
+                exec(`taskkill /pid ${ffmpegProc.pid} /T /F`, () => {});
+              }).catch(() => {});
+            }
+          }
+        } catch {}
+      };
+
+      req.on('close', cleanupProcess);
+      res.on('finish', cleanupProcess);
+      res.on('error', cleanupProcess);
 
       ffmpegProc.stderr.on('data', (data) => {
         const errStr = data.toString();
-        if (errStr.includes('403') || errStr.includes('Server returned') || errStr.includes('HTTP error')) {
-          // Drive quota/access error - send error response
-          if (!hasData && !hasEnded && !res.headersSent) {
-            hasEnded = true;
-            try { ffmpegProc.kill(); } catch {}
+        if (errStr.includes('403') || errStr.includes('Server returned 403') || errStr.includes('HTTP error 403')) {
+          if (!hasData && !res.headersSent) {
+            cleanupProcess();
             res.status(503).json({
-              error: 'Google Drive access error. Try Drive Player mode.',
-              previewUrl: `https://drive.google.com/file/d/${fileId}/preview`,
+              error: 'Google Drive rate limit or access error. Please verify the file sharing settings.',
             });
           }
         }
@@ -278,15 +361,18 @@ export class SourcesController {
         hasData = true;
       });
 
-      ffmpegProc.on('error', () => {
-        if (!res.headersSent) res.status(500).end();
+      ffmpegProc.on('error', (err) => {
+        cleanupProcess();
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'FFmpeg transcode error', details: err.message });
+        }
       });
 
       ffmpegProc.on('close', (code) => {
-        hasEnded = true;
         if (!hasData && !res.headersSent) {
-          res.status(500).json({ error: 'Transcoding failed. The file may be unavailable.' });
+          res.status(500).json({ error: 'Playback stream failed to start. The file may be temporarily unavailable.' });
         }
+        cleanupProcess();
       });
 
       ffmpegProc.stdout.pipe(res);
