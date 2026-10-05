@@ -7,6 +7,7 @@ import { validate } from '../../middlewares/validate.js';
 const router = Router();
 
 // Public media streaming and track metadata
+router.get('/drive/:fileId/info', SourcesController.getDriveFileInfo);
 router.get('/drive/:fileId/media-info', SourcesController.getDriveMediaInfo);
 router.get('/drive/:fileId/subtitles/:trackIndex', SourcesController.getDriveSubtitleTrack);
 router.get(['/drive/:fileId/stream', '/drive/*'], SourcesController.streamDrive);

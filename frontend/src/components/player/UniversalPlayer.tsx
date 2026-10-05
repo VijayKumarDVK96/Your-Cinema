@@ -228,6 +228,34 @@ export const UniversalPlayer: React.FC = () => {
   const bufferTimerRef = useRef<any>(null);
   const streamRecoveryAttemptsRef = useRef<number>(0);
 
+  // YouTube-style Buffer Chunk Strategy: 50MB (Normal) vs 10MB (Low Connection)
+  const [bufferChunkMode, setBufferChunkMode] = useState<'50mb' | '10mb'>(() => {
+    try {
+      const saved = localStorage.getItem('yourcinema_buffer_chunk');
+      if (saved === '10mb' || saved === '50mb') return saved;
+      const navConn = (navigator as any).connection;
+      if (navConn && (navConn.effectiveType === '2g' || navConn.effectiveType === '3g' || navConn.downlink < 3)) {
+        return '10mb';
+      }
+      return '50mb';
+    } catch {
+      return '50mb';
+    }
+  });
+  const [bufferMenuAnchor, setBufferMenuAnchor] = useState<null | HTMLElement>(null);
+
+  // Responsive desktop player controls & scrubber state
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [currentPlaybackSec, setCurrentPlaybackSec] = useState<number>(initialSec);
+  const [bufferedSec, setBufferedSec] = useState<number>(0);
+  const [controlsVisible, setControlsVisible] = useState<boolean>(true);
+  const [hoverTimeSec, setHoverTimeSec] = useState<number | null>(null);
+  const [hoverPercent, setHoverPercent] = useState<number>(0);
+  const [isHoveringTimeline, setIsHoveringTimeline] = useState<boolean>(false);
+  const [isDraggingTimeline, setIsDraggingTimeline] = useState<boolean>(false);
+  const controlsTimeoutRef = useRef<any>(null);
+  const scrubberContainerRef = useRef<HTMLDivElement>(null);
+
   const handleThemeChange = (mode: PlayerThemeMode) => {
     setPlayerThemeMode(mode);
     setThemeMenuAnchor(null);
@@ -246,6 +274,10 @@ export const UniversalPlayer: React.FC = () => {
     if (isOpen) {
       initialSeekDoneRef.current = false;
       currentSecRef.current = initialSec;
+      setCurrentPlaybackSec(initialSec);
+      setBufferedSec(0);
+      setIsPlaying(true);
+      setControlsVisible(true);
       setStreamError(null);
       setIsAudioSwitching(false);
       setIsBuffering(false);
@@ -266,6 +298,10 @@ export const UniversalPlayer: React.FC = () => {
       if (bufferTimerRef.current) {
         clearTimeout(bufferTimerRef.current);
         bufferTimerRef.current = null;
+      }
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+        controlsTimeoutRef.current = null;
       }
     };
   }, [isOpen, activeMovie?.user_movie_id, initialSec, defaultSubtitlesEnabled]);
@@ -489,12 +525,16 @@ export const UniversalPlayer: React.FC = () => {
       const target = Math.max(0, Math.min(runtimeSec, cur + delta));
       player.currentTime = target;
       currentSecRef.current = target;
+      setCurrentPlaybackSec(target);
+      saveProgress(target, false);
     } else if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
       const cur = ytPlayerRef.current.getCurrentTime() || 0;
       const target = Math.max(0, Math.min(runtimeSec, cur + delta));
       ytPlayerRef.current.seekTo(target, true);
+      currentSecRef.current = target;
+      setCurrentPlaybackSec(target);
     }
-  }, [isYouTube, runtimeSec]);
+  }, [isYouTube, runtimeSec, saveProgress]);
 
   // Fullscreen toggle handler
   const handleToggleFullscreen = () => {
@@ -519,6 +559,119 @@ export const UniversalPlayer: React.FC = () => {
           (player.provider as any).video.requestPictureInPicture();
         }
       } catch {}
+    }
+  };
+
+  // Desktop timeline scrubbing and forward/rewind with mouse cursor
+  const handleTimelineScrub = useCallback((clientX: number) => {
+    const elem = scrubberContainerRef.current;
+    if (!elem) return;
+    const rect = elem.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const targetSec = Math.floor(ratio * runtimeSec);
+    currentSecRef.current = targetSec;
+    setCurrentPlaybackSec(targetSec);
+    saveProgress(targetSec, false);
+
+    const player = vidstackPlayerRef.current;
+    if (player) {
+      try {
+        player.currentTime = targetSec;
+      } catch {}
+    }
+
+    if (selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) {
+      setPlayerKey((k) => k + 1);
+    }
+  }, [runtimeSec, saveProgress, selectedAudioIndex, streamQuality]);
+
+  const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingTimeline(true);
+    handleTimelineScrub(e.clientX);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      handleTimelineScrub(moveEvent.clientX);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingTimeline(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTimelineHoverMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverPercent(ratio * 100);
+    setHoverTimeSec(Math.floor(ratio * runtimeSec));
+    setIsHoveringTimeline(true);
+  };
+
+  const handleTogglePlay = () => {
+    const player = vidstackPlayerRef.current;
+    if (player) {
+      if (player.paused) {
+        player.play().catch(() => {});
+        setIsPlaying(true);
+      } else {
+        player.pause();
+        setIsPlaying(false);
+      }
+    }
+  };
+
+  const handleVolumeChange = (_: any, newVol: number | number[]) => {
+    const v = Number(newVol);
+    setVolume(v);
+    setIsMuted(v === 0);
+    const player = vidstackPlayerRef.current;
+    if (player) {
+      try {
+        player.volume = v / 100;
+        player.muted = v === 0;
+      } catch {}
+    }
+  };
+
+  const handleToggleMute = () => {
+    const player = vidstackPlayerRef.current;
+    if (player) {
+      const nextMuted = !isMuted;
+      setIsMuted(nextMuted);
+      try {
+        player.muted = nextMuted;
+      } catch {}
+    }
+  };
+
+  const handleSelectBufferMode = (mode: '50mb' | '10mb') => {
+    setBufferChunkMode(mode);
+    setBufferMenuAnchor(null);
+    try {
+      localStorage.setItem('yourcinema_buffer_chunk', mode);
+    } catch {}
+    setPlayerKey((k) => k + 1);
+  };
+
+  const handlePlayerMouseMove = () => {
+    setControlsVisible(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    if (isPlaying && !isDraggingTimeline) {
+      controlsTimeoutRef.current = setTimeout(() => {
+        setControlsVisible(false);
+      }, 3500);
+    }
+  };
+
+  const handlePlayerMouseLeave = () => {
+    if (isPlaying && !isDraggingTimeline) {
+      setControlsVisible(false);
     }
   };
 
@@ -779,11 +932,12 @@ export const UniversalPlayer: React.FC = () => {
   const buildStreamSrc = (): string => {
     if (!driveFileId) return '';
     const params = new URLSearchParams();
+    params.set('chunk', bufferChunkMode);
     if (selectedAudioIndex > 0) {
       params.set('audioIndex', String(selectedAudioIndex));
     }
     const seekPos = Math.floor(currentSecRef.current || 0);
-    if ((selectedAudioIndex > 0 || streamQuality !== 'auto') && seekPos > 0) {
+    if ((selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) && seekPos > 0) {
       params.set('t', String(seekPos));
     }
     if (streamQuality !== 'auto') {
@@ -1842,6 +1996,8 @@ export const UniversalPlayer: React.FC = () => {
                 bottom: '68px !important',
               },
             }}
+            onMouseMove={handlePlayerMouseMove}
+            onMouseLeave={handlePlayerMouseLeave}
             key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}`}
           >
             <MediaPlayer
@@ -1870,6 +2026,7 @@ export const UniversalPlayer: React.FC = () => {
                 const cur = Math.floor(typeof detail === 'number' ? detail : (detail as any)?.currentTime ?? 0);
                 if (cur > 0) {
                   currentSecRef.current = cur;
+                  setCurrentPlaybackSec(cur);
                 }
               }}
               onWaiting={() => {
@@ -1880,6 +2037,7 @@ export const UniversalPlayer: React.FC = () => {
                 }, 4000);
               }}
               onPlaying={() => {
+                setIsPlaying(true);
                 setIsBuffering(false);
                 setShowWeakNetworkHint(false);
                 if (bufferTimerRef.current) {
@@ -1887,16 +2045,44 @@ export const UniversalPlayer: React.FC = () => {
                   bufferTimerRef.current = null;
                 }
               }}
+              onPause={() => {
+                setIsPlaying(false);
+                const cur = Math.floor(vidstackPlayerRef.current?.currentTime || currentSecRef.current);
+                if (cur > 0) {
+                  saveProgress(cur, false);
+                }
+              }}
               onTimeUpdate={(detail) => {
                 const cur = Math.floor(detail.currentTime);
                 if (cur > 0) {
                   currentSecRef.current = cur;
+                  setCurrentPlaybackSec(cur);
                 }
-              }}
-              onPause={() => {
-                const cur = Math.floor(vidstackPlayerRef.current?.currentTime || currentSecRef.current);
-                if (cur > 0) {
-                  saveProgress(cur, false);
+                // YouTube-style buffer calculation
+                try {
+                  const player = vidstackPlayerRef.current;
+                  const videoElem = (player as any)?.provider?.video || (player as any)?.el?.querySelector('video');
+                  if (videoElem && videoElem.buffered && videoElem.buffered.length > 0) {
+                    let foundRange = false;
+                    for (let i = 0; i < videoElem.buffered.length; i++) {
+                      const bStart = videoElem.buffered.start(i);
+                      const bEnd = videoElem.buffered.end(i);
+                      if (cur >= bStart && cur <= bEnd) {
+                        setBufferedSec(bEnd);
+                        foundRange = true;
+                        break;
+                      }
+                    }
+                    if (!foundRange) {
+                      setBufferedSec(videoElem.buffered.end(videoElem.buffered.length - 1));
+                    }
+                  } else {
+                    const chunkEst = bufferChunkMode === '50mb' ? 120 : 35;
+                    setBufferedSec(Math.min(runtimeSec, cur + chunkEst));
+                  }
+                } catch {
+                  const chunkEst = bufferChunkMode === '50mb' ? 120 : 35;
+                  setBufferedSec(Math.min(runtimeSec, cur + chunkEst));
                 }
               }}
               onEnded={() => {
@@ -1933,8 +2119,378 @@ export const UniversalPlayer: React.FC = () => {
                   );
                 })}
               </MediaProvider>
-              <DefaultVideoLayout icons={defaultLayoutIcons} />
+
+              {/* Mobile uses DefaultVideoLayout touch controls */}
+              {isMobileOrTablet && <DefaultVideoLayout icons={defaultLayoutIcons} />}
             </MediaPlayer>
+
+            {/* Desktop Screen Cinema Controls Overlay */}
+            {!isMobileOrTablet && (
+              <Fade in={controlsVisible || !isPlaying}>
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    pointerEvents: 'none',
+                    zIndex: 25,
+                  }}
+                >
+                  {/* Clickable center area to toggle play/pause */}
+                  <Box
+                    sx={{
+                      flex: 1,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      pointerEvents: 'auto',
+                    }}
+                    onClick={handleTogglePlay}
+                  >
+                    {!isPlaying && !isBuffering && (
+                      <Box
+                        sx={{
+                          width: 72,
+                          height: 72,
+                          borderRadius: '50%',
+                          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                          border: `2px solid ${themeStyles.accentColor}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: themeStyles.glow,
+                          transition: 'transform 0.15s ease',
+                          '&:hover': { transform: 'scale(1.1)' },
+                        }}
+                      >
+                        <PlayArrowIcon sx={{ fontSize: 44, color: '#FFF' }} />
+                      </Box>
+                    )}
+                  </Box>
+
+                  {/* Bottom Controls Bar with YouTube-style Scrubber & Buffer Bar */}
+                  <Box
+                    sx={{
+                      background: 'linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.75) 70%, transparent 100%)',
+                      px: 2.5,
+                      pt: 2,
+                      pb: 1.5,
+                      pointerEvents: 'auto',
+                    }}
+                  >
+                    {/* YouTube-style Full-width Scrubber Bar with Buffer & Hover Preview */}
+                    <Box
+                      ref={scrubberContainerRef}
+                      className="cinema-timeline-container"
+                      onMouseDown={handleTimelineMouseDown}
+                      onMouseMove={handleTimelineHoverMove}
+                      onMouseLeave={() => setIsHoveringTimeline(false)}
+                    >
+                      <Box className="cinema-timeline-track">
+                        {/* YouTube-style light buffer bar */}
+                        <Box
+                          className="cinema-timeline-buffer"
+                          sx={{
+                            width: `${Math.min(100, Math.max(0, (bufferedSec / runtimeSec) * 100))}%`,
+                          }}
+                        />
+                        {/* Played progress bar */}
+                        <Box
+                          className="cinema-timeline-played"
+                          sx={{
+                            width: `${Math.min(100, Math.max(0, (currentPlaybackSec / runtimeSec) * 100))}%`,
+                            backgroundColor: themeStyles.accentColor,
+                            boxShadow: themeStyles.glow,
+                          }}
+                        />
+                        {/* Scrubber thumb */}
+                        <Box
+                          className="cinema-timeline-thumb"
+                          sx={{
+                            left: `${Math.min(100, Math.max(0, (currentPlaybackSec / runtimeSec) * 100))}%`,
+                            backgroundColor: '#FFF',
+                            boxShadow: `0 0 10px ${themeStyles.accentColor}`,
+                          }}
+                        />
+                      </Box>
+
+                      {/* Hover timestamp tooltip */}
+                      {isHoveringTimeline && hoverTimeSec !== null && (
+                        <Box
+                          className="cinema-time-tooltip"
+                          sx={{ left: `${hoverPercent}%` }}
+                        >
+                          {formatPlaybackTime(hoverTimeSec)}
+                        </Box>
+                      )}
+                    </Box>
+
+                    {/* Controls Row */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.8 }}>
+                      {/* Left controls: Play, 10s Rewind/Forward, Volume, Time */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+                        <Tooltip title={isPlaying ? 'Pause (Space / K)' : 'Play (Space / K)'}>
+                          <IconButton
+                            onClick={handleTogglePlay}
+                            sx={{ color: '#FFF', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                          >
+                            {isPlaying ? <PauseIcon sx={{ fontSize: 26 }} /> : <PlayArrowIcon sx={{ fontSize: 26 }} />}
+                          </IconButton>
+                        </Tooltip>
+
+                        <Tooltip title="Rewind 10s (J / Left Arrow)">
+                          <IconButton
+                            onClick={() => handleSkipSeconds(-10)}
+                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                          >
+                            <Replay10Icon sx={{ fontSize: 22 }} />
+                          </IconButton>
+                        </Tooltip>
+
+                        <Tooltip title="Forward 10s (L / Right Arrow)">
+                          <IconButton
+                            onClick={() => handleSkipSeconds(10)}
+                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                          >
+                            <Forward10Icon sx={{ fontSize: 22 }} />
+                          </IconButton>
+                        </Tooltip>
+
+                        {/* Volume Control */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, ml: 0.5 }}>
+                          <Tooltip title={isMuted ? 'Unmute (M)' : 'Mute (M)'}>
+                            <IconButton
+                              onClick={handleToggleMute}
+                              sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            >
+                              {isMuted || volume === 0 ? <VolumeOffIcon sx={{ fontSize: 20 }} /> : <VolumeUpIcon sx={{ fontSize: 20 }} />}
+                            </IconButton>
+                          </Tooltip>
+                          <Slider
+                            size="small"
+                            value={isMuted ? 0 : volume}
+                            onChange={handleVolumeChange}
+                            min={0}
+                            max={100}
+                            sx={{
+                              width: 75,
+                              color: themeStyles.accentColor,
+                              height: 4,
+                              '& .MuiSlider-thumb': {
+                                width: 10,
+                                height: 10,
+                                '&:hover, &.Mui-focusVisible': {
+                                  boxShadow: `0 0 0 6px ${themeStyles.accentColor}30`,
+                                },
+                              },
+                            }}
+                          />
+                        </Box>
+
+                        {/* Time Display */}
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: '#E2E8F0',
+                            fontFamily: 'monospace',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            ml: 1,
+                            userSelect: 'none',
+                          }}
+                        >
+                          {formatPlaybackTime(currentPlaybackSec)} / {formatPlaybackTime(runtimeSec)}
+                        </Typography>
+                      </Box>
+
+                      {/* Right controls: Buffer Strategy, Audio, Subtitles, Quality, Speed, PiP, Fullscreen */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {/* YouTube-style Buffer Strategy Toggle */}
+                        <Tooltip title="YouTube-style Chunk Buffering Strategy">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => setBufferMenuAnchor(e.currentTarget)}
+                            startIcon={<GraphicEqIcon sx={{ fontSize: '13px !important', color: bufferChunkMode === '50mb' ? '#38BDF8' : '#F59E0B' }} />}
+                            endIcon={<ArrowDropDownIcon sx={{ fontSize: '13px !important' }} />}
+                            sx={{
+                              borderColor: bufferChunkMode === '50mb' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(245, 158, 11, 0.5)',
+                              color: bufferChunkMode === '50mb' ? '#38BDF8' : '#F59E0B',
+                              backgroundColor: bufferChunkMode === '50mb' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              py: 0.2,
+                              px: 1,
+                              textTransform: 'none',
+                              '&:hover': { borderColor: themeStyles.accentColor },
+                            }}
+                          >
+                            Buffer: {bufferChunkMode === '50mb' ? '50MB Chunk' : '10MB Chunk'}
+                          </Button>
+                        </Tooltip>
+                        <Menu
+                          anchorEl={bufferMenuAnchor}
+                          open={Boolean(bufferMenuAnchor)}
+                          onClose={() => setBufferMenuAnchor(null)}
+                          PaperProps={{
+                            sx: {
+                              backgroundColor: '#0B1120',
+                              border: `1px solid ${themeStyles.accentColor}40`,
+                              color: '#FFF',
+                              minWidth: 260,
+                              borderRadius: 2,
+                            },
+                          }}
+                        >
+                          <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+                            YOUTUBE-STYLE BUFFER STRATEGY
+                          </Typography>
+                          <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+
+                          <MenuItem selected={bufferChunkMode === '50mb'} onClick={() => handleSelectBufferMode('50mb')} sx={{ py: 0.8 }}>
+                            <Box>
+                              <Typography variant="body2" sx={{ fontSize: '12px', color: bufferChunkMode === '50mb' ? '#38BDF8' : '#FFF', fontWeight: 700 }}>
+                                ⚡ 50MB Buffer (Broadband / High Speed)
+                              </Typography>
+                              <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                                Preloads 50MB ahead for smooth high-res playback
+                              </Typography>
+                            </Box>
+                            {bufferChunkMode === '50mb' && <CheckIcon sx={{ fontSize: 14, color: '#38BDF8', ml: 1.5 }} />}
+                          </MenuItem>
+
+                          <MenuItem selected={bufferChunkMode === '10mb'} onClick={() => handleSelectBufferMode('10mb')} sx={{ py: 0.8 }}>
+                            <Box>
+                              <Typography variant="body2" sx={{ fontSize: '12px', color: bufferChunkMode === '10mb' ? '#F59E0B' : '#FFF', fontWeight: 700 }}>
+                                📶 10MB Buffer (Weak Connection / Data Saver)
+                              </Typography>
+                              <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+                                Fast 10MB chunk downloads to prevent stalls on slow internet
+                              </Typography>
+                            </Box>
+                            {bufferChunkMode === '10mb' && <CheckIcon sx={{ fontSize: 14, color: '#F59E0B', ml: 1.5 }} />}
+                          </MenuItem>
+                        </Menu>
+
+                        {/* Audio Track Selector */}
+                        {hasMultipleAudio && (
+                          <Tooltip title="Select Audio Track">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={(e) => setAudioMenuAnchor(e.currentTarget)}
+                              startIcon={<AudiotrackIcon sx={{ fontSize: '13px !important' }} />}
+                              sx={{
+                                borderColor: 'rgba(255, 255, 255, 0.2)',
+                                color: '#E2E8F0',
+                                fontSize: '11px',
+                                py: 0.2,
+                                px: 1,
+                                textTransform: 'none',
+                                '&:hover': { borderColor: themeStyles.accentColor },
+                              }}
+                            >
+                              Audio
+                            </Button>
+                          </Tooltip>
+                        )}
+
+                        {/* Subtitle Track Selector */}
+                        {embeddedSubtitles.length > 0 && (
+                          <Tooltip title="Subtitles / Closed Captions">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={(e) => setSubtitleMenuAnchor(e.currentTarget)}
+                              startIcon={selectedSubtitleId === 'off' ? <ClosedCaptionDisabledIcon sx={{ fontSize: '13px !important' }} /> : <ClosedCaptionIcon sx={{ fontSize: '13px !important', color: '#10B981' }} />}
+                              sx={{
+                                borderColor: selectedSubtitleId === 'off' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(16, 185, 129, 0.4)',
+                                color: selectedSubtitleId === 'off' ? '#94A3B8' : '#34D399',
+                                fontSize: '11px',
+                                py: 0.2,
+                                px: 1,
+                                textTransform: 'none',
+                                '&:hover': { borderColor: '#10B981' },
+                              }}
+                            >
+                              Subtitles
+                            </Button>
+                          </Tooltip>
+                        )}
+
+                        {/* Quality Preset */}
+                        <Tooltip title="Stream Quality">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => setQualityMenuAnchor(e.currentTarget)}
+                            startIcon={<SettingsIcon sx={{ fontSize: '13px !important' }} />}
+                            sx={{
+                              borderColor: 'rgba(255, 255, 255, 0.2)',
+                              color: '#E2E8F0',
+                              fontSize: '11px',
+                              py: 0.2,
+                              px: 1,
+                              textTransform: 'none',
+                              '&:hover': { borderColor: themeStyles.accentColor },
+                            }}
+                          >
+                            {streamQuality}
+                          </Button>
+                        </Tooltip>
+
+                        {/* Speed */}
+                        <Tooltip title="Playback Speed">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => setSpeedMenuAnchor(e.currentTarget)}
+                            sx={{
+                              borderColor: 'rgba(255, 255, 255, 0.2)',
+                              color: '#E2E8F0',
+                              fontSize: '11px',
+                              py: 0.2,
+                              px: 0.8,
+                              textTransform: 'none',
+                              minWidth: 42,
+                              '&:hover': { borderColor: themeStyles.accentColor },
+                            }}
+                          >
+                            {playbackSpeed}x
+                          </Button>
+                        </Tooltip>
+
+                        {/* PiP */}
+                        <Tooltip title="Picture-in-Picture">
+                          <IconButton
+                            onClick={handleTogglePiP}
+                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                          >
+                            <PictureInPictureAltIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </Tooltip>
+
+                        {/* Fullscreen */}
+                        <Tooltip title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}>
+                          <IconButton
+                            onClick={handleToggleFullscreen}
+                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                          >
+                            {isFullscreen ? <FullscreenExitIcon sx={{ fontSize: 20 }} /> : <FullscreenIcon sx={{ fontSize: 20 }} />}
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </Box>
+                  </Box>
+                </Box>
+              </Fade>
+            )}
           </Box>
         )}
 
