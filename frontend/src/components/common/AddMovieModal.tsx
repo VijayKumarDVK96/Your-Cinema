@@ -41,6 +41,7 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
+import { WatchlistTreeSelect } from './WatchlistTreeSelect.js';
 
 interface AddMovieModalProps {
   open: boolean;
@@ -425,42 +426,29 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
 
                 {/* Watchlist Selector */}
                 <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel sx={{ color: '#94A3B8', fontSize: '0.85rem' }}>Watchlist</InputLabel>
-                    <Select
-                      value={defaultWatchlistId}
-                      label="Watchlist"
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setDefaultWatchlistId(val);
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.5, display: 'block' }}>
+                      Watchlist
+                    </Typography>
+                    <WatchlistTreeSelect
+                      value={defaultWatchlistId || 'none'}
+                      onChange={(newId) => {
+                        const actualId = newId === 'none' || newId === '__new__' ? '' : newId;
+                        setDefaultWatchlistId(actualId);
                         setItemOptions((prev) => {
                           const updated = { ...prev };
                           Object.keys(updated).forEach((id) => {
-                            updated[Number(id)] = { ...updated[Number(id)], watchlistId: val };
+                            updated[Number(id)] = { ...updated[Number(id)], watchlistId: actualId };
                           });
                           return updated;
                         });
                       }}
-                      sx={{
-                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                        color: '#F8FAFC',
-                        borderRadius: 2,
-                        fontSize: '0.85rem',
-                      }}
-                    >
-                      <MenuItem value="">
-                        <em>None (Unassigned)</em>
-                      </MenuItem>
-                      {selectableWatchlists.map((w: any) => (
-                        <MenuItem key={w.id} value={w.id}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <PlaylistPlayIcon sx={{ fontSize: 16, color: '#E5A93C' }} />
-                            {w.name}
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                      watchlists={selectableWatchlists}
+                      noneLabel="None (Unassigned)"
+                      allowCreateNew={false}
+                      minWidth="100%"
+                    />
+                  </Box>
                 </Grid>
 
                 {/* Rating & Favorite */}
@@ -910,32 +898,22 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
 
                           {/* Watchlist Selector */}
                           <Grid item xs={12} sm={4}>
-                            <FormControl fullWidth size="small">
-                              <InputLabel sx={{ color: '#94A3B8', fontSize: '0.8rem' }}>Watchlist</InputLabel>
-                              <Select
-                                value={currentOpts.watchlistId}
-                                label="Watchlist"
-                                onChange={(e) => updateItemOption(item.id, 'watchlistId', e.target.value)}
-                                sx={{
-                                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                                  color: '#F8FAFC',
-                                  borderRadius: 1.5,
-                                  fontSize: '0.82rem',
+                            <Box>
+                              <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 600, mb: 0.5, display: 'block' }}>
+                                Watchlist
+                              </Typography>
+                              <WatchlistTreeSelect
+                                value={currentOpts.watchlistId || 'none'}
+                                onChange={(newId) => {
+                                  const actualId = newId === 'none' || newId === '__new__' ? '' : newId;
+                                  updateItemOption(item.id, 'watchlistId', actualId);
                                 }}
-                              >
-                                <MenuItem value="">
-                                  <em>None (Unassigned)</em>
-                                </MenuItem>
-                                {selectableWatchlists.map((w: any) => (
-                                  <MenuItem key={w.id} value={w.id}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <PlaylistPlayIcon sx={{ fontSize: 16, color: '#E5A93C' }} />
-                                      {w.name}
-                                    </Box>
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </FormControl>
+                                watchlists={selectableWatchlists}
+                                noneLabel="None (Unassigned)"
+                                allowCreateNew={false}
+                                minWidth="100%"
+                              />
+                            </Box>
                           </Grid>
 
                           {/* Personal Rating */}
