@@ -1799,10 +1799,11 @@ export const UniversalPlayer: React.FC = () => {
               '& [data-media-player]': {
                 width: '100%',
                 height: '100%',
+                minHeight: isMobileOrTablet ? 'calc(100dvh - 100px)' : '580px',
                 backgroundColor: '#000',
                 borderRadius: 0,
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'scale-down' : 'contain'),
-                '--media-captions-offset': '52px',
+                '--media-captions-offset': '68px',
                 '--media-cue-color': '#FFFFFF',
                 '--media-cue-bg': 'rgba(10, 15, 26, 0.85)',
                 '--media-cue-font-family': '"Outfit", "Inter", -apple-system, sans-serif',
@@ -1814,6 +1815,11 @@ export const UniversalPlayer: React.FC = () => {
                 '--media-cue-text-shadow': '0 2px 6px rgba(0,0,0,0.95), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000',
                 '--media-cue-box-shadow': '0 4px 14px rgba(0,0,0,0.5)',
                 '--media-brand': themeStyles.accentColor,
+                '--video-brand': themeStyles.accentColor,
+                '--video-focus-ring-color': themeStyles.accentColor,
+              },
+              '& .vds-video-layout': {
+                '--video-brand': themeStyles.accentColor,
               },
               '& video': {
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'contain' : 'contain'),
@@ -1833,7 +1839,7 @@ export const UniversalPlayer: React.FC = () => {
                 backdropFilter: 'blur(4px) !important',
               },
               '& [data-part="captions"], & .vds-captions, & media-captions': {
-                bottom: '52px !important',
+                bottom: '68px !important',
               },
             }}
             key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}`}
@@ -1858,6 +1864,12 @@ export const UniversalPlayer: React.FC = () => {
                   } else {
                     performSeek(currentSecRef.current);
                   }
+                }
+              }}
+              onSeeked={(detail) => {
+                const cur = Math.floor(typeof detail === 'number' ? detail : (detail as any)?.currentTime ?? 0);
+                if (cur > 0) {
+                  currentSecRef.current = cur;
                 }
               }}
               onWaiting={() => {

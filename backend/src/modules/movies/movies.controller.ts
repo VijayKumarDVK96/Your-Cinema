@@ -68,7 +68,16 @@ export class MoviesController {
         throw new BadRequestError('tmdb_id is required');
       }
 
-      const movie = await MoviesService.addMovie(userId, tmdbId, mediaType);
+      const initialData = {
+        watch_status: req.body.watch_status,
+        personal_rating: req.body.personal_rating !== undefined ? req.body.personal_rating : undefined,
+        is_favorite: req.body.is_favorite !== undefined ? req.body.is_favorite : undefined,
+        assigned_genre: req.body.assigned_genre !== undefined ? req.body.assigned_genre : undefined,
+        watchlist_ids: req.body.watchlist_ids || (req.body.watchlist_id ? [req.body.watchlist_id] : undefined),
+        watchlist_id: req.body.watchlist_id,
+      };
+
+      const movie = await MoviesService.addMovie(userId, tmdbId, mediaType, initialData);
       return sendCreated(res, movie);
     } catch (err) {
       next(err);

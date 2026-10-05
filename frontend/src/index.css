@@ -51,3 +51,81 @@ img {
   height: auto;
   display: block;
 }
+
+/* Vidstack Player Desktop & Mobile Visibility & Styling */
+.vds-video-layout {
+  --video-brand: #00A4DC;
+  --video-focus-ring-color: #00A4DC;
+  z-index: 20 !important;
+}
+
+/* Make sure bottom controls, scrubber bar and buttons are always visible on hover and active on desktop */
+media-player[data-controls] .vds-controls,
+.vds-video-layout .vds-controls,
+[data-media-player] .vds-controls {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  z-index: 25 !important;
+}
+
+/* Time Slider / Scrubber Bar */
+.vds-time-slider,
+.vds-slider {
+  cursor: pointer !important;
+  height: 28px !important;
+  display: flex !important;
+  align-items: center !important;
+  z-index: 30 !important;
+  touch-action: none !important;
+}
+
+.vds-slider-track {
+  height: 6px !important;
+  border-radius: 3px !important;
+  background-color: rgba(255, 255, 255, 0.25) !important;
+  transition: height 0.15s ease !important;
+}
+
+.vds-time-slider:hover .vds-slider-track {
+  height: 8px !important;
+}
+
+.vds-slider-track-fill {
+  background-color: #00A4DC !important;
+  border-radius: 3px !important;
+}
+
+.vds-slider-thumb {
+  width: 14px !important;
+  height: 14px !important;
+  background-color: #FFFFFF !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 8px rgba(0, 164, 220, 0.8) !important;
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  transition: transform 0.15s ease !important;
+}
+
+.vds-time-slider:hover .vds-slider-thumb {
+  transform: scale(1.3) !important;
+}
+
+/* Bottom Controls Bar Styling */
+.vds-controls-group {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.7) 60%, transparent 100%) !important;
+  padding: 10px 16px !important;
+  gap: 10px !important;
+}
+
+.vds-button {
+  cursor: pointer !important;
+  color: #F8FAFC !important;
+  transition: color 0.15s ease, transform 0.15s ease !important;
+}
+
+.vds-button:hover {
+  color: #00A4DC !important;
+  transform: scale(1.1) !important;
+}
+

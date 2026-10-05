@@ -914,14 +914,18 @@ export class MoviesService {
       watch_status?: 'unwatched' | 'watching' | 'watched';
       personal_rating?: number | null;
       is_favorite?: boolean;
+      assigned_genre?: string | null;
+      watchlist_ids?: string[];
+      watchlist_id?: string | null;
     }
   ) {
     let canonicalMovie: any;
 
     const initialStatus = initialData?.watch_status || 'unwatched';
-    const initialRating = initialData?.personal_rating ?? null;
+    const initialRating = initialData?.personal_rating !== undefined ? initialData.personal_rating : null;
     const initialFav = initialData?.is_favorite ?? false;
     const initialLastWatched = initialStatus === 'watched' ? new Date().toISOString() : null;
+    const initialGenre = initialData?.assigned_genre !== undefined ? initialData.assigned_genre : null;
 
     if (isPgConnected) {
       const existingMovie = (await pool.query('SELECT * FROM movies WHERE tmdb_id = $1', [tmdbId])).rows[0];
@@ -965,15 +969,35 @@ export class MoviesService {
             personal_rating: initialData.personal_rating,
             is_favorite: initialData.is_favorite,
           });
+          if (initialData.assigned_genre !== undefined && initialData.assigned_genre !== null) {
+            await GenresService.attachGenreToMovie(alreadyInLibrary.id, initialData.assigned_genre);
+          }
+          const watchlistList = initialData.watchlist_ids || (initialData.watchlist_id ? [initialData.watchlist_id] : []);
+          for (const wId of watchlistList) {
+            if (wId) {
+              await WatchlistsService.addMovieToList(userId, wId, alreadyInLibrary.id).catch(() => {});
+            }
+          }
         }
         return this.getMovieById(userId, alreadyInLibrary.id);
       }
 
       const userMovieId = uuidv4();
       await pool.query(`
-        INSERT INTO user_movies (id, user_id, movie_id, watch_status, personal_rating, is_favorite, last_watched_at, media_type, current_season, current_episode)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 1)
-      `, [userMovieId, userId, canonicalMovie.id, initialStatus, initialRating, initialFav, initialLastWatched, canonicalMovie.media_type || mediaType]);
+        INSERT INTO user_movies (id, user_id, movie_id, watch_status, personal_rating, is_favorite, last_watched_at, media_type, current_season, current_episode, assigned_genre)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 1, $9)
+      `, [userMovieId, userId, canonicalMovie.id, initialStatus, initialRating, initialFav, initialLastWatched, canonicalMovie.media_type || mediaType, initialGenre]);
+
+      if (initialGenre) {
+        await GenresService.attachGenreToMovie(userMovieId, initialGenre).catch(() => {});
+      }
+
+      const watchlistList = initialData?.watchlist_ids || (initialData?.watchlist_id ? [initialData.watchlist_id] : []);
+      for (const wId of watchlistList) {
+        if (wId) {
+          await WatchlistsService.addMovieToList(userId, wId, userMovieId).catch(() => {});
+        }
+      }
 
       return this.getMovieById(userId, userMovieId);
     }
@@ -997,6 +1021,15 @@ export class MoviesService {
           personal_rating: initialData.personal_rating,
           is_favorite: initialData.is_favorite,
         });
+        if (initialData.assigned_genre !== undefined && initialData.assigned_genre !== null) {
+          await GenresService.attachGenreToMovie(duplicate.id, initialData.assigned_genre);
+        }
+        const watchlistList = initialData.watchlist_ids || (initialData.watchlist_id ? [initialData.watchlist_id] : []);
+        for (const wId of watchlistList) {
+          if (wId) {
+            await WatchlistsService.addMovieToList(userId, wId, duplicate.id).catch(() => {});
+          }
+        }
       }
       return this.getMovieById(userId, duplicate.id);
     }
@@ -1012,6 +1045,7 @@ export class MoviesService {
       watch_status: initialStatus,
       personal_rating: initialRating,
       is_favorite: initialFav,
+      assigned_genre: initialGenre,
       personal_notes: null,
       custom_title: null,
       custom_overview: null,
@@ -1026,6 +1060,17 @@ export class MoviesService {
       updated_at: new Date().toISOString(),
     };
     inMemoryDb.userMovies.set(newUmId, newUm);
+
+    if (initialGenre) {
+      await GenresService.attachGenreToMovie(newUmId, initialGenre).catch(() => {});
+    }
+
+    const watchlistList = initialData?.watchlist_ids || (initialData?.watchlist_id ? [initialData.watchlist_id] : []);
+    for (const wId of watchlistList) {
+      if (wId) {
+        await WatchlistsService.addMovieToList(userId, wId, newUmId).catch(() => {});
+      }
+    }
 
     return this.getMovieById(userId, newUmId);
   }
