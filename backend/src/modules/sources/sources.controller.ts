@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { SourcesService, extractDriveFileId } from './sources.service.js';
 import { MoviesService } from '../movies/movies.service.js';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
@@ -503,8 +504,10 @@ export class SourcesController {
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
       const abortController = new AbortController();
-      req.on('close', () => {
-        abortController.abort();
+      res.on('close', () => {
+        if (!res.writableEnded) {
+          abortController.abort();
+        }
       });
 
       try {
@@ -526,7 +529,7 @@ export class SourcesController {
 
         if (driveRes.body) {
           const nodeStream = Readable.fromWeb(driveRes.body as any);
-          nodeStream.pipe(res);
+          await pipeline(nodeStream, res);
         } else {
           res.end();
         }

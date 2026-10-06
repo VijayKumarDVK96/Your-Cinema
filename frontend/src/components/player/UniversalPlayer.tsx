@@ -490,18 +490,19 @@ export const UniversalPlayer: React.FC = () => {
   const handleSelectSubtitleTrack = (subId: string) => {
     setSelectedSubtitleId(subId);
     setSubtitleMenuAnchor(null);
-    const player = vidstackPlayerRef.current;
-    if (player) {
-      try {
-        const tracks: any[] = Array.from(player.textTracks || []).filter(Boolean);
-        tracks.forEach((t: any) => {
-          if (t.kind === 'subtitles' || t.kind === 'captions') {
-            t.mode = subId === 'off' ? 'disabled' : (t.id === subId || subId === 'default' ? 'showing' : 'disabled');
-          }
-        });
-      } catch {}
-    }
   };
+
+  useEffect(() => {
+    if (!isOpen || !isDrive) return;
+    const selectedTrackIndex = embeddedSubtitles.findIndex((track) => track.id === selectedSubtitleId);
+    const video = document.querySelector('video');
+    const tracks: TextTrack[] = Array.from(video?.textTracks || []);
+    tracks.forEach((track, index) => {
+      if (track.kind === 'subtitles' || track.kind === 'captions') {
+        track.mode = selectedSubtitleId !== 'off' && index === selectedTrackIndex ? 'showing' : 'disabled';
+      }
+    });
+  }, [embeddedSubtitles, isDrive, isOpen, playerKey, selectedSubtitleId]);
 
   // Playback speed switcher
   const handleSelectSpeed = (speed: number) => {
