@@ -19,13 +19,15 @@ pipeline {
         IMAGE_TAG            = "${env.BUILD_NUMBER}"
         DOCKER_NETWORK       = "postgresql_postgres_network"
         NPM_NETWORK          = "shared-network"
+        DOCKER_BUILDKIT      = "1"
     }
 
     options {
         buildDiscarder(logRotator(numToKeepStr: "10"))
         disableConcurrentBuilds()
-        timeout(time: 30, unit: "MINUTES")
+        timeout(time: 20, unit: "MINUTES")
         timestamps()
+        skipDefaultCheckout()
     }
 
     stages {
@@ -148,14 +150,14 @@ pipeline {
                     fi
 
                     echo "Waiting for backend to become healthy..."
-                    for i in \$(seq 1 20); do
+                    for i in \$(seq 1 15); do
                         STATUS=\$(docker inspect --format="{{.State.Health.Status}}" your-cinema-backend 2>/dev/null || echo "not_found")
                         if [ "\$STATUS" = "healthy" ]; then
                             echo "Backend is healthy."
                             break
                         fi
-                        echo "  Status: \$STATUS - waiting (attempt \$i/20)..."
-                        sleep 6
+                        echo "  Status: \$STATUS - waiting (attempt \$i/15)..."
+                        sleep 2
                     done
                 """
             }
@@ -185,7 +187,10 @@ pipeline {
 
     post {
         always {
-            sh "rm -f backend/.env || true"
+            sh """
+                rm -f backend/.env || true
+                docker image prune -f >/dev/null 2>&1 || true
+            """
         }
         success {
             echo "Deployment succeeded - Your Cinema is live."
