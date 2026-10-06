@@ -1,5 +1,5 @@
 ##################################################
-# Stage 1: Builder � compile TypeScript
+# Stage 1: Builder – compile TypeScript
 ##################################################
 FROM node:20-alpine AS builder
 
@@ -14,7 +14,18 @@ COPY src ./src
 RUN npm run build
 
 ##################################################
-# Stage 2: Production image
+# Stage 2: Production dependencies only
+##################################################
+FROM node:20-alpine AS deps
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && \
+    npm cache clean --force
+
+##################################################
+# Stage 3: Lean Production image
 ##################################################
 FROM node:20-alpine AS production
 
@@ -22,12 +33,13 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy package manifest and install prod deps only
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
-# Copy compiled output from builder
+# Copy prod dependencies and compiled dist from previous stages
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY package.json ./
+
+# Run with non-root user
+USER node
 
 EXPOSE 5000
 

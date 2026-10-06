@@ -1,5 +1,5 @@
 ##################################################
-# Stage 1: Builder � build Vite React app
+# Stage 1: Builder – build Vite React app
 ##################################################
 FROM node:20-alpine AS builder
 
@@ -21,9 +21,9 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 ##################################################
-# Stage 2: Serve via Nginx
+# Stage 2: Serve via Nginx Slim
 ##################################################
-FROM nginx:1.27-alpine AS production
+FROM nginx:1.27-alpine-slim AS production
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
