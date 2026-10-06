@@ -6,7 +6,7 @@ import { MoviesService } from '../movies/movies.service.js';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
 import { BadRequestError } from '../../utils/errors.js';
 
-const mediaInfoCache = new Map<string, { audioTracks: any[]; subtitleTracks: any[]; timestamp: number }>();
+const mediaInfoCache = new Map<string, { audioTracks: any[]; subtitleTracks: any[]; fileName?: string; isMkv?: boolean; isTranscoded?: boolean; timestamp: number }>();
 const subtitleCache = new Map<string, string>();
 
 export interface DriveDirectInfo {
@@ -14,6 +14,8 @@ export interface DriveDirectInfo {
   cookies: string;
   totalSize: number;
   contentType: string;
+  fileName?: string;
+  isMkvOrNonMp4?: boolean;
   expiresAt: number;
 }
 
@@ -38,10 +40,22 @@ export async function resolveDriveDirect(fileId: string): Promise<DriveDirectInf
     confirmToken = confirmMatch[1];
   }
 
-  const directUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=${confirmToken}`;
+  let uuidToken = '';
+  const uuidMatch = html1.match(/name="uuid"\s+value="([^"]+)"/) || html1.match(/uuid=([0-9a-zA-Z_-]+)/);
+  if (uuidMatch && uuidMatch[1]) {
+    uuidToken = uuidMatch[1];
+  }
+
+  const directUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=${confirmToken}${uuidToken ? `&uuid=${uuidToken}` : ''}`;
 
   let totalSize = 0;
   let contentType = 'video/mp4';
+  let fileName = '';
+
+  const fnMatch1 = html1.match(/<span class="uc-name-size"><a[^>]*>([^<]+)<\/a>/i) || html1.match(/<title>Google Drive - ([^<]+)<\/title>/i);
+  if (fnMatch1 && fnMatch1[1]) {
+    fileName = fnMatch1[1].trim();
+  }
 
   try {
     const headRes = await fetch(directUrl, {
@@ -51,6 +65,14 @@ export async function resolveDriveDirect(fileId: string): Promise<DriveDirectInf
         Range: 'bytes=0-0',
       },
     });
+
+    const cd = headRes.headers.get('content-disposition');
+    if (cd) {
+      const fnMatch2 = cd.match(/filename\*?=(?:UTF-8'')?"?([^";\r\n]+)"?/i);
+      if (fnMatch2 && fnMatch2[1]) {
+        fileName = decodeURIComponent(fnMatch2[1].trim());
+      }
+    }
 
     const contentRange = headRes.headers.get('content-range');
     if (contentRange) {
@@ -67,12 +89,19 @@ export async function resolveDriveDirect(fileId: string): Promise<DriveDirectInf
     }
   } catch {}
 
+  const isMkvOrNonMp4 = Boolean(
+    (fileName && !fileName.toLowerCase().endsWith('.mp4')) ||
+    (contentType && (contentType.includes('matroska') || contentType.includes('mkv')))
+  );
+
   const info: DriveDirectInfo = {
     directUrl,
     cookies,
     totalSize,
     contentType,
-    expiresAt: Date.now() + 3600000, // 1 hour TTL
+    fileName,
+    isMkvOrNonMp4,
+    expiresAt: Date.now() + 20 * 60 * 1000, // 20 min TTL
   };
 
   driveDirectCache.set(fileId, info);
@@ -89,6 +118,8 @@ export class SourcesController {
       const info = await resolveDriveDirect(fileId);
       return sendSuccess(res, {
         fileId,
+        fileName: info.fileName || '',
+        isMkv: Boolean(info.isMkvOrNonMp4),
         totalSize: info.totalSize,
         totalSizeMB: (info.totalSize / (1024 * 1024)).toFixed(1),
         contentType: info.contentType,
@@ -109,7 +140,13 @@ export class SourcesController {
 
       const cached = mediaInfoCache.get(fileId);
       if (cached && Date.now() - cached.timestamp < 3600000) {
-        return sendSuccess(res, { audioTracks: cached.audioTracks, subtitleTracks: cached.subtitleTracks });
+        return sendSuccess(res, {
+          audioTracks: cached.audioTracks,
+          subtitleTracks: cached.subtitleTracks,
+          fileName: cached.fileName || '',
+          isMkv: Boolean(cached.isMkv),
+          isTranscoded: Boolean(cached.isTranscoded),
+        });
       }
 
       const info = await resolveDriveDirect(fileId);
@@ -187,18 +224,41 @@ export class SourcesController {
               return track;
             });
 
-          if (audioTracks.length > 0 || subtitleTracks.length > 0) {
-            mediaInfoCache.set(fileId, { audioTracks, subtitleTracks, timestamp: Date.now() });
-          }
-          return sendSuccess(res, { audioTracks, subtitleTracks });
+          mediaInfoCache.set(fileId, {
+            audioTracks,
+            subtitleTracks,
+            fileName: info.fileName,
+            isMkv: Boolean(info.isMkvOrNonMp4),
+            isTranscoded: Boolean(info.isMkvOrNonMp4),
+            timestamp: Date.now(),
+          });
+          return sendSuccess(res, {
+            audioTracks,
+            subtitleTracks,
+            fileName: info.fileName || '',
+            isMkv: Boolean(info.isMkvOrNonMp4),
+            isTranscoded: Boolean(info.isMkvOrNonMp4),
+          });
         } catch {
-          return sendSuccess(res, { audioTracks: [], subtitleTracks: [] });
+          return sendSuccess(res, {
+            audioTracks: [],
+            subtitleTracks: [],
+            fileName: info.fileName || '',
+            isMkv: Boolean(info.isMkvOrNonMp4),
+            isTranscoded: Boolean(info.isMkvOrNonMp4),
+          });
         }
       });
 
       ffprobeProc.on('error', () => {
         clearTimeout(timeout);
-        return sendSuccess(res, { audioTracks: [], subtitleTracks: [] });
+        return sendSuccess(res, {
+          audioTracks: [],
+          subtitleTracks: [],
+          fileName: info.fileName || '',
+          isMkv: Boolean(info.isMkvOrNonMp4),
+          isTranscoded: Boolean(info.isMkvOrNonMp4),
+        });
       });
     } catch (err) {
       next(err);
@@ -296,7 +356,7 @@ export class SourcesController {
       // Handle HEAD request for media probes
       if (req.method === 'HEAD') {
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', info.contentType || 'video/mp4');
+        res.setHeader('Content-Type', 'video/mp4');
         if (info.totalSize > 0) {
           res.setHeader('Content-Length', String(info.totalSize));
         }
@@ -304,10 +364,18 @@ export class SourcesController {
         return res.status(200).end();
       }
 
-      // If audio track > 0 or a downscaled transcode quality is explicitly forced,
-      // run FFmpeg stream with fast keyframe seek.
+      // Detect if the file is an MKV or non-MP4 container (not natively supported by HTML5 video in browsers)
+      const isNonMp4 = Boolean(
+        info.isMkvOrNonMp4 ||
+        (info.fileName && !info.fileName.toLowerCase().endsWith('.mp4')) ||
+        (info.contentType && (info.contentType.includes('matroska') || info.contentType.includes('mkv')))
+      );
+
+      // If audio track > 0, downscaled quality selected, or non-MP4 container (MKV),
+      // run FFmpeg stream to transmux/transcode cleanly into fragmented MP4.
       const requiresTranscode = (audioIndex !== null && !isNaN(audioIndex) && audioIndex > 0) ||
-        (quality !== 'auto' && quality !== 'direct' && quality !== 'original' && quality !== 'passthrough');
+        (quality !== 'auto' && quality !== 'direct' && quality !== 'original' && quality !== 'passthrough') ||
+        isNonMp4;
 
       if (requiresTranscode) {
         const { spawn } = await import('child_process');
@@ -380,7 +448,7 @@ export class SourcesController {
           ];
           audioBitrate = '160k';
         } else {
-          // Fast stream copy for high performance
+          // Fast stream copy for high performance remux (e.g. MKV -> fragmented MP4 container)
           videoCodecArgs = ['-c:v', 'copy'];
           audioBitrate = '128k';
         }
@@ -412,7 +480,7 @@ export class SourcesController {
         ];
 
         res.setHeader('Content-Type', 'video/mp4');
-        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Accept-Ranges', 'none');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Buffer-Chunk-Size', `${isLowBandwidth ? '10MB' : '50MB'}`);
@@ -443,6 +511,10 @@ export class SourcesController {
 
         ffmpegProc.stdout.on('data', () => {
           hasData = true;
+        });
+
+        ffmpegProc.stdout.on('error', () => {
+          cleanupProcess();
         });
 
         ffmpegProc.on('error', (err) => {
@@ -494,24 +566,16 @@ export class SourcesController {
 
       const contentLen = Math.max(0, end - start + 1);
 
-      res.status(206);
-      res.setHeader('Content-Type', info.contentType && !info.contentType.includes('text/html') ? info.contentType : 'video/mp4');
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${info.totalSize > 0 ? info.totalSize : '*'}`);
-      res.setHeader('Content-Length', String(contentLen));
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.setHeader('X-Buffer-Chunk-Size', `${isLowBandwidth ? '10MB' : '50MB'}`);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-
       const abortController = new AbortController();
-      res.on('close', () => {
-        if (!res.writableEnded) {
-          abortController.abort();
-        }
-      });
+      const onClientClose = () => {
+        abortController.abort();
+      };
+      req.on('close', onClientClose);
+      res.on('close', onClientClose);
 
+      let driveRes: globalThis.Response;
       try {
-        const driveRes = await fetch(info.directUrl, {
+        driveRes = await fetch(info.directUrl, {
           signal: abortController.signal,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -519,14 +583,34 @@ export class SourcesController {
             Range: `bytes=${start}-${end}`,
           },
         });
+      } catch (err: any) {
+        if (err.name === 'AbortError' || req.destroyed || res.destroyed) return;
+        driveDirectCache.delete(fileId);
+        throw err;
+      }
 
-        if (!driveRes.ok && driveRes.status !== 206) {
-          if (!res.headersSent) {
-            return res.status(driveRes.status).end();
-          }
-          return;
+      if (!driveRes.ok && driveRes.status !== 206) {
+        driveDirectCache.delete(fileId);
+        if (!res.headersSent) {
+          return res.status(driveRes.status).json({
+            error: 'Google Drive stream source returned an error',
+            status: driveRes.status,
+          });
         }
+        return;
+      }
 
+      // Send 206 response headers ONLY after verified successful response from Google Drive
+      res.status(206);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${info.totalSize > 0 ? info.totalSize : '*'}`);
+      res.setHeader('Content-Length', String(contentLen));
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('X-Buffer-Chunk-Size', `${isLowBandwidth ? '10MB' : '50MB'}`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      try {
         if (driveRes.body) {
           const nodeStream = Readable.fromWeb(driveRes.body as any);
           await pipeline(nodeStream, res);
@@ -534,11 +618,33 @@ export class SourcesController {
           res.end();
         }
       } catch (err: any) {
-        if (err.name === 'AbortError' || req.destroyed) return;
+        if (
+          err.name === 'AbortError' ||
+          err.code === 'ABORT_ERR' ||
+          err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+          err.code === 'ECONNRESET' ||
+          err.code === 'EPIPE' ||
+          req.destroyed ||
+          res.destroyed ||
+          res.writableEnded
+        ) {
+          return;
+        }
         throw err;
+      } finally {
+        req.off('close', onClientClose);
+        res.off('close', onClientClose);
       }
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || req.destroyed) {
+      if (
+        err.name === 'AbortError' ||
+        err.code === 'ABORT_ERR' ||
+        err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        err.code === 'ECONNRESET' ||
+        err.code === 'EPIPE' ||
+        req.destroyed ||
+        res.destroyed
+      ) {
         return;
       }
       next(err);

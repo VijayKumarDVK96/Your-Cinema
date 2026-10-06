@@ -160,6 +160,7 @@ export const UniversalPlayer: React.FC = () => {
   const [timeInputValue, setTimeInputValue] = useState<string>('');
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isAudioSwitching, setIsAudioSwitching] = useState<boolean>(false);
+  const [isTranscodedStream, setIsTranscodedStream] = useState<boolean>(false);
 
   // Player Theme mode: 'jellyfin' (cyan/purple glow) | 'plex' (amber/gold glow)
   const [playerThemeMode, setPlayerThemeMode] = useState<PlayerThemeMode>(() => {
@@ -352,10 +353,18 @@ export const UniversalPlayer: React.FC = () => {
     if (!isOpen || !isDrive || !driveFileId) return;
     let isSubscribed = true;
 
+    const fn = (activeSource?.file_name || activeSource?.provider_name || '').toLowerCase();
+    if (fn.endsWith('.mkv') || fn.includes('.mkv')) {
+      setIsTranscodedStream(true);
+    }
+
     api.get(`/sources/drive/${driveFileId}/media-info`)
       .then((res) => {
         if (!isSubscribed) return;
         const data = res.data?.data;
+        if (data?.isTranscoded || data?.isMkv) {
+          setIsTranscodedStream(true);
+        }
         if (data?.audioTracks && data.audioTracks.length > 0) {
           setAudioTracks(data.audioTracks);
           try {
@@ -381,7 +390,7 @@ export const UniversalPlayer: React.FC = () => {
     return () => {
       isSubscribed = false;
     };
-  }, [isOpen, isDrive, driveFileId, defaultSubtitlesEnabled]);
+  }, [isOpen, isDrive, driveFileId, defaultSubtitlesEnabled, activeSource]);
 
   // Save playback progress to backend
   const saveProgress = useCallback(
@@ -581,10 +590,10 @@ export const UniversalPlayer: React.FC = () => {
       } catch {}
     }
 
-    if (selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) {
+    if (isTranscodedStream || selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) {
       setPlayerKey((k) => k + 1);
     }
-  }, [runtimeSec, saveProgress, selectedAudioIndex, streamQuality]);
+  }, [runtimeSec, saveProgress, selectedAudioIndex, streamQuality, isTranscodedStream]);
 
   const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDraggingTimeline(true);
@@ -938,7 +947,7 @@ export const UniversalPlayer: React.FC = () => {
       params.set('audioIndex', String(selectedAudioIndex));
     }
     const seekPos = Math.floor(currentSecRef.current || 0);
-    if ((selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) && seekPos > 0) {
+    if ((isTranscodedStream || selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) && seekPos > 0) {
       params.set('t', String(seekPos));
     }
     if (streamQuality !== 'auto') {
@@ -2016,7 +2025,7 @@ export const UniversalPlayer: React.FC = () => {
                 setShowWeakNetworkHint(false);
                 streamRecoveryAttemptsRef.current = 0;
                 if (!initialSeekDoneRef.current && currentSecRef.current > 0) {
-                  if (selectedAudioIndex > 0) {
+                  if (isTranscodedStream || selectedAudioIndex > 0) {
                     initialSeekDoneRef.current = true;
                   } else {
                     performSeek(currentSecRef.current);

@@ -33,6 +33,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# Install ffmpeg & ffprobe for media probing and dynamic video remuxing/transcoding
+RUN apk add --no-cache ffmpeg
+
 # Copy prod dependencies and compiled dist from previous stages
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
