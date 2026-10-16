@@ -6,6 +6,8 @@ const router = Router();
 
 // TMDB endpoints are strictly protected and used exclusively for "Add Movie" imports
 router.get('/search', authenticate, TmdbController.search);
+router.get('/person/credits', authenticate, TmdbController.getPersonCredits);
+router.get('/person/:id/credits', authenticate, TmdbController.getPersonCredits);
 router.get('/movie/:id', authenticate, TmdbController.getDetails);
 router.get('/tv/:id', authenticate, TmdbController.getTvDetails);
 router.get('/images/:id', authenticate, TmdbController.getImages);

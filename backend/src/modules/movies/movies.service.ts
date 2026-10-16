@@ -209,6 +209,14 @@ export class MoviesService {
           EXISTS (
             SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
             WHERE LOWER(cm->>'name') LIKE '%' || $${searchParamIdx} || '%'
+          ) OR
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.crew_members::jsonb) = 'array' THEN m.crew_members::jsonb ELSE '[]'::jsonb END) crm
+            WHERE LOWER(crm->>'name') LIKE '%' || $${searchParamIdx} || '%'
+          ) OR
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.created_by::jsonb) = 'array' THEN m.created_by::jsonb ELSE '[]'::jsonb END) crb
+            WHERE LOWER(crb->>'name') LIKE '%' || $${searchParamIdx} || '%'
           )
         )`);
         params.push(queryTerm);

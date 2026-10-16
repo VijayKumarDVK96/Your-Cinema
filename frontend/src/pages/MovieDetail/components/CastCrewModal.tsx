@@ -23,6 +23,7 @@ export interface CastCrewModalProps {
   onClose: () => void;
   movie: UserMovie;
   initialFilter?: 'all' | 'cast' | 'crew';
+  onOpenPersonality?: (target: { id?: number | null; name: string; profile_path?: string | null; role?: string }) => void;
 }
 
 export const CastCrewModal: React.FC<CastCrewModalProps> = ({
@@ -30,6 +31,7 @@ export const CastCrewModal: React.FC<CastCrewModalProps> = ({
   onClose,
   movie,
   initialFilter = 'all',
+  onOpenPersonality,
 }) => {
   const [modalFilter, setModalFilter] = useState<'all' | 'cast' | 'crew'>(initialFilter);
   const [modalSearch, setModalSearch] = useState('');
@@ -162,6 +164,12 @@ export const CastCrewModal: React.FC<CastCrewModalProps> = ({
                   <Grid item xs={6} sm={4} md={3} lg={2.4} key={`cast-${idx}`}>
                     <Paper
                       elevation={0}
+                      onClick={() => {
+                        if (onOpenPersonality) {
+                          onClose();
+                          onOpenPersonality({ id: c.id, name: c.name, profile_path: c.profile_path, role: c.character || 'Cast' });
+                        }
+                      }}
                       sx={{
                         borderRadius: '14px',
                         overflow: 'hidden',
@@ -170,6 +178,7 @@ export const CastCrewModal: React.FC<CastCrewModalProps> = ({
                         display: 'flex',
                         flexDirection: 'column',
                         height: '100%',
+                        cursor: onOpenPersonality ? 'pointer' : 'default',
                         transition: 'all 0.2s ease',
                         '&:hover': {
                           borderColor: 'rgba(229, 169, 60, 0.4)',
@@ -223,6 +232,12 @@ export const CastCrewModal: React.FC<CastCrewModalProps> = ({
                   <Grid item xs={6} sm={4} md={3} lg={2.4} key={`crew-${idx}`}>
                     <Paper
                       elevation={0}
+                      onClick={() => {
+                        if (onOpenPersonality) {
+                          onClose();
+                          onOpenPersonality({ id: member.id, name: member.name, profile_path: member.profile_path, role: member.job || member.department || 'Crew' });
+                        }
+                      }}
                       sx={{
                         p: 2,
                         borderRadius: '14px',
@@ -232,6 +247,7 @@ export const CastCrewModal: React.FC<CastCrewModalProps> = ({
                         flexDirection: 'column',
                         justifyContent: 'space-between',
                         height: '100%',
+                        cursor: onOpenPersonality ? 'pointer' : 'default',
                         transition: 'all 0.2s ease',
                         '&:hover': {
                           borderColor: `${roleColor}88`,

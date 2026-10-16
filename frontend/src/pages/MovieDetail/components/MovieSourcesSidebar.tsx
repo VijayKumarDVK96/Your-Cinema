@@ -24,6 +24,7 @@ export interface MovieSourcesSidebarProps {
   onPlaySource: (src: MovieSource) => void;
   onWatchTrailer: () => void;
   formatRuntime: (mins: number) => string;
+  onOpenPersonality?: (target: { id?: number | null; name: string; profile_path?: string | null; role?: string }) => void;
 }
 
 export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
@@ -34,6 +35,7 @@ export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
   onPlaySource,
   onWatchTrailer,
   formatRuntime,
+  onOpenPersonality,
 }) => {
   const resolveOttUrl = (src: any): string => {
     const raw = src?.external_url || '';
@@ -176,12 +178,83 @@ export const MovieSourcesSidebar: React.FC<MovieSourcesSidebarProps> = ({
                 <Typography variant="body2" sx={{ color: '#64748B' }}>First Air Date</Typography>
                 <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{movie.first_air_date || movie.release_date || 'TBD'}</Typography>
               </Box>
+              {movie.created_by && movie.created_by.length > 0 ? (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center' }}>
+                  <Typography variant="body2" sx={{ color: '#64748B' }}>Creator(s)</Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {movie.created_by.map((creator: any, idx: number) => (
+                      <Typography
+                        key={idx}
+                        variant="body2"
+                        onClick={() => onOpenPersonality?.({ id: creator.id || null, name: creator.name, profile_path: creator.profile_path || null, role: 'Creator' })}
+                        sx={{
+                          color: '#F8FAFC',
+                          fontWeight: 600,
+                          cursor: onOpenPersonality ? 'pointer' : 'default',
+                          '&:hover': onOpenPersonality ? { color: '#E5A93C', textDecoration: 'underline' } : {},
+                        }}
+                      >
+                        {creator.name}{idx < (movie.created_by?.length || 0) - 1 ? ',' : ''}
+                      </Typography>
+                    ))}
+                  </Box>
+                </Box>
+              ) : movie.director ? (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center' }}>
+                  <Typography variant="body2" sx={{ color: '#64748B' }}>Director</Typography>
+                  <Typography
+                    variant="body2"
+                    onClick={() => {
+                      if (!movie.director) return;
+                      const dirCrew = (movie.crew_members || []).find((c: any) => c.job === 'Director' || c.name === movie.director);
+                      onOpenPersonality?.({
+                        id: dirCrew?.id || null,
+                        name: movie.director,
+                        profile_path: dirCrew?.profile_path || null,
+                        role: 'Director',
+                      });
+                    }}
+                    sx={{
+                      color: '#F8FAFC',
+                      fontWeight: 600,
+                      cursor: onOpenPersonality ? 'pointer' : 'default',
+                      '&:hover': onOpenPersonality ? { color: '#E5A93C', textDecoration: 'underline' } : {},
+                    }}
+                  >
+                    {movie.director}
+                  </Typography>
+                </Box>
+              ) : null}
             </>
           ) : (
             <>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center' }}>
                 <Typography variant="body2" sx={{ color: '#64748B' }}>Director</Typography>
-                <Typography variant="body2" sx={{ color: '#F8FAFC', fontWeight: 600 }}>{movie.director || 'Unknown'}</Typography>
+                {movie.director ? (
+                  <Typography
+                    variant="body2"
+                    onClick={() => {
+                      if (!movie.director) return;
+                      const dirCrew = (movie.crew_members || []).find((c: any) => c.job === 'Director' || c.name === movie.director);
+                      onOpenPersonality?.({
+                        id: dirCrew?.id || null,
+                        name: movie.director,
+                        profile_path: dirCrew?.profile_path || null,
+                        role: 'Director',
+                      });
+                    }}
+                    sx={{
+                      color: '#F8FAFC',
+                      fontWeight: 600,
+                      cursor: onOpenPersonality ? 'pointer' : 'default',
+                      '&:hover': onOpenPersonality ? { color: '#E5A93C', textDecoration: 'underline' } : {},
+                    }}
+                  >
+                    {movie.director}
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" sx={{ color: '#64748B' }}>Unknown</Typography>
+                )}
               </Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', pb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <Typography variant="body2" sx={{ color: '#64748B' }}>Release Date</Typography>

@@ -39,6 +39,7 @@ import {
   FullscreenBackdropModal,
   GenreManageDialog,
 } from './components/index.js';
+import { PersonalityModal, PersonalityTarget } from '../../components/common/PersonalityModal.js';
 
 export const MovieDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -56,6 +57,13 @@ export const MovieDetailPage: React.FC = () => {
   const [castCrewModalOpen, setCastCrewModalOpen] = useState(false);
   const [castModalFilter, setCastModalFilter] = useState<'all' | 'cast' | 'crew'>('all');
   const [fullscreenBackdropOpen, setFullscreenBackdropOpen] = useState(false);
+  const [personalityModalOpen, setPersonalityModalOpen] = useState(false);
+  const [selectedPersonality, setSelectedPersonality] = useState<PersonalityTarget | null>(null);
+
+  const handleOpenPersonality = (target: PersonalityTarget) => {
+    setSelectedPersonality(target);
+    setPersonalityModalOpen(true);
+  };
 
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
@@ -364,6 +372,7 @@ export const MovieDetailPage: React.FC = () => {
         onOpenGenreDialog={() => setGenreDialogOpen(true)}
         onDetachGenre={(genreId) => detachGenreMutation.mutate(genreId)}
         formatRuntime={formatRuntime}
+        onOpenPersonality={handleOpenPersonality}
       />
 
       {/* Main Content Area */}
@@ -447,6 +456,7 @@ export const MovieDetailPage: React.FC = () => {
             <MovieCastCrewTab
               movie={movie}
               onOpenCastModal={handleOpenCastModal}
+              onOpenPersonality={handleOpenPersonality}
             />
           )}
 
@@ -491,6 +501,7 @@ export const MovieDetailPage: React.FC = () => {
             }}
             onWatchTrailer={handleWatchTrailer}
             formatRuntime={formatRuntime}
+            onOpenPersonality={handleOpenPersonality}
           />
         </Grid>
       </Grid>
@@ -589,6 +600,7 @@ export const MovieDetailPage: React.FC = () => {
         onClose={() => setCastCrewModalOpen(false)}
         movie={movie}
         initialFilter={castModalFilter}
+        onOpenPersonality={handleOpenPersonality}
       />
 
       <FullscreenBackdropModal
@@ -596,6 +608,17 @@ export const MovieDetailPage: React.FC = () => {
         onClose={() => setFullscreenBackdropOpen(false)}
         backdropUrl={backdropUrl}
         movieTitle={movie.title}
+      />
+
+      <PersonalityModal
+        open={personalityModalOpen}
+        onClose={() => setPersonalityModalOpen(false)}
+        personality={selectedPersonality}
+        onMovieAdded={() => {
+          queryClient.invalidateQueries({ queryKey: ['movie', id] });
+          queryClient.invalidateQueries({ queryKey: ['my-movies'] });
+          queryClient.invalidateQueries({ queryKey: ['movies'] });
+        }}
       />
     </Box>
   );

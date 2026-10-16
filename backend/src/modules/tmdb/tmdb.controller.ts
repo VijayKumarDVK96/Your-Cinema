@@ -65,4 +65,21 @@ export class TmdbController {
       next(err);
     }
   }
+
+  static async getPersonCredits(req: Request, res: Response, next: NextFunction) {
+    try {
+      const personId = parseInteger(req.params.id || req.query.id);
+      const name = (req.query.name as string)?.trim();
+
+      if (!personId && !name) {
+        throw new BadRequestError('Person ID or name is required');
+      }
+
+      const credits = await TmdbService.getPersonCredits(personId, name);
+      return sendSuccess(res, credits);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
+

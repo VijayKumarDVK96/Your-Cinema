@@ -46,6 +46,7 @@ export interface MovieHeroProps {
   onOpenGenreDialog: () => void;
   onDetachGenre: (genreId: string | number) => void;
   formatRuntime: (mins: number) => string;
+  onOpenPersonality?: (target: { id?: number | null; name: string; profile_path?: string | null; role?: string }) => void;
 }
 
 export const MovieHero: React.FC<MovieHeroProps> = ({
@@ -67,6 +68,7 @@ export const MovieHero: React.FC<MovieHeroProps> = ({
   onOpenGenreDialog,
   onDetachGenre,
   formatRuntime,
+  onOpenPersonality,
 }) => {
   const resolveOttUrl = (src: any): string => {
     const raw = src?.external_url || '';
@@ -202,11 +204,60 @@ export const MovieHero: React.FC<MovieHeroProps> = ({
               {movie.title}
             </Typography>
 
-            <Typography variant="body1" sx={{ color: '#94A3B8', fontWeight: 500, fontSize: { xs: '0.88rem', sm: '1rem' } }}>
-              {movie.media_type === 'tv'
-                ? `${movie.first_air_date ? movie.first_air_date.substring(0, 4) : (movie.release_date?.substring(0, 4) || 'TBD')}${movie.last_air_date && movie.last_air_date.substring(0, 4) !== (movie.first_air_date || movie.release_date || '').substring(0, 4) ? `–${movie.last_air_date.substring(0, 4)}` : ''} • ${movie.number_of_seasons || 1} ${movie.number_of_seasons === 1 ? 'Season' : 'Seasons'}${movie.number_of_episodes ? ` • ${movie.number_of_episodes} Episodes` : ''} • ${movie.created_by && movie.created_by.length > 0 ? `Created by ${movie.created_by.map((c: any) => c.name).join(', ')}` : (movie.director ? `Directed by ${movie.director}` : '')}`
-                : `${movie.release_date?.substring(0, 4)} • ${movie.runtime ? formatRuntime(movie.runtime) : 'Runtime TBD'} • Directed by ${movie.director || 'Unknown'}`}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
+              <Typography variant="body1" sx={{ color: '#94A3B8', fontWeight: 500, fontSize: { xs: '0.88rem', sm: '1rem' } }}>
+                {movie.media_type === 'tv'
+                  ? `${movie.first_air_date ? movie.first_air_date.substring(0, 4) : (movie.release_date?.substring(0, 4) || 'TBD')}${movie.last_air_date && movie.last_air_date.substring(0, 4) !== (movie.first_air_date || movie.release_date || '').substring(0, 4) ? `–${movie.last_air_date.substring(0, 4)}` : ''} • ${movie.number_of_seasons || 1} ${movie.number_of_seasons === 1 ? 'Season' : 'Seasons'}${movie.number_of_episodes ? ` • ${movie.number_of_episodes} Episodes` : ''}`
+                  : `${movie.release_date?.substring(0, 4)} • ${movie.runtime ? formatRuntime(movie.runtime) : 'Runtime TBD'}`}
+              </Typography>
+              {movie.media_type === 'tv' && movie.created_by && movie.created_by.length > 0 ? (
+                <>
+                  <Typography variant="body1" sx={{ color: '#64748B' }}>•</Typography>
+                  <Typography variant="body1" sx={{ color: '#94A3B8' }}>Created by</Typography>
+                  {movie.created_by.map((creator: any, idx: number) => (
+                    <Typography
+                      key={idx}
+                      variant="body1"
+                      onClick={() => onOpenPersonality?.({ id: creator.id || null, name: creator.name, profile_path: creator.profile_path || null, role: 'Creator' })}
+                      sx={{
+                        color: '#F8FAFC',
+                        fontWeight: 600,
+                        cursor: onOpenPersonality ? 'pointer' : 'default',
+                        '&:hover': onOpenPersonality ? { color: '#E5A93C', textDecoration: 'underline' } : {},
+                      }}
+                    >
+                      {creator.name}{idx < (movie.created_by?.length || 0) - 1 ? ',' : ''}
+                    </Typography>
+                  ))}
+                </>
+              ) : movie.director ? (
+                <>
+                  <Typography variant="body1" sx={{ color: '#64748B' }}>•</Typography>
+                  <Typography variant="body1" sx={{ color: '#94A3B8' }}>Directed by</Typography>
+                  <Typography
+                    variant="body1"
+                    onClick={() => {
+                      if (!movie.director) return;
+                      const dirCrew = (movie.crew_members || []).find((c: any) => c.job === 'Director' || c.name === movie.director);
+                      onOpenPersonality?.({
+                        id: dirCrew?.id || null,
+                        name: movie.director,
+                        profile_path: dirCrew?.profile_path || null,
+                        role: 'Director',
+                      });
+                    }}
+                    sx={{
+                      color: '#F8FAFC',
+                      fontWeight: 600,
+                      cursor: onOpenPersonality ? 'pointer' : 'default',
+                      '&:hover': onOpenPersonality ? { color: '#E5A93C', textDecoration: 'underline' } : {},
+                    }}
+                  >
+                    {movie.director}
+                  </Typography>
+                </>
+              ) : null}
+            </Box>
 
             {/* Ratings */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, my: 0.5, flexWrap: 'wrap' }}>

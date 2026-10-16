@@ -903,4 +903,162 @@ export class TmdbService {
       posters: found?.poster_path ? [{ file_path: found.poster_path, aspect_ratio: 0.67, width: 1000, height: 1500 }] : [],
     };
   }
+
+  static async getPersonCredits(personId?: number | null, name?: string): Promise<{
+    person: {
+      id: number | null;
+      name: string;
+      biography?: string;
+      profile_path: string | null;
+      known_for_department?: string;
+      birthday?: string | null;
+      place_of_birth?: string | null;
+    };
+    cast: any[];
+    crew: any[];
+  }> {
+    let resolvedId = personId || null;
+    let personName = name || '';
+    let personBio = '';
+    let profilePath: string | null = null;
+    let knownForDept = '';
+    let birthday: string | null = null;
+    let placeOfBirth: string | null = null;
+
+    if (config.tmdb.apiKey && config.tmdb.apiKey !== 'mock_or_demo_key') {
+      try {
+        // If we don't have ID, search person by name
+        if (!resolvedId && personName) {
+          const searchRes = await fetch(
+            `${config.tmdb.baseUrl}/search/person?api_key=${config.tmdb.apiKey}&query=${encodeURIComponent(personName)}&include_adult=false`
+          );
+          if (searchRes.ok) {
+            const searchData: any = await searchRes.json();
+            if (searchData.results && searchData.results.length > 0) {
+              const bestMatch = searchData.results[0];
+              resolvedId = bestMatch.id;
+              personName = bestMatch.name || personName;
+              profilePath = bestMatch.profile_path || null;
+              knownForDept = bestMatch.known_for_department || '';
+            }
+          }
+        }
+
+        if (resolvedId) {
+          // Fetch person details
+          const detailRes = await fetch(
+            `${config.tmdb.baseUrl}/person/${resolvedId}?api_key=${config.tmdb.apiKey}`
+          );
+          if (detailRes.ok) {
+            const detailData: any = await detailRes.json();
+            personName = detailData.name || personName;
+            personBio = detailData.biography || '';
+            profilePath = detailData.profile_path || profilePath;
+            knownForDept = detailData.known_for_department || knownForDept;
+            birthday = detailData.birthday || null;
+            placeOfBirth = detailData.place_of_birth || null;
+          }
+
+          // Fetch combined credits
+          const creditsRes = await fetch(
+            `${config.tmdb.baseUrl}/person/${resolvedId}/combined_credits?api_key=${config.tmdb.apiKey}`
+          );
+          if (creditsRes.ok) {
+            const creditsData: any = await creditsRes.json();
+            const formatCredit = (item: any) => {
+              const isTv = item.media_type === 'tv';
+              return {
+                id: item.id,
+                title: isTv ? (item.name || item.original_name) : item.title,
+                original_title: isTv ? (item.original_name || item.name) : item.original_title,
+                overview: item.overview,
+                release_date: isTv ? (item.first_air_date || '') : (item.release_date || ''),
+                poster_path: item.poster_path,
+                backdrop_path: item.backdrop_path,
+                vote_average: item.vote_average || 0,
+                character: item.character || '',
+                job: item.job || '',
+                department: item.department || '',
+                media_type: (isTv ? 'tv' : 'movie') as 'movie' | 'tv',
+                popularity: item.popularity || 0,
+              };
+            };
+
+            const castList = (creditsData.cast || [])
+              .map(formatCredit)
+              .filter((c: any) => c.title && c.poster_path)
+              .sort((a: any, b: any) => (b.popularity || 0) - (a.popularity || 0));
+
+            const crewList = (creditsData.crew || [])
+              .map(formatCredit)
+              .filter((c: any) => c.title && c.poster_path)
+              .sort((a: any, b: any) => (b.popularity || 0) - (a.popularity || 0));
+
+            return {
+              person: {
+                id: resolvedId,
+                name: personName,
+                biography: personBio,
+                profile_path: profilePath,
+                known_for_department: knownForDept,
+                birthday,
+                place_of_birth: placeOfBirth,
+              },
+              cast: castList,
+              crew: crewList,
+            };
+          }
+        }
+      } catch (err: any) {
+        Logger.warn(`TMDB getPersonCredits failed: ${err.message}`);
+      }
+    }
+
+    // Mock fallback
+    const targetName = (personName || '').toLowerCase().trim();
+    const matchedCastMovies = this.mockMovies.filter(m =>
+      (m.cast || []).some((c: any) => (c.name || '').toLowerCase().includes(targetName))
+    );
+    const matchedCrewMovies = this.mockMovies.filter(m =>
+      (m.director && m.director.toLowerCase().includes(targetName)) ||
+      (m.crew_members || []).some((c: any) => (c.name || '').toLowerCase().includes(targetName)) ||
+      (m.created_by || []).some((c: any) => (c.name || '').toLowerCase().includes(targetName))
+    );
+
+    return {
+      person: {
+        id: resolvedId,
+        name: personName || 'Unknown Person',
+        biography: personBio || '',
+        profile_path: profilePath,
+        known_for_department: knownForDept,
+        birthday,
+        place_of_birth: placeOfBirth,
+      },
+      cast: matchedCastMovies.map(m => ({
+        id: m.id,
+        title: m.title,
+        original_title: m.original_title,
+        overview: m.overview,
+        release_date: m.release_date || m.first_air_date || '',
+        poster_path: m.poster_path,
+        backdrop_path: m.backdrop_path,
+        vote_average: m.vote_average,
+        character: m.cast?.find((c: any) => (c.name || '').toLowerCase().includes(targetName))?.character || '',
+        media_type: m.media_type || 'movie',
+      })),
+      crew: matchedCrewMovies.map(m => ({
+        id: m.id,
+        title: m.title,
+        original_title: m.original_title,
+        overview: m.overview,
+        release_date: m.release_date || m.first_air_date || '',
+        poster_path: m.poster_path,
+        backdrop_path: m.backdrop_path,
+        vote_average: m.vote_average,
+        job: m.director?.toLowerCase().includes(targetName) ? 'Director' : 'Crew',
+        media_type: m.media_type || 'movie',
+      })),
+    };
+  }
 }

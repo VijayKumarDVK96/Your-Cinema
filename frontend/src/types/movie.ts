@@ -28,12 +28,14 @@ export interface MovieSource {
 }
 
 interface CastMember {
+  id?: number;
   name: string;
   character: string;
   profile_path?: string | null;
 }
 
 interface CrewMember {
+  id?: number;
   name: string;
   job: string;
   department?: string;

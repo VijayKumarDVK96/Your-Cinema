@@ -25,11 +25,13 @@ import { UserMovie } from '../../../types/index.js';
 export interface MovieCastCrewTabProps {
   movie: UserMovie;
   onOpenCastModal: (filter: 'all' | 'cast' | 'crew') => void;
+  onOpenPersonality?: (target: { id?: number | null; name: string; profile_path?: string | null; role?: string }) => void;
 }
 
 export const MovieCastCrewTab: React.FC<MovieCastCrewTabProps> = ({
   movie,
   onOpenCastModal,
+  onOpenPersonality,
 }) => {
   const castCarouselRef = useRef<HTMLDivElement>(null);
   const crewCarouselRef = useRef<HTMLDivElement>(null);
@@ -131,7 +133,13 @@ export const MovieCastCrewTab: React.FC<MovieCastCrewTabProps> = ({
                       '& .cast-image': { transform: 'scale(1.06)' },
                     },
                   }}
-                  onClick={() => onOpenCastModal('cast')}
+                  onClick={() => {
+                    if (onOpenPersonality) {
+                      onOpenPersonality({ id: c.id, name: c.name, profile_path: c.profile_path, role: c.character || 'Cast' });
+                    } else {
+                      onOpenCastModal('cast');
+                    }
+                  }}
                 >
                   <Box sx={{ width: '100%', height: 210, overflow: 'hidden', position: 'relative', backgroundColor: '#1E293B' }}>
                     {photoUrl ? (
@@ -317,7 +325,13 @@ export const MovieCastCrewTab: React.FC<MovieCastCrewTabProps> = ({
                       borderColor: `${roleBadgeColor}88`,
                     },
                   }}
-                  onClick={() => onOpenCastModal('crew')}
+                  onClick={() => {
+                    if (onOpenPersonality) {
+                      onOpenPersonality({ id: member.id, name: member.name, profile_path: member.profile_path, role: member.job || member.department || 'Crew' });
+                    } else {
+                      onOpenCastModal('crew');
+                    }
+                  }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
                     <Box sx={{ p: 1, borderRadius: 2, backgroundColor: roleBgColor }}>{icon}</Box>
