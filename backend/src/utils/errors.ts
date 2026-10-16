@@ -25,6 +25,12 @@ export class BadRequestError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message: string = 'Resource already exists') {
+    super(message, 409, 'CONFLICT');
+  }
+}
+
 export class UnauthorizedError extends AppError {
   constructor(message: string = 'Authentication required') {
     super(message, 401, 'UNAUTHORIZED');

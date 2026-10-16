@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState } from 'react';
 import { UserMovie, MovieSource } from '../types/index.js';
+import { isDriveSource } from '../utils/googleDrive.js';
+import { isYouTubeSource } from '../utils/youtube.js';
+import { getOttMeta } from '../utils/ottProviders.js';
 
 interface PlayerContextType {
   activeMovie: UserMovie | null;
@@ -17,8 +20,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
   const openPlayer = (movie: UserMovie, source?: MovieSource) => {
-    // If source not provided, pick first available source or default to trailer
-    const chosenSource = source || (movie.sources && movie.sources.length > 0 ? movie.sources[0] : null);
+    // If source not provided, prefer in-app playable source (Drive or YouTube)
+    let chosenSource: MovieSource | null = source || null;
+    if (!chosenSource && movie.sources && movie.sources.length > 0) {
+      chosenSource = movie.sources.find((s: any) => isDriveSource(s) || isYouTubeSource(s)) || null;
+    }
+
+    // If it's an OTT source, open the OTT URL alone in a new tab directly!
+    if (chosenSource && !isDriveSource(chosenSource) && !isYouTubeSource(chosenSource)) {
+      const meta = getOttMeta(chosenSource.provider_name, chosenSource.provider_icon);
+      const raw = chosenSource.external_url || '';
+      const targetUrl = (raw && !raw.includes('themoviedb.org')) ? raw : meta.getDefaultSearchUrl(movie.title);
+      if (targetUrl) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    }
 
     setActiveMovie(movie);
     setActiveSource(chosenSource);

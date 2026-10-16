@@ -4,7 +4,8 @@ import { TmdbService } from '../tmdb/tmdb.service.js';
 import { WatchlistsService } from '../watchlists/watchlists.service.js';
 import { GenresService, PREDEFINED_GENRES } from '../genres/genres.service.js';
 import { TagsService } from '../tags/tags.service.js';
-import { NotFoundError, BadRequestError } from '../../utils/errors.js';
+import { NotFoundError, BadRequestError, ConflictError } from '../../utils/errors.js';
+import { SourcesService, detectProviderFromUrl } from '../sources/sources.service.js';
 import { MovieFilters } from '../../types/index.js';
 
 
@@ -917,6 +918,8 @@ export class MoviesService {
       assigned_genre?: string | null;
       watchlist_ids?: string[];
       watchlist_id?: string | null;
+      ott_url?: string | null;
+      ott_provider?: string | null;
     }
   ) {
     let canonicalMovie: any;
@@ -963,23 +966,7 @@ export class MoviesService {
       )).rows[0];
 
       if (alreadyInLibrary) {
-        if (initialData) {
-          await this.updateMovie(userId, alreadyInLibrary.id, {
-            watch_status: initialData.watch_status,
-            personal_rating: initialData.personal_rating,
-            is_favorite: initialData.is_favorite,
-          });
-          if (initialData.assigned_genre !== undefined && initialData.assigned_genre !== null) {
-            await GenresService.attachGenreToMovie(alreadyInLibrary.id, initialData.assigned_genre);
-          }
-          const watchlistList = initialData.watchlist_ids || (initialData.watchlist_id ? [initialData.watchlist_id] : []);
-          for (const wId of watchlistList) {
-            if (wId) {
-              await WatchlistsService.addMovieToList(userId, wId, alreadyInLibrary.id).catch(() => {});
-            }
-          }
-        }
-        return this.getMovieById(userId, alreadyInLibrary.id);
+        throw new ConflictError(`"${canonicalMovie.title}" is already in your library.`);
       }
 
       const userMovieId = uuidv4();
@@ -999,6 +986,21 @@ export class MoviesService {
         }
       }
 
+      // Automatically link initial OTT / Streaming source if provided
+      if (initialData?.ott_url && initialData.ott_url.trim()) {
+        const rawUrl = initialData.ott_url.trim();
+        const detectedProvider = initialData.ott_provider || detectProviderFromUrl(rawUrl, 'Streaming');
+        const isDrive = rawUrl.includes('drive.google.com') || rawUrl.includes('drive.usercontent.google.com');
+        const isYt = rawUrl.includes('youtube.com') || rawUrl.includes('youtu.be');
+        const sourceType = isDrive ? 'google_drive' : isYt ? 'youtube' : 'ott';
+        await SourcesService.addSource(userId, {
+          userMovieId,
+          sourceType,
+          providerName: detectedProvider,
+          externalUrl: rawUrl,
+        }).catch(() => {});
+      }
+
       return this.getMovieById(userId, userMovieId);
     }
 
@@ -1015,23 +1017,7 @@ export class MoviesService {
       .find(um => um.user_id === userId && um.movie_id === canonicalMovie.id);
 
     if (duplicate) {
-      if (initialData) {
-        await this.updateMovie(userId, duplicate.id, {
-          watch_status: initialData.watch_status,
-          personal_rating: initialData.personal_rating,
-          is_favorite: initialData.is_favorite,
-        });
-        if (initialData.assigned_genre !== undefined && initialData.assigned_genre !== null) {
-          await GenresService.attachGenreToMovie(duplicate.id, initialData.assigned_genre);
-        }
-        const watchlistList = initialData.watchlist_ids || (initialData.watchlist_id ? [initialData.watchlist_id] : []);
-        for (const wId of watchlistList) {
-          if (wId) {
-            await WatchlistsService.addMovieToList(userId, wId, duplicate.id).catch(() => {});
-          }
-        }
-      }
-      return this.getMovieById(userId, duplicate.id);
+      throw new ConflictError(`"${canonicalMovie.title}" is already in your library.`);
     }
 
     const newUmId = `um-${Date.now()}`;
@@ -1070,6 +1056,21 @@ export class MoviesService {
       if (wId) {
         await WatchlistsService.addMovieToList(userId, wId, newUmId).catch(() => {});
       }
+    }
+
+    // Automatically link initial OTT / Streaming source if provided
+    if (initialData?.ott_url && initialData.ott_url.trim()) {
+      const rawUrl = initialData.ott_url.trim();
+      const detectedProvider = initialData.ott_provider || detectProviderFromUrl(rawUrl, 'Streaming');
+      const isDrive = rawUrl.includes('drive.google.com') || rawUrl.includes('drive.usercontent.google.com');
+      const isYt = rawUrl.includes('youtube.com') || rawUrl.includes('youtu.be');
+      const sourceType = isDrive ? 'google_drive' : isYt ? 'youtube' : 'ott';
+      await SourcesService.addSource(userId, {
+        userMovieId: newUmId,
+        sourceType,
+        providerName: detectedProvider,
+        externalUrl: rawUrl,
+      }).catch(() => {});
     }
 
     return this.getMovieById(userId, newUmId);

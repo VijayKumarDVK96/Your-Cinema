@@ -75,6 +75,8 @@ export class MoviesController {
         assigned_genre: req.body.assigned_genre !== undefined ? req.body.assigned_genre : undefined,
         watchlist_ids: req.body.watchlist_ids || (req.body.watchlist_id ? [req.body.watchlist_id] : undefined),
         watchlist_id: req.body.watchlist_id,
+        ott_url: req.body.ott_url || req.body.ottUrl,
+        ott_provider: req.body.ott_provider || req.body.ottProvider,
       };
 
       const movie = await MoviesService.addMovie(userId, tmdbId, mediaType, initialData);

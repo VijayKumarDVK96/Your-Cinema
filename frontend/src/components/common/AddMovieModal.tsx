@@ -37,11 +37,13 @@ import CategoryIcon from '@mui/icons-material/Category';
 import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import LinkIcon from '@mui/icons-material/Link';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { WatchlistTreeSelect } from './WatchlistTreeSelect.js';
+import { detectOttProviderFromUrl, getOttMeta } from '../../utils/ottProviders.js';
 
 interface AddMovieModalProps {
   open: boolean;
@@ -56,6 +58,7 @@ interface ItemCustomOptions {
   rating: number | null;
   genre: string;
   watchlistId: string;
+  ottUrl: string;
 }
 
 export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onMovieAdded, initialQuery = '' }) => {
@@ -66,6 +69,7 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [addingId, setAddingId] = useState<number | null>(null);
+  const [itemErrors, setItemErrors] = useState<Record<number, string>>({});
 
   // Global default preset controls
   const [defaultWatchStatus, setDefaultWatchStatus] = useState<'unwatched' | 'watching' | 'watched'>('unwatched');
@@ -73,11 +77,26 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
   const [defaultRating, setDefaultRating] = useState<number | null>(null);
   const [defaultGenre, setDefaultGenre] = useState<string>('');
   const [defaultWatchlistId, setDefaultWatchlistId] = useState<string>('');
+  const [defaultOttUrl, setDefaultOttUrl] = useState<string>('');
   const [showDefaultSettings, setShowDefaultSettings] = useState(false);
 
   // Per-item override options map
   const [itemOptions, setItemOptions] = useState<Record<number, ItemCustomOptions>>({});
   const [expandedItemId, setExpandedItemId] = useState<number | null>(null);
+
+  // Fetch existing movies in library to detect duplicates
+  const { data: userMoviesData } = useQuery({
+    queryKey: ['my-movies', 'duplicate-check'],
+    queryFn: async () => {
+      const res = await api.get('/movies?limit=2000');
+      return res.data?.data?.movies || res.data?.data || [];
+    },
+    enabled: open,
+  });
+
+  const existingTmdbIds = new Set<number>(
+    (userMoviesData || []).map((m: any) => Number(m.tmdb_id)).filter(Boolean)
+  );
 
   // Fetch all genres
   const { data: genresData } = useQuery({
@@ -145,11 +164,13 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
           rating: defaultRating,
           genre: defaultGenre || (item.genre_ids && item.genre_ids[0] ? String(item.genre_ids[0]) : ''),
           watchlistId: defaultWatchlistId,
+          ottUrl: defaultOttUrl || '',
         };
       });
       setItemOptions((prev) => ({ ...initialMap, ...prev }));
     } catch (err: any) {
-      setError(err.message || 'Could not retrieve TMDB search results.');
+      const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message || 'Could not retrieve TMDB search results.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -171,6 +192,7 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
         rating: defaultRating,
         genre: defaultGenre,
         watchlistId: defaultWatchlistId,
+        ottUrl: defaultOttUrl || '',
       };
       return {
         ...prev,
@@ -183,16 +205,32 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
   };
 
   const handleAdd = async (item: any) => {
+    // Check if title is already added to user's library
+    if (existingTmdbIds.has(item.id) || addedIds.has(item.id)) {
+      const title = item.title || item.name || 'This title';
+      const errMsg = `"${title}" is already in your library.`;
+      setError(errMsg);
+      setItemErrors((prev) => ({ ...prev, [item.id]: errMsg }));
+      return;
+    }
+
     const opts = itemOptions[item.id] || {
       watchStatus: defaultWatchStatus,
       isFavorite: defaultIsFavorite,
       rating: defaultRating,
       genre: defaultGenre,
       watchlistId: defaultWatchlistId,
+      ottUrl: defaultOttUrl || '',
     };
 
     setAddingId(item.id);
     setError(null);
+    setItemErrors((prev) => {
+      const copy = { ...prev };
+      delete copy[item.id];
+      return copy;
+    });
+
     try {
       const type = item.media_type || (mediaType === 'tv' ? 'tv' : 'movie');
       await api.post('/movies', {
@@ -203,12 +241,15 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
         is_favorite: opts.isFavorite,
         assigned_genre: opts.genre || undefined,
         watchlist_ids: opts.watchlistId ? [opts.watchlistId] : undefined,
+        ott_url: opts.ottUrl?.trim() || undefined,
       });
 
       setAddedIds((prev) => new Set(prev).add(item.id));
       if (onMovieAdded) onMovieAdded();
     } catch (err: any) {
-      setError(err.message || 'Failed to add to your library.');
+      const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message || 'Failed to add to your library.';
+      setError(msg);
+      setItemErrors((prev) => ({ ...prev, [item.id]: msg }));
     } finally {
       setAddingId(null);
     }
@@ -514,6 +555,39 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                     </Button>
                   </Box>
                 </Grid>
+
+                {/* Preset Default OTT / Streaming URL */}
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    placeholder="Preset OTT / Stream URL to apply to all results (e.g. Netflix, Prime, Hotstar, Drive, YouTube)..."
+                    value={defaultOttUrl}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDefaultOttUrl(val);
+                      setItemOptions((prev) => {
+                        const updated = { ...prev };
+                        Object.keys(updated).forEach((id) => {
+                          updated[Number(id)] = { ...updated[Number(id)], ottUrl: val };
+                        });
+                        return updated;
+                      });
+                    }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <LinkIcon sx={{ color: '#E5A93C', fontSize: 18 }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      borderRadius: 1.5,
+                      '& .MuiOutlinedInput-input': { fontSize: '0.82rem', color: '#F8FAFC' },
+                    }}
+                  />
+                </Grid>
               </Grid>
             </Box>
           </Collapse>
@@ -565,6 +639,7 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
         {results.length > 0 && (
           <Grid container spacing={2} sx={{ maxHeight: '520px', overflowY: 'auto', pr: 0.5, mt: 0.5 }}>
             {results.map((item) => {
+              const isAlreadyInLibrary = existingTmdbIds.has(item.id);
               const isAdded = addedIds.has(item.id);
               const isAdding = addingId === item.id;
               const isExpanded = expandedItemId === item.id;
@@ -583,6 +658,7 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                 rating: defaultRating,
                 genre: defaultGenre,
                 watchlistId: defaultWatchlistId,
+                ottUrl: defaultOttUrl || '',
               };
 
               return (
@@ -591,7 +667,9 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                     sx={{
                       p: 1.75,
                       backgroundColor: 'rgba(255, 255, 255, 0.025)',
-                      border: isAdded
+                      border: isAlreadyInLibrary
+                        ? '1px solid rgba(245, 158, 11, 0.4)'
+                        : isAdded
                         ? '1px solid rgba(16, 185, 129, 0.4)'
                         : isExpanded
                         ? '1px solid rgba(229, 169, 60, 0.4)'
@@ -599,7 +677,11 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                       borderRadius: 2.5,
                       transition: 'all 0.2s ease',
                       '&:hover': {
-                        borderColor: isAdded ? 'rgba(16, 185, 129, 0.6)' : 'rgba(229, 169, 60, 0.35)',
+                        borderColor: isAlreadyInLibrary
+                          ? 'rgba(245, 158, 11, 0.6)'
+                          : isAdded
+                          ? 'rgba(16, 185, 129, 0.6)'
+                          : 'rgba(229, 169, 60, 0.35)',
                         backgroundColor: 'rgba(255, 255, 255, 0.04)',
                       },
                     }}
@@ -644,6 +726,20 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                                 backgroundColor: 'rgba(168, 85, 247, 0.2)',
                                 color: '#C084FC',
                                 border: '1px solid rgba(168, 85, 247, 0.4)',
+                              }}
+                            />
+                          )}
+                          {isAlreadyInLibrary && (
+                            <Chip
+                              label="Already in Library"
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.65rem',
+                                fontWeight: 800,
+                                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                color: '#FCD34D',
+                                border: '1px solid rgba(245, 158, 11, 0.5)',
                               }}
                             />
                           )}
@@ -761,15 +857,102 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                           )}
                         </Box>
 
+                        {/* OTT URL Provision for each movie */}
+                        <Box sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            placeholder="OTT / Streaming URL (e.g. Netflix, Prime, Hotstar, Drive, YouTube)..."
+                            value={currentOpts.ottUrl || ''}
+                            onChange={(e) => updateItemOption(item.id, 'ottUrl', e.target.value)}
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <LinkIcon sx={{ color: '#E5A93C', fontSize: 18 }} />
+                                </InputAdornment>
+                              ),
+                              endAdornment: currentOpts.ottUrl ? (
+                                <InputAdornment position="end">
+                                  {(() => {
+                                    const detected = detectOttProviderFromUrl(currentOpts.ottUrl);
+                                    if (!detected) return null;
+                                    const meta = getOttMeta(detected);
+                                    return (
+                                      <Chip
+                                        size="small"
+                                        label={detected}
+                                        sx={{
+                                          height: 20,
+                                          fontSize: '0.68rem',
+                                          fontWeight: 700,
+                                          backgroundColor: meta.bgColor,
+                                          color: meta.textColor,
+                                          border: `1px solid ${meta.borderColor}`,
+                                        }}
+                                      />
+                                    );
+                                  })()}
+                                </InputAdornment>
+                              ) : undefined,
+                            }}
+                            sx={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.035)',
+                              borderRadius: 1.5,
+                              '& .MuiOutlinedInput-root': {
+                                borderRadius: 1.5,
+                                '& fieldset': {
+                                  borderColor: currentOpts.ottUrl ? 'rgba(229, 169, 60, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+                                },
+                                '&:hover fieldset': {
+                                  borderColor: 'rgba(229, 169, 60, 0.6)',
+                                },
+                              },
+                              '& .MuiOutlinedInput-input': {
+                                py: 0.75,
+                                fontSize: '0.8rem',
+                                color: '#F8FAFC',
+                              },
+                            }}
+                          />
+                        </Box>
+
+                        {/* Per-item Error Alert */}
+                        {itemErrors[item.id] && (
+                          <Alert
+                            severity="error"
+                            onClose={() => {
+                              setItemErrors((prev) => {
+                                const copy = { ...prev };
+                                delete copy[item.id];
+                                return copy;
+                              });
+                            }}
+                            sx={{
+                              mb: 1.5,
+                              py: 0.2,
+                              px: 1.2,
+                              fontSize: '0.78rem',
+                              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                              color: '#F87171',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              alignItems: 'center',
+                            }}
+                          >
+                            {itemErrors[item.id]}
+                          </Alert>
+                        )}
+
                         {/* Action buttons */}
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                           <Button
                             size="small"
-                            variant={isAdded ? 'outlined' : 'contained'}
-                            color={isAdded ? 'success' : 'primary'}
+                            variant={isAlreadyInLibrary ? 'outlined' : isAdded ? 'outlined' : 'contained'}
+                            color={isAlreadyInLibrary ? 'warning' : isAdded ? 'success' : 'primary'}
                             startIcon={
                               isAdding ? (
                                 <CircularProgress size={16} color="inherit" />
+                              ) : isAlreadyInLibrary ? (
+                                <CheckCircleIcon sx={{ color: '#FCD34D' }} />
                               ) : isAdded ? (
                                 <CheckCircleIcon />
                               ) : (
@@ -784,9 +967,25 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                               py: 0.6,
                               px: 2,
                               borderRadius: 2,
+                              ...(isAlreadyInLibrary
+                                ? {
+                                    borderColor: 'rgba(245, 158, 11, 0.5)',
+                                    color: '#FCD34D',
+                                    '&:hover': {
+                                      borderColor: '#F59E0B',
+                                      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                                    },
+                                  }
+                                : {}),
                             }}
                           >
-                            {isAdded ? 'Added to Sanctuary' : item.media_type === 'tv' ? 'Add Series' : 'Add to Library'}
+                            {isAlreadyInLibrary
+                              ? 'Already in Library'
+                              : isAdded
+                              ? 'Added to Sanctuary'
+                              : item.media_type === 'tv'
+                              ? 'Add Series'
+                              : 'Add to Library'}
                           </Button>
 
                           <Button
@@ -958,6 +1157,30 @@ export const AddMovieModal: React.FC<AddMovieModalProps> = ({ open, onClose, onM
                             >
                               {currentOpts.isFavorite ? 'Favorite' : 'Mark as Favorite'}
                             </Button>
+                          </Grid>
+
+                          {/* OTT URL Provision */}
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              size="small"
+                              label="OTT / Streaming Link"
+                              placeholder="https://netflix.com/..., https://primevideo.com/..., Google Drive URL..."
+                              value={currentOpts.ottUrl || ''}
+                              onChange={(e) => updateItemOption(item.id, 'ottUrl', e.target.value)}
+                              InputProps={{
+                                startAdornment: (
+                                  <InputAdornment position="start">
+                                    <LinkIcon sx={{ color: '#E5A93C', fontSize: 18 }} />
+                                  </InputAdornment>
+                                ),
+                              }}
+                              sx={{
+                                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                borderRadius: 1.5,
+                                '& .MuiOutlinedInput-input': { fontSize: '0.82rem', color: '#F8FAFC' },
+                              }}
+                            />
                           </Grid>
                         </Grid>
                       </Box>

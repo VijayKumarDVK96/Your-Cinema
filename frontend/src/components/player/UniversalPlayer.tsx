@@ -339,8 +339,21 @@ export const UniversalPlayer: React.FC = () => {
     activeSource?.source_type === 'youtube' ||
     isYouTubeSource(activeSource) ||
     (!activeSource && Boolean(activeMovie?.trailer_url));
-  const isOtt = activeSource?.source_type === 'ott' && !isYouTube && !isDrive;
+  const isOtt = !isDrive && !isYouTube && (activeSource?.source_type === 'ott' || Boolean(activeSource?.provider_name));
   const ottMeta = isOtt && activeSource ? getOttMeta(activeSource.provider_name, activeSource.provider_icon) : null;
+
+  // Auto-launch OTT sources directly in a new tab and close player dialog
+  useEffect(() => {
+    if (isOpen && isOtt && activeSource && activeMovie) {
+      const meta = getOttMeta(activeSource.provider_name, activeSource.provider_icon);
+      const raw = activeSource.external_url || '';
+      const targetUrl = (raw && !raw.includes('themoviedb.org')) ? raw : meta.getDefaultSearchUrl(activeMovie.title);
+      if (targetUrl) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        closePlayer();
+      }
+    }
+  }, [isOpen, isOtt, activeSource, activeMovie, closePlayer]);
 
   // Google Drive URLs
   const driveFileId = isDrive
@@ -2543,7 +2556,7 @@ export const UniversalPlayer: React.FC = () => {
         )}
 
         {/* Case 3: OTT Deep Link Launcher */}
-        {isOtt && ottMeta && (
+        {isOtt && ottMeta && activeMovie && activeSource && (
           <Box sx={{ p: 6, textAlign: 'center', maxWidth: 520 }}>
             <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2, transform: 'scale(1.5)' }}>
               {ottMeta.icon}

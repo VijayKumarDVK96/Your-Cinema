@@ -21,10 +21,15 @@ export function extractDriveFileId(input?: string | null): string {
   if (fileDMatch && fileDMatch[1]) return fileDMatch[1];
   const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (idParamMatch && idParamMatch[1]) return idParamMatch[1];
-  if (!trimmed.includes('/') && !trimmed.includes('?') && !trimmed.includes('&')) {
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (!trimmed.includes('google.com') && !trimmed.includes('googleusercontent.com')) {
+      return '';
+    }
+  }
+  if (!trimmed.includes('/') && !trimmed.includes('?') && !trimmed.includes('&') && !trimmed.includes(':')) {
     return trimmed;
   }
-  return trimmed;
+  return '';
 }
 
 function formatPlaybackTime(sec: number): string {
@@ -74,7 +79,8 @@ export class SourcesService {
     const raw = input.externalFileId || input.externalUrl || '';
     const cleanId = extractDriveFileId(raw);
     const isDrive = input.sourceType === 'google_drive' ||
-      (input.providerName || '').toLowerCase().includes('drive') ||
+      (input.providerName || '').toLowerCase().includes('google drive') ||
+      (input.providerName || '').toLowerCase() === 'drive' ||
       (input.externalUrl || '').includes('drive.google.com') ||
       (input.externalUrl || '').includes('drive.usercontent.google.com');
 

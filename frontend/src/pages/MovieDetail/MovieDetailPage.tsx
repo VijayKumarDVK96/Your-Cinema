@@ -372,9 +372,9 @@ export const MovieDetailPage: React.FC = () => {
         <Grid item xs={12} md={8}>
           {/* Main Content Tabs */}
           <Paper
+            elevation={0}
             sx={{
               backgroundColor: '#0B0F19',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: 2.5,
               mb: 3,
               p: 0.5,
@@ -553,10 +553,8 @@ export const MovieDetailPage: React.FC = () => {
         onLaunchSource={(src) => {
           if (isDriveSource(src) || isYouTubeSource(src)) {
             openPlayer(movie, src);
-          } else if (src.source_type === 'ott' && src.external_url) {
-            window.open(src.external_url, '_blank', 'noopener,noreferrer');
           } else {
-            openPlayer(movie, src);
+            window.open(resolveOttUrl(src), '_blank', 'noopener,noreferrer');
           }
         }}
         onWatchTrailer={handleWatchTrailer}

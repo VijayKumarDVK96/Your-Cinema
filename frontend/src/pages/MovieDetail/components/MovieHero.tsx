@@ -93,7 +93,7 @@ export const MovieHero: React.FC<MovieHeroProps> = ({
         backgroundSize: 'cover',
         backgroundPosition: 'center 20%',
         backgroundRepeat: 'no-repeat',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        border: 'none',
         boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
       }}
     >

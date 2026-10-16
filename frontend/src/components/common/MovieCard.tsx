@@ -81,8 +81,15 @@ export const MovieCard: React.FC<MovieCardProps> = ({
     e.stopPropagation();
     if (primarySource && (isYouTubeSource(primarySource) || isDriveSource(primarySource))) {
       openPlayer(movie, primarySource);
-    } else if (ottInfo?.url && primarySource?.source_type === 'ott') {
-      window.open(ottInfo.url, '_blank', 'noopener,noreferrer');
+    } else if (primarySource && !isDriveSource(primarySource) && !isYouTubeSource(primarySource)) {
+      const url = ottInfo?.url && !ottInfo.url.includes('themoviedb.org')
+        ? ottInfo.url
+        : getOttMeta(primarySource.provider_name, primarySource.provider_icon).getDefaultSearchUrl(movie.title);
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        navigate(`/movies/${movie.user_movie_id}`);
+      }
     } else if (movie.trailer_url) {
       openPlayer(movie);
     } else {

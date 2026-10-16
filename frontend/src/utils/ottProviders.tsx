@@ -365,3 +365,19 @@ export const OttBadge: React.FC<{
     />
   );
 };
+
+export const detectOttProviderFromUrl = (url: string = ''): string => {
+  const u = (url || '').toLowerCase();
+  if (u.includes('netflix.com')) return 'Netflix';
+  if (u.includes('primevideo.com') || u.includes('amazon.com')) return 'Prime Video';
+  if (u.includes('hotstar.com') || u.includes('jiohotstar.com') || u.includes('disneyplus.com')) return 'JioHotstar';
+  if (u.includes('apple.com') || u.includes('tv.apple.com')) return 'Apple TV+';
+  if (u.includes('jiocinema.com')) return 'JioCinema';
+  if (u.includes('zee5.com')) return 'Zee5';
+  if (u.includes('sonyliv.com')) return 'Sony LIV';
+  if (u.includes('sunnxt.com')) return 'Sun NXT';
+  if (u.includes('aha.video')) return 'Aha';
+  if (u.includes('drive.google.com') || u.includes('drive.usercontent.google.com')) return 'Google Drive';
+  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube';
+  return '';
+};
