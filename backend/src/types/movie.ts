@@ -17,6 +17,8 @@ export interface MovieFilters {
   isFavorite?: boolean;
   mediaType?: MediaType;
   search?: string;
+  personId?: number;
+  personName?: string;
   sortBy?: 'added_at' | 'release_date' | 'rating' | 'my_rating' | 'tmdb_rating' | 'runtime' | 'title' | 'vote_average' | 'personal_rating';
   sortOrder?: 'asc' | 'desc';
   page?: number;

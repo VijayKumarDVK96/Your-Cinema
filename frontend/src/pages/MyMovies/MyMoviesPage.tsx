@@ -140,6 +140,8 @@ export const MyMoviesPage: React.FC = () => {
   const [newGenreNameInput, setNewGenreNameInput] = useState('');
 
   const searchTerm = searchParams.get('search') || '';
+  const personIdParam = searchParams.get('person_id') || '';
+  const personNameParam = searchParams.get('person_name') || '';
 
   const ratingMin = ratingRange[0] > 1 ? ratingRange[0] : undefined;
   const ratingMax = ratingRange[1] < 5 ? ratingRange[1] : undefined;
@@ -148,7 +150,7 @@ export const MyMoviesPage: React.FC = () => {
 
   // Query Movies
   const { data, isLoading } = useQuery({
-    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, yearMin, yearMax, isFavorite, sortBy, page, limit: 50, search: searchTerm }],
+    queryKey: ['my-movies', { status, mediaType, genreId, language, ott, tagId, ratingMin, ratingMax, yearMin, yearMax, isFavorite, sortBy, page, limit: 50, search: searchTerm, personId: personIdParam, personName: personNameParam }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.append('status', status);
@@ -163,6 +165,8 @@ export const MyMoviesPage: React.FC = () => {
       if (yearMax !== undefined) params.append('yearMax', yearMax.toString());
       if (isFavorite) params.append('isFavorite', 'true');
       if (searchTerm) params.append('search', searchTerm);
+      if (personIdParam) params.append('personId', personIdParam);
+      if (personNameParam) params.append('personName', personNameParam);
       params.append('sortBy', sortBy);
       params.append('page', page.toString());
       params.append('limit', '50');

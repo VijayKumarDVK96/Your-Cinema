@@ -136,6 +136,8 @@ export class MoviesService {
       isFavorite,
       mediaType = 'all',
       search,
+      personId,
+      personName,
       sortBy = 'release_date',
       sortOrder = 'desc',
       page = 1,
@@ -146,6 +148,48 @@ export class MoviesService {
       const conditions: string[] = ['um.user_id = $1'];
       const params: any[] = [userId];
       let pIdx = 2;
+
+      if (personId || (personName && personName.trim())) {
+        const pConditions: string[] = [];
+        if (personId) {
+          const personIdParam = pIdx++;
+          params.push(personId);
+          pConditions.push(`
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
+              WHERE (cm->>'id')::INT = $${personIdParam}
+            ) OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.crew_members::jsonb) = 'array' THEN m.crew_members::jsonb ELSE '[]'::jsonb END) crm
+              WHERE (crm->>'id')::INT = $${personIdParam}
+            ) OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.created_by::jsonb) = 'array' THEN m.created_by::jsonb ELSE '[]'::jsonb END) crb
+              WHERE (crb->>'id')::INT = $${personIdParam}
+            )
+          `);
+        }
+        if (personName && personName.trim()) {
+          const personNameParam = pIdx++;
+          params.push(personName.trim().toLowerCase());
+          pConditions.push(`
+            LOWER(TRIM(COALESCE(um.custom_director, m.director, ''))) = $${personNameParam} OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
+              WHERE LOWER(TRIM(cm->>'name')) = $${personNameParam}
+            ) OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.crew_members::jsonb) = 'array' THEN m.crew_members::jsonb ELSE '[]'::jsonb END) crm
+              WHERE LOWER(TRIM(crm->>'name')) = $${personNameParam}
+            ) OR
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.created_by::jsonb) = 'array' THEN m.created_by::jsonb ELSE '[]'::jsonb END) crb
+              WHERE LOWER(TRIM(crb->>'name')) = $${personNameParam}
+            )
+          `);
+        }
+        conditions.push(`(${pConditions.join(' OR ')})`);
+      }
 
       if (status && status !== 'all') {
         conditions.push(`um.watch_status = $${pIdx++}`);
@@ -205,7 +249,6 @@ export class MoviesService {
           LOWER(COALESCE(um.custom_title, m.title)) LIKE '%' || $${searchParamIdx} || '%' OR
           LOWER(COALESCE(m.original_title, '')) LIKE '%' || $${searchParamIdx} || '%' OR
           LOWER(COALESCE(um.custom_director, m.director, '')) LIKE '%' || $${searchParamIdx} || '%' OR
-          LOWER(COALESCE(m.overview, '')) LIKE '%' || $${searchParamIdx} || '%' OR
           EXISTS (
             SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.cast_members::jsonb) = 'array' THEN m.cast_members::jsonb ELSE '[]'::jsonb END) cm
             WHERE LOWER(cm->>'name') LIKE '%' || $${searchParamIdx} || '%'
@@ -540,6 +583,21 @@ export class MoviesService {
     });
 
     let filtered = resolved;
+    if (personId) {
+      filtered = filtered.filter(m =>
+        (Array.isArray(m.cast_members) && m.cast_members.some((cm: any) => cm.id === personId)) ||
+        (Array.isArray(m.crew_members) && m.crew_members.some((crm: any) => crm.id === personId)) ||
+        (Array.isArray(m.created_by) && m.created_by.some((crb: any) => crb.id === personId))
+      );
+    } else if (personName && personName.trim()) {
+      const pName = personName.trim().toLowerCase();
+      filtered = filtered.filter(m =>
+        (m.director && m.director.trim().toLowerCase() === pName) ||
+        (Array.isArray(m.cast_members) && m.cast_members.some((cm: any) => (cm.name || '').trim().toLowerCase() === pName)) ||
+        (Array.isArray(m.crew_members) && m.crew_members.some((crm: any) => (crm.name || '').trim().toLowerCase() === pName)) ||
+        (Array.isArray(m.created_by) && m.created_by.some((crb: any) => (crb.name || '').trim().toLowerCase() === pName))
+      );
+    }
     if (mediaType && mediaType !== 'all') {
       filtered = filtered.filter(m => (m.media_type || 'movie') === mediaType);
     }

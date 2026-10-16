@@ -68,11 +68,29 @@ interface WatchlistNode {
   children?: WatchlistNode[];
 }
 
+const LAST_WATCHLIST_STORAGE_KEY = 'yc_last_active_watchlist_id';
+
 export const WatchlistsPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  // Selected Watchlist in right content pane
-  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  // Selected Watchlist in right content pane - defaults to last clicked from localStorage
+  const [selectedListId, setSelectedListId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_WATCHLIST_STORAGE_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleSelectWatchlist = (id: string) => {
+    setSelectedListId(id);
+    setSelectedMovieIds([]);
+    setMoviesPage(1);
+    try {
+      localStorage.setItem(LAST_WATCHLIST_STORAGE_KEY, id);
+    } catch {}
+  };
+
   const [moviesPage, setMoviesPage] = useState<number>(1);
   const [watchlistToDelete, setWatchlistToDelete] = useState<{ id: string; name: string } | null>(null);
 
@@ -212,10 +230,44 @@ export const WatchlistsPage: React.FC = () => {
 
   // Active selected folder in right content area
   const activeId = useMemo(() => {
-    if (selectedListId) return selectedListId;
+    if (selectedListId) {
+      if (selectedListId.startsWith('unassigned')) return selectedListId;
+      if (flatWatchlists.length === 0 || flatWatchlists.some((w: any) => w.id === selectedListId)) {
+        return selectedListId;
+      }
+    }
+    try {
+      const saved = localStorage.getItem(LAST_WATCHLIST_STORAGE_KEY);
+      if (saved) {
+        if (saved.startsWith('unassigned')) return saved;
+        if (flatWatchlists.length === 0 || flatWatchlists.some((w: any) => w.id === saved)) {
+          return saved;
+        }
+      }
+    } catch {}
+
     if (flatWatchlists.length > 0) return flatWatchlists[0].id;
     return 'unassigned-movies';
   }, [selectedListId, flatWatchlists]);
+
+  // Persist last active watchlist and auto-expand tree path to it
+  React.useEffect(() => {
+    if (activeId) {
+      try {
+        localStorage.setItem(LAST_WATCHLIST_STORAGE_KEY, activeId);
+      } catch {}
+      if (flatWatchlists.length > 0 && !activeId.startsWith('unassigned')) {
+        const path = getWatchlistPath(activeId);
+        if (path.length > 1) {
+          setExpandedFolderIds((prev) => {
+            const next = new Set(prev);
+            path.slice(0, -1).forEach((p) => next.add(p.id));
+            return next;
+          });
+        }
+      }
+    }
+  }, [activeId, flatWatchlists]);
 
   const { data: activeList, isLoading: isActiveListLoading } = useQuery({
     queryKey: [
@@ -383,11 +435,7 @@ export const WatchlistsPage: React.FC = () => {
     return (
       <React.Fragment key={node.id}>
         <ListItemButton
-          onClick={() => {
-            setSelectedListId(node.id);
-            setSelectedMovieIds([]);
-            setMoviesPage(1);
-          }}
+          onClick={() => handleSelectWatchlist(node.id)}
           sx={{
             pl: depth * 2 + 1.2,
             pr: 1,
@@ -564,11 +612,7 @@ export const WatchlistsPage: React.FC = () => {
                   return (
                     <ListItemButton
                       key={sys.id}
-                      onClick={() => {
-                        setSelectedListId(sys.id);
-                        setSelectedMovieIds([]);
-                        setMoviesPage(1);
-                      }}
+                      onClick={() => handleSelectWatchlist(sys.id)}
                       sx={{
                         px: 1.2,
                         py: 0.8,
@@ -614,11 +658,7 @@ export const WatchlistsPage: React.FC = () => {
                   return (
                     <ListItemButton
                       key={sys.id}
-                      onClick={() => {
-                        setSelectedListId(sys.id);
-                        setSelectedMovieIds([]);
-                        setMoviesPage(1);
-                      }}
+                      onClick={() => handleSelectWatchlist(sys.id)}
                       sx={{
                         px: 1.2,
                         py: 0.8,
@@ -700,10 +740,8 @@ export const WatchlistsPage: React.FC = () => {
                   <Box
                     onClick={() => {
                       if (flatWatchlists.length > 0) {
-                        setSelectedListId(flatWatchlists[0].id);
+                        handleSelectWatchlist(flatWatchlists[0].id);
                       }
-                      setSelectedMovieIds([]);
-                      setMoviesPage(1);
                     }}
                     sx={{
                       display: 'flex',
@@ -728,9 +766,7 @@ export const WatchlistsPage: React.FC = () => {
                         key={item.id}
                         onClick={() => {
                           if (!isLast) {
-                            setSelectedListId(item.id);
-                            setSelectedMovieIds([]);
-                            setMoviesPage(1);
+                            handleSelectWatchlist(item.id);
                           }
                         }}
                         sx={{

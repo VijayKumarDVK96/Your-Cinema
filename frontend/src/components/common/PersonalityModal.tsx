@@ -63,25 +63,14 @@ export const PersonalityModal: React.FC<PersonalityModalProps> = ({
   const personName = personality?.name || '';
   const personId = personality?.id || null;
 
-  // 1. Fetch library movies matching this personality
+  // 1. Fetch user's library movies
   const {
-    data: libraryMovies = [],
-    isLoading: libraryLoading,
+    data: allUserMovies = [],
+    isLoading: allUserMoviesLoading,
   } = useQuery<UserMovie[]>({
-    queryKey: ['personality-library', personName],
-    queryFn: async () => {
-      if (!personName) return [];
-      const res = await api.get(`/movies?search=${encodeURIComponent(personName)}&limit=50`);
-      return res.data?.data?.movies || [];
-    },
-    enabled: open && !!personName,
-  });
-
-  // 2. Fetch full library TMDB IDs to accurately show "In Library" tag on filmography
-  const { data: allUserMovies = [] } = useQuery<UserMovie[]>({
     queryKey: ['my-movies', 'all-ids'],
     queryFn: async () => {
-      const res = await api.get('/movies?limit=500');
+      const res = await api.get('/movies?limit=2000');
       return res.data?.data?.movies || [];
     },
     enabled: open,
@@ -120,13 +109,6 @@ export const PersonalityModal: React.FC<PersonalityModalProps> = ({
     }
   }, [open, personName]);
 
-  // If library query finishes and has 0 items while TMDB has results, we can keep library tab or let user switch
-  React.useEffect(() => {
-    if (!libraryLoading && libraryMovies.length === 0 && activeTab === 'library') {
-      // Don't auto-switch aggressively, but keep UX pleasant
-    }
-  }, [libraryLoading, libraryMovies.length, activeTab]);
-
   const personProfile = tmdbData?.person || {};
   const photoUrl = personProfile.profile_path
     ? (personProfile.profile_path.startsWith('http')
@@ -140,6 +122,55 @@ export const PersonalityModal: React.FC<PersonalityModalProps> = ({
 
   const rawCastCredits = (tmdbData?.cast || []) as any[];
   const rawCrewCredits = (tmdbData?.crew || []) as any[];
+
+  // Authoritative Set of TMDB Movie IDs from this person's filmography
+  const filmographyTmdbIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    rawCastCredits.forEach((c) => { if (c.id) ids.add(c.id); });
+    rawCrewCredits.forEach((c) => { if (c.id) ids.add(c.id); });
+    return ids;
+  }, [rawCastCredits, rawCrewCredits]);
+
+  const normalizedPersonName = personName.trim().toLowerCase();
+
+  // Exactly matched movies in user's library
+  const libraryMovies = React.useMemo(() => {
+    if (!normalizedPersonName && !personId) return [];
+
+    return allUserMovies.filter((movie: UserMovie) => {
+      // 1. Definite match: movie's TMDB ID is in this person's TMDB filmography
+      if (movie.tmdb_id && filmographyTmdbIds.has(movie.tmdb_id)) {
+        return true;
+      }
+
+      // 2. Exact match by TMDB Person ID in cast or crew
+      if (personId) {
+        if (movie.cast_members?.some((c: any) => c.id === personId)) return true;
+        if (movie.crew_members?.some((c: any) => c.id === personId)) return true;
+        if (movie.created_by?.some((c: any) => c.id === personId)) return true;
+      }
+
+      // 3. Exact match by name (strict equality, NOT loose substring)
+      if (normalizedPersonName) {
+        if (movie.director && movie.director.trim().toLowerCase() === normalizedPersonName) {
+          return true;
+        }
+        if (movie.cast_members?.some((c: any) => c.name?.trim().toLowerCase() === normalizedPersonName)) {
+          return true;
+        }
+        if (movie.crew_members?.some((c: any) => c.name?.trim().toLowerCase() === normalizedPersonName)) {
+          return true;
+        }
+        if (movie.created_by?.some((c: any) => c.name?.trim().toLowerCase() === normalizedPersonName)) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [allUserMovies, filmographyTmdbIds, personId, normalizedPersonName]);
+
+  const libraryLoading = allUserMoviesLoading || tmdbLoading;
 
   // Filter filmography
   const filteredCredits = React.useMemo(() => {
@@ -200,7 +231,11 @@ export const PersonalityModal: React.FC<PersonalityModalProps> = ({
 
   const handleOpenLibrarySearch = () => {
     onClose();
-    navigate(`/movies?search=${encodeURIComponent(personName)}`);
+    if (personId) {
+      navigate(`/movies?person_id=${personId}&search=${encodeURIComponent(personName)}`);
+    } else {
+      navigate(`/movies?person_name=${encodeURIComponent(personName)}`);
+    }
   };
 
   if (!open || !personality) return null;

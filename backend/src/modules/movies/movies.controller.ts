@@ -35,6 +35,8 @@ export class MoviesController {
         isFavorite: parseBoolean(req.query.isFavorite),
         mediaType: (req.query.mediaType || req.query.media_type) as any,
         search: req.query.search as string,
+        personId: parseInteger(req.query.personId || req.query.person_id),
+        personName: (req.query.personName || req.query.person_name) as string | undefined,
         sortBy: req.query.sortBy as any,
         sortOrder: req.query.sortOrder as any,
         page: parseInteger(req.query.page, 1),
