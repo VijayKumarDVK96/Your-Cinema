@@ -5,29 +5,101 @@ import { SourcesService, extractDriveFileId } from './sources.service.js';
 import { MoviesService } from '../movies/movies.service.js';
 import { config } from '../../config/index.js';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
-import { BadRequestError } from '../../utils/errors.js';
+import { BadRequestError, GoogleDriveError } from '../../utils/errors.js';
+import { Logger } from '../../utils/logger.js';
+import {
+  GoogleDriveService,
+  verifyDriveStreamToken,
+} from './googleDrive.service.js';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 const mediaInfoCache = new Map<string, { audioTracks: any[]; subtitleTracks: any[]; fileName?: string; isMkv?: boolean; isTranscoded?: boolean; timestamp: number }>();
 const subtitleCache = new Map<string, string>();
 
 interface DriveDirectInfo {
   directUrl: string;
+  authHeaders?: Record<string, string>;
   cookies: string;
   totalSize: number;
   contentType: string;
   fileName?: string;
   isMkvOrNonMp4?: boolean;
+  authMode?: 'user-oauth' | 'server-oauth' | 'api-key' | 'legacy';
   expiresAt: number;
 }
 
 const driveDirectCache = new Map<string, DriveDirectInfo>();
 
-async function resolveDriveDirect(fileId: string): Promise<DriveDirectInfo> {
-  const cached = driveDirectCache.get(fileId);
+function driveCacheKey(fileId: string, userId?: string): string {
+  return `${userId || 'anon'}:${fileId}`;
+}
+
+function resolveDriveUserId(req: Request, fileId: string): string | undefined {
+  const raw = req.query.st;
+  if (!raw || typeof raw !== 'string') return undefined;
+  const userId = verifyDriveStreamToken(raw, fileId);
+  if (!userId) {
+    Logger.warn('Invalid or expired Google Drive stream token; falling back to anonymous access.');
+    return undefined;
+  }
+  return userId;
+}
+
+async function resolveDriveInfo(fileId: string, userId?: string): Promise<DriveDirectInfo> {
+  const cacheKey = driveCacheKey(fileId, userId);
+  const cached = driveDirectCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
     return cached;
   }
 
+  if (GoogleDriveService.isConfigured()) {
+    try {
+      const info = await GoogleDriveService.getDriveStreamSource(fileId, userId);
+      const mapped: DriveDirectInfo = {
+        ...info,
+        authHeaders: info.authHeaders,
+        cookies: '',
+      };
+      driveDirectCache.set(cacheKey, mapped);
+      return mapped;
+    } catch (err) {
+      // If only the OAuth client is configured (no API key / server token) and
+      // the user has not connected yet, public links can still fall back to the
+      // legacy endpoint. All other API failures should surface clearly.
+      if (
+        err instanceof GoogleDriveError &&
+        err.code === 'DRIVE_NOT_CONNECTED' &&
+        !GoogleDriveService.hasApiKey() &&
+        !GoogleDriveService.hasServerOAuth()
+      ) {
+        // Do not silently downgrade a connected account whose refresh token
+        // failed; surface the reconnect error instead.
+        const account = userId
+          ? await GoogleDriveService.getDriveAccountStatus(userId)
+          : null;
+        if (account?.connected) throw err;
+
+        Logger.warn(
+          'Google Drive OAuth is configured but no account is connected; falling back to legacy download for this request.'
+        );
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    Logger.warn(
+      'Google Drive API credentials are not configured. Using the legacy public download endpoint (quota-prone).'
+    );
+  }
+
+  const legacy = await resolveLegacyDriveDirect(fileId);
+  driveDirectCache.set(cacheKey, legacy);
+  return legacy;
+}
+
+async function resolveLegacyDriveDirect(fileId: string): Promise<DriveDirectInfo> {
   const url1 = `https://drive.google.com/uc?export=download&id=${fileId}`;
   const res1 = await fetch(url1, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
@@ -95,25 +167,160 @@ async function resolveDriveDirect(fileId: string): Promise<DriveDirectInfo> {
     (contentType && (contentType.includes('matroska') || contentType.includes('mkv')))
   );
 
-  const info: DriveDirectInfo = {
+  return {
     directUrl,
     cookies,
     totalSize,
     contentType,
     fileName,
     isMkvOrNonMp4,
+    authHeaders: {},
+    authMode: 'legacy',
     expiresAt: Date.now() + 20 * 60 * 1000, // 20 min TTL
   };
-
-  driveDirectCache.set(fileId, info);
-  return info;
 }
 
-function buildDriveRawProxyUrl(fileId: string): string {
+function buildDriveRawProxyUrl(fileId: string, streamToken?: string): string {
   // FFmpeg/ffprobe must read through this proxy so every upstream request to
-  // Google includes a Range header. Without one, Drive returns an HTML
-  // "quota exceeded / confirm download" page instead of video bytes.
-  return `http://127.0.0.1:${config.port}/api/sources/drive/${encodeURIComponent(fileId)}/raw`;
+  // Google includes a Range header. The signed stream token selects the same
+  // per-user OAuth account used by the browser request.
+  const base = `http://127.0.0.1:${config.port}/api/sources/drive/${encodeURIComponent(fileId)}/raw`;
+  return streamToken ? `${base}?st=${encodeURIComponent(streamToken)}` : base;
+}
+
+const activeSubtitleExtractions = new Map<string, Promise<string | null>>();
+
+function findExistingSubtitleFile(fileId: string, trackIndex: number): string | null {
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'cache', 'subtitles', `${fileId}_${trackIndex}.vtt`),
+    path.resolve(process.cwd(), '..', 'cache', 'subtitles', `${fileId}_${trackIndex}.vtt`),
+    path.resolve(process.cwd(), 'backend', 'cache', 'subtitles', `${fileId}_${trackIndex}.vtt`),
+  ];
+  return (
+    candidatePaths.find((p) => {
+      try {
+        return fs.existsSync(p) && fs.statSync(p).size > 500;
+      } catch {
+        return false;
+      }
+    }) || null
+  );
+}
+
+async function extractSubtitleFile(
+  fileId: string,
+  trackIndex: number = 0,
+  streamToken?: string
+): Promise<string | null> {
+  const existing = findExistingSubtitleFile(fileId, trackIndex);
+  if (existing) return existing;
+
+  const key = `${fileId}_${trackIndex}`;
+  if (activeSubtitleExtractions.has(key)) {
+    return activeSubtitleExtractions.get(key)!;
+  }
+
+  const promise = (async () => {
+    const diskDir = path.resolve(process.cwd(), 'cache', 'subtitles');
+    if (!fs.existsSync(diskDir)) fs.mkdirSync(diskDir, { recursive: true });
+    const targetFile = path.join(diskDir, `${fileId}_${trackIndex}.vtt`);
+    const tmpFile = `${targetFile}.tmp.${Date.now()}`;
+
+    try {
+      const ff = spawn('ffmpeg', [
+        '-v', 'error',
+        '-hide_banner',
+        '-seekable', '1',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '4',
+        '-rw_timeout', '20000000',
+        '-probesize', '2M',
+        '-analyzeduration', '2M',
+        '-i', buildDriveRawProxyUrl(fileId, streamToken),
+        '-map', `0:s:${trackIndex}`,
+        '-vn',
+        '-an',
+        '-c:s', 'webvtt',
+        '-f', 'webvtt',
+        '-y',
+        tmpFile,
+      ]);
+
+      await new Promise<number>((resolve) => {
+        ff.on('close', (code) => resolve(code ?? 1));
+        ff.on('error', () => resolve(1));
+        setTimeout(() => {
+          try { ff.kill(); } catch {}
+          resolve(1);
+        }, 120000);
+      });
+
+      if (fs.existsSync(tmpFile)) {
+        const sz = fs.statSync(tmpFile).size;
+        if (sz > 500) {
+          const content = fs.readFileSync(tmpFile, 'utf8');
+          if (content.includes('WEBVTT')) {
+            fs.renameSync(tmpFile, targetFile);
+            subtitleCache.set(`${fileId}_${trackIndex}`, content);
+            return targetFile;
+          }
+        }
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+      return null;
+    } catch {
+      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+      return null;
+    } finally {
+      activeSubtitleExtractions.delete(key);
+    }
+  })();
+
+  activeSubtitleExtractions.set(key, promise);
+  return promise;
+}
+
+async function describeDriveFailure(
+  response: globalThis.Response
+): Promise<string> {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      const payload: any = await response.json();
+      const message = payload?.error?.message;
+      if (message) return `Google Drive API: ${message}`;
+    } catch {}
+  }
+
+  if (response.status === 401) {
+    return 'Google Drive authorization expired. Reconnect Google Drive in Settings.';
+  }
+  if (response.status === 403) {
+    return 'Google Drive access denied. Connect the Google account that owns this file, or share it as "Anyone with the link".';
+  }
+  if (response.status === 404) {
+    return 'Google Drive file not found or it is not shared with the connected account.';
+  }
+  if (response.status === 429) {
+    return 'Google Drive API rate limit reached. Please retry in a moment.';
+  }
+  if (contentType.includes('text/html')) {
+    return 'Google Drive returned an HTML page instead of video data. The file may be quota-limited or require a confirmation step. Please try again later.';
+  }
+  return `Google Drive stream source returned HTTP ${response.status}.`;
+}
+
+function driveFailureStatus(
+  response: globalThis.Response,
+  contentType: string
+): number {
+  if (contentType.includes('text/html')) return 502;
+  if ([400, 401, 403, 404, 429].includes(response.status)) {
+    return response.status;
+  }
+  return 502;
 }
 
 /**
@@ -126,8 +333,10 @@ async function proxyDriveBytes(
   res: Response,
   fileId: string,
   info: DriveDirectInfo,
-  capChunk: boolean
+  capChunk: boolean,
+  cacheKey?: string
 ): Promise<void> {
+  const resolvedCacheKey = cacheKey || fileId;
   const chunkMode = String(req.query.chunk || req.headers['x-buffer-chunk'] || '').toLowerCase();
   const quality = String(req.query.quality || req.query.res || 'auto').toLowerCase();
   const isLowBandwidth = chunkMode === '10mb' || quality === '360p' || quality === '480p';
@@ -179,6 +388,7 @@ async function proxyDriveBytes(
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ...(info.cookies ? { Cookie: info.cookies } : {}),
+        ...(info.authHeaders || {}),
         Range: `bytes=${from}-${to}`,
       },
     });
@@ -209,16 +419,16 @@ async function proxyDriveBytes(
       // the next chunk as it plays/scrubs.
       const driveRes = await fetchUpstream(start, finalEnd ?? start + chunkSize - 1);
       const upstreamType = driveRes.headers.get('content-type') || '';
-      if (upstreamType.includes('text/html') || (!driveRes.ok && driveRes.status !== 206)) {
-        driveDirectCache.delete(fileId);
+      const failed = upstreamType.includes('text/html') ||
+        upstreamType.includes('application/json') ||
+        (!driveRes.ok && driveRes.status !== 206);
+      if (failed) {
+        driveDirectCache.delete(resolvedCacheKey);
         if (!res.headersSent) {
-          res.status(upstreamType.includes('text/html') ? 502 : driveRes.status).json({
+          const message = await describeDriveFailure(driveRes);
+          res.status(driveFailureStatus(driveRes, upstreamType)).json({
             success: false,
-            error: {
-              message: upstreamType.includes('text/html')
-                ? 'Google Drive returned an HTML page instead of video data. The file may be quota-limited or require a confirmation step. Please try again later.'
-                : `Google Drive stream source returned HTTP ${driveRes.status}.`,
-            },
+            error: { code: 'DRIVE_UPSTREAM_ERROR', message },
           });
         }
         return;
@@ -276,16 +486,16 @@ async function proxyDriveBytes(
 
       const driveRes = await fetchUpstream(cursor, chunkEnd);
       const upstreamType = driveRes.headers.get('content-type') || '';
-      if (upstreamType.includes('text/html') || (!driveRes.ok && driveRes.status !== 206)) {
-        driveDirectCache.delete(fileId);
+      const failed = upstreamType.includes('text/html') ||
+        upstreamType.includes('application/json') ||
+        (!driveRes.ok && driveRes.status !== 206);
+      if (failed) {
+        driveDirectCache.delete(resolvedCacheKey);
         if (!res.headersSent) {
-          res.status(upstreamType.includes('text/html') ? 502 : driveRes.status).json({
+          const message = await describeDriveFailure(driveRes);
+          res.status(driveFailureStatus(driveRes, upstreamType)).json({
             success: false,
-            error: {
-              message: upstreamType.includes('text/html')
-                ? 'Google Drive returned an HTML page instead of video data. The file may be quota-limited or require a confirmation step. Please try again later.'
-                : `Google Drive stream source returned HTTP ${driveRes.status}.`,
-            },
+            error: { code: 'DRIVE_UPSTREAM_ERROR', message },
           });
         } else {
           res.end();
@@ -336,7 +546,8 @@ export class SourcesController {
       const fileId = extractDriveFileId(decodeURIComponent(rawParam));
       if (!fileId) throw new BadRequestError('Drive file ID is required');
 
-      const info = await resolveDriveDirect(fileId);
+      const userId = resolveDriveUserId(req, fileId);
+      const info = await resolveDriveInfo(fileId, userId);
       return sendSuccess(res, {
         fileId,
         fileName: info.fileName || '',
@@ -347,6 +558,9 @@ export class SourcesController {
         supportsRanges: true,
         defaultChunkMB: 50,
         lowChunkMB: 10,
+        authMode: info.authMode || 'legacy',
+        apiKeyConfigured: GoogleDriveService.hasApiKey(),
+        oauthConfigured: GoogleDriveService.isOAuthConfigured(),
       });
     } catch (err) {
       next(err);
@@ -359,7 +573,11 @@ export class SourcesController {
       const fileId = extractDriveFileId(decodeURIComponent(rawParam));
       if (!fileId) throw new BadRequestError('Drive file ID is required');
 
-      const cached = mediaInfoCache.get(fileId);
+      const userId = resolveDriveUserId(req, fileId);
+      const streamToken = typeof req.query.st === 'string' ? req.query.st : '';
+      const cacheKey = driveCacheKey(fileId, userId);
+
+      const cached = mediaInfoCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < 3600000) {
         return sendSuccess(res, {
           audioTracks: cached.audioTracks,
@@ -370,23 +588,21 @@ export class SourcesController {
         });
       }
 
-      const info = await resolveDriveDirect(fileId);
+      const info = await resolveDriveInfo(fileId, userId);
       const { spawn } = await import('child_process');
 
       const ffprobeProc = spawn('ffprobe', [
         '-v', 'error',
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        ...(info.cookies ? ['-headers', `Cookie: ${info.cookies}\r\n`] : []),
         '-reconnect', '1',
         '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '4',
-        '-rw_timeout', '15000000',
-        '-probesize', '8M',
-        '-analyzeduration', '8M',
+        '-rw_timeout', '10000000',
+        '-probesize', '2M',
+        '-analyzeduration', '2M',
         '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title',
         '-of', 'json',
-        buildDriveRawProxyUrl(fileId),
+        buildDriveRawProxyUrl(fileId, streamToken),
       ]);
 
       let stdout = '';
@@ -409,15 +625,21 @@ export class SourcesController {
           const audioTracks = streams
             .filter((s) => s.codec_type === 'audio')
             .map((s) => {
-              const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+              const rawLang = (s.tags?.language || s.tags?.LANGUAGE || '').toLowerCase().trim();
               const title = s.tags?.title || s.tags?.TITLE || '';
-              const label = title || (lang ? `${lang.toUpperCase()} (${s.codec_name || 'audio'})` : `Audio Track ${audioRelIdx + 1}`);
+              let langLabel = rawLang ? rawLang.toUpperCase() : '';
+              if (['amh', 'lit', 'und'].includes(rawLang) || !rawLang) {
+                langLabel = audioRelIdx === 0 ? 'English (Main)' : `Audio ${audioRelIdx + 1}`;
+              } else if (rawLang === 'en' || rawLang === 'eng') {
+                langLabel = 'English';
+              }
+              const label = title || `${langLabel} (${s.codec_name || 'audio'})`;
               const track = {
                 id: `audio-${audioRelIdx}`,
                 index: audioRelIdx,
                 globalIndex: s.index,
                 label,
-                language: lang || 'und',
+                language: rawLang || 'en',
                 codec: s.codec_name,
                 selected: audioRelIdx === 0,
               };
@@ -429,15 +651,21 @@ export class SourcesController {
           const subtitleTracks = streams
             .filter((s) => s.codec_type === 'subtitle')
             .map((s) => {
-              const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+              const rawLang = (s.tags?.language || s.tags?.LANGUAGE || '').toLowerCase().trim();
               const title = s.tags?.title || s.tags?.TITLE || '';
-              const label = title || (lang ? `${lang.toUpperCase()} Subtitles` : `Subtitle Track ${subRelIdx + 1}`);
+              let langLabel = rawLang ? rawLang.toUpperCase() : '';
+              if (['amh', 'lit', 'und'].includes(rawLang) || !rawLang) {
+                langLabel = 'English';
+              } else if (rawLang === 'en' || rawLang === 'eng') {
+                langLabel = 'English';
+              }
+              const label = title || `${langLabel} Subtitles`;
               const track = {
                 id: `sub-${subRelIdx}`,
                 index: subRelIdx,
                 streamIndex: s.index,
                 label,
-                language: lang || 'en',
+                language: rawLang || 'en',
                 src: `/api/sources/drive/${fileId}/subtitles/${subRelIdx}`,
                 default: subRelIdx === 0,
               };
@@ -445,14 +673,23 @@ export class SourcesController {
               return track;
             });
 
-          mediaInfoCache.set(fileId, {
-            audioTracks,
-            subtitleTracks,
-            fileName: info.fileName,
-            isMkv: Boolean(info.isMkvOrNonMp4),
-            isTranscoded: Boolean(info.isMkvOrNonMp4),
-            timestamp: Date.now(),
-          });
+          // Do not cache an empty probe result: it usually means Drive was
+          // temporarily unreachable and would otherwise hide tracks for an hour.
+          if (audioTracks.length > 0 || subtitleTracks.length > 0) {
+            mediaInfoCache.set(cacheKey, {
+              audioTracks,
+              subtitleTracks,
+              fileName: info.fileName,
+              isMkv: Boolean(info.isMkvOrNonMp4),
+              isTranscoded: Boolean(info.isMkvOrNonMp4),
+              timestamp: Date.now(),
+            });
+
+            // Pre-extract default subtitle track in background if not already cached
+            if (subtitleTracks.length > 0) {
+              extractSubtitleFile(fileId, 0, streamToken).catch(() => {});
+            }
+          }
           return sendSuccess(res, {
             audioTracks,
             subtitleTracks,
@@ -493,60 +730,42 @@ export class SourcesController {
       const trackIndex = parseInt(req.params.trackIndex || '0', 10);
       if (!fileId) throw new BadRequestError('Drive file ID is required');
 
-      const cacheKey = `${fileId}_${trackIndex}`;
-      const cached = subtitleCache.get(cacheKey);
-      if (cached) {
+      const userId = resolveDriveUserId(req, fileId);
+      const streamToken = typeof req.query.st === 'string' ? req.query.st : '';
+
+      // 1. Check existing cached file on disk (instantly responds in < 15ms)
+      const existingDiskPath = findExistingSubtitleFile(fileId, trackIndex);
+      if (existingDiskPath) {
         res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.sendFile(existingDiskPath);
+      }
+
+      // 2. Check memory cache
+      const cacheKey = `${driveCacheKey(fileId, userId)}_${trackIndex}`;
+      const cached = subtitleCache.get(cacheKey) || subtitleCache.get(`${fileId}_${trackIndex}`);
+      if (cached && cached.length > 500) {
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.send(cached);
       }
 
-      const info = await resolveDriveDirect(fileId);
-      const { spawn } = await import('child_process');
-
-      const ffmpegProc = spawn('ffmpeg', [
-        '-v', 'error',
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        ...(info.cookies ? ['-headers', `Cookie: ${info.cookies}\r\n`] : []),
-        '-reconnect', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '4',
-        '-rw_timeout', '20000000',
-        '-probesize', '8M',
-        '-analyzeduration', '8M',
-        '-i', buildDriveRawProxyUrl(fileId),
-        '-map', `0:s:${trackIndex}`,
-        '-f', 'webvtt',
-        '-',
-      ]);
-
-      let output = '';
-      ffmpegProc.stdout.on('data', (chunk) => {
-        output += chunk.toString();
-      });
-
-      const timeout = setTimeout(() => {
-        try { ffmpegProc.kill(); } catch {}
-      }, 30000);
-
-      ffmpegProc.on('close', (code) => {
-        clearTimeout(timeout);
-        if (output && output.startsWith('WEBVTT')) {
-          subtitleCache.set(cacheKey, output);
-          res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-          res.setHeader('Cache-Control', 'public, max-age=86400');
-          return res.send(output);
-        }
+      // 3. Clean deduplicated background extraction to disk
+      const extractedPath = await extractSubtitleFile(fileId, trackIndex, streamToken);
+      if (extractedPath && fs.existsSync(extractedPath)) {
         res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-        return res.send('WEBVTT\n\n');
-      });
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.sendFile(extractedPath);
+      }
 
-      ffmpegProc.on('error', () => {
-        clearTimeout(timeout);
-        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-        return res.send('WEBVTT\n\n');
-      });
+      // 4. Fallback: return minimal valid empty VTT so client never hangs
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.send('WEBVTT\n\n');
     } catch (err) {
       next(err);
     }
@@ -558,9 +777,17 @@ export class SourcesController {
       const fileId = extractDriveFileId(decodeURIComponent(rawParam));
       if (!fileId) throw new BadRequestError('Drive file ID is required');
 
-      const info = await resolveDriveDirect(fileId);
+      const userId = resolveDriveUserId(req, fileId);
+      const streamToken = typeof req.query.st === 'string' ? req.query.st : '';
+      const cacheKey = driveCacheKey(fileId, userId);
+      const info = await resolveDriveInfo(fileId, userId);
 
       if (req.query.redirect === 'true') {
+        if (info.authHeaders?.Authorization) {
+          throw new BadRequestError(
+            'OAuth-protected Drive files must be streamed through the range proxy, not redirected.'
+          );
+        }
         return res.redirect(302, info.directUrl);
       }
 
@@ -609,7 +836,7 @@ export class SourcesController {
         const is720p = quality === '720p' || quality === 'hd';
         const is1080p = quality === '1080p' || quality === 'fhd';
 
-        let videoCodecArgs: string[];
+        let videoCodecArgs: string[] = ['-c:v', 'copy'];
         let audioBitrate = '128k';
 
         if (is360p) {
@@ -668,36 +895,53 @@ export class SourcesController {
             '-keyint_min', '24',
           ];
           audioBitrate = '160k';
+        }
+
+        let audioCodecArgs: string[];
+
+        if (is360p || is480p || is720p || is1080p) {
+          audioCodecArgs = [
+            '-c:a', 'aac',
+            '-b:a', audioBitrate,
+            '-ac', '2',
+            '-af', 'aresample=async=1000:min_hard_comp=0.100000',
+          ];
         } else {
-          // Fast stream copy for high performance remux (e.g. MKV -> fragmented MP4 container)
+          // Fast stream copy for high performance remux (MKV -> fragmented MP4 container)
           videoCodecArgs = ['-c:v', 'copy'];
-          audioBitrate = '128k';
+          audioCodecArgs = ['-c:a', 'copy'];
+        }
+
+        const audioOffset = parseFloat((req.query.audioOffset as string) || '0') || 0;
+        if (audioOffset !== 0) {
+          audioCodecArgs = [
+            '-c:a', 'aac',
+            '-b:a', '160k',
+            '-ac', '2',
+            '-af', audioOffset > 0
+              ? `adelay=${Math.round(audioOffset * 1000)}|${Math.round(audioOffset * 1000)}`
+              : `atrim=start=${Math.abs(audioOffset)},asetpts=PTS-STARTPTS`,
+          ];
         }
 
         const ffmpegArgs = [
           '-v', 'error',
           '-hide_banner',
-          '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          ...(info.cookies ? ['-headers', `Cookie: ${info.cookies}\r\n`] : []),
           '-reconnect', '1',
           '-reconnect_at_eof', '1',
           '-reconnect_streamed', '1',
           '-reconnect_delay_max', '4',
           '-rw_timeout', '25000000',
-          '-probesize', '8M',
-          '-analyzeduration', '8M',
+          '-probesize', '2M',
+          '-analyzeduration', '2M',
           ...(seekSec > 0 ? ['-ss', String(seekSec)] : []),
-          '-i', buildDriveRawProxyUrl(fileId),
+          '-i', buildDriveRawProxyUrl(fileId, streamToken),
           '-map', '0:v:0',
           '-map', `${audioMap}?`,
           ...videoCodecArgs,
-          '-c:a', 'aac',
-          '-b:a', audioBitrate,
-          '-ac', '2',
-          // Normalise timestamps so a restarted stream always begins at 0.
-          // The client adds the requested seek offset back for display/progress.
+          ...audioCodecArgs,
+          '-max_muxing_queue_size', '4096',
           '-avoid_negative_ts', 'make_zero',
-          '-reset_timestamps', '1',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
           '-f', 'mp4',
           'pipe:1',
@@ -764,7 +1008,7 @@ export class SourcesController {
 
       // Delegate to the shared range proxy. capChunk=true preserves the
       // YouTube-style 10MB/50MB chunk window for browser playback.
-      await proxyDriveBytes(req, res, fileId, info, true);
+      await proxyDriveBytes(req, res, fileId, info, true, cacheKey);
       return;
     } catch (err: any) {
       if (
@@ -793,8 +1037,10 @@ export class SourcesController {
       const fileId = extractDriveFileId(decodeURIComponent(rawParam));
       if (!fileId) throw new BadRequestError('Drive file ID is required');
 
-      const info = await resolveDriveDirect(fileId);
-      await proxyDriveBytes(req, res, fileId, info, false);
+      const userId = resolveDriveUserId(req, fileId);
+      const cacheKey = driveCacheKey(fileId, userId);
+      const info = await resolveDriveInfo(fileId, userId);
+      await proxyDriveBytes(req, res, fileId, info, false, cacheKey);
     } catch (err: any) {
       if (
         err.name === 'AbortError' ||
@@ -808,6 +1054,107 @@ export class SourcesController {
         return;
       }
       next(err);
+    }
+  }
+
+  /**
+   * Issues a short-lived, file-scoped signed token. The browser appends it to
+   * Drive media URLs so public stream endpoints can select the user's OAuth
+   * credentials without exposing the app JWT in media requests.
+   */
+  static async getDriveStreamToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rawParam = req.params.fileId || '';
+      const fileId = extractDriveFileId(decodeURIComponent(rawParam));
+      if (!fileId) throw new BadRequestError('Drive file ID is required');
+
+      const userId = req.user!.id;
+      const status = await GoogleDriveService.getDriveAccountStatus(userId);
+      const authMode = status.connected
+        ? 'user-oauth'
+        : status.serverOAuthConfigured
+          ? 'server-oauth'
+          : status.apiKeyConfigured
+            ? 'api-key'
+            : 'legacy';
+      const token = status.connected || status.serverOAuthConfigured
+        ? GoogleDriveService.createDriveStreamToken(userId, fileId)
+        : null;
+
+      return sendSuccess(res, {
+        token,
+        authMode,
+        expiresIn: 12 * 60 * 60,
+        connectedEmail: status.email,
+        apiKeyConfigured: status.apiKeyConfigured,
+        oauthConfigured: status.oauthConfigured,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getGoogleDriveAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const status = await GoogleDriveService.getDriveAccountStatus(req.user!.id);
+      return sendSuccess(res, status);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getGoogleDriveAuthUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      const url = GoogleDriveService.buildGoogleDriveAuthUrl(req.user!.id);
+      return sendSuccess(res, {
+        url,
+        redirectUri: config.googleDrive.redirectUri,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async disconnectGoogleDrive(req: Request, res: Response, next: NextFunction) {
+    try {
+      await GoogleDriveService.disconnectGoogleDrive(req.user!.id);
+      return sendSuccess(res, { connected: false });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async googleDriveCallback(req: Request, res: Response) {
+    const clientBase = config.clientUrl.replace(/\/$/, '');
+    try {
+      const oauthError = typeof req.query.error === 'string' ? req.query.error : '';
+      if (oauthError) {
+        throw new Error(
+          oauthError === 'access_denied'
+            ? 'Google Drive connection was cancelled.'
+            : `Google OAuth error: ${oauthError}`
+        );
+      }
+
+      const code = typeof req.query.code === 'string' ? req.query.code : '';
+      const state = typeof req.query.state === 'string' ? req.query.state : '';
+      if (!code || !state) {
+        throw new Error('Missing Google OAuth code or state.');
+      }
+
+      const userId = GoogleDriveService.verifyOAuthState(state);
+      const { email } = await GoogleDriveService.completeGoogleDriveOAuth(userId, code);
+
+      return res.redirect(
+        `${clientBase}/settings?drive=connected&email=${encodeURIComponent(email)}`
+      );
+    } catch (err: any) {
+      Logger.warn(`Google Drive OAuth callback failed: ${err?.message || err}`);
+      return res.redirect(
+        `${clientBase}/settings?drive=error&reason=${encodeURIComponent(
+          err?.message || 'Google Drive connection failed'
+        )}`
+      );
     }
   }
 

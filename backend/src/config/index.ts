@@ -29,6 +29,25 @@ export const config = {
     baseUrl: process.env.TMDB_BASE_URL || 'https://api.themoviedb.org/3',
   },
 
+  googleDrive: {
+    // API key: works for files shared as "Anyone with the link".
+    apiKey: process.env.GOOGLE_DRIVE_API_KEY || '',
+    // OAuth: works for private files in a user's Drive.
+    clientId: process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '',
+    redirectUri:
+      process.env.GOOGLE_DRIVE_REDIRECT_URI ||
+      process.env.GOOGLE_REDIRECT_URI ||
+      'http://localhost:5000/api/sources/google-drive/callback',
+    // Server-wide OAuth (alternative to per-user "Connect Google Drive").
+    refreshToken: process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '',
+    accessToken: process.env.GOOGLE_DRIVE_ACCESS_TOKEN || '',
+    streamTokenSecret:
+      process.env.GOOGLE_DRIVE_STREAM_SECRET ||
+      process.env.JWT_SECRET ||
+      'your_cinema_default_jwt_secret_dev_key',
+  },
+
   ai: {
     defaultProvider: process.env.DEFAULT_AI_PROVIDER || 'gemini',
     geminiApiKey: process.env.GEMINI_API_KEY || '',

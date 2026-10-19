@@ -6,6 +6,12 @@ import { validate } from '../../middlewares/validate.js';
 
 const router = Router();
 
+// Public OAuth callback (state JWT protects the request)
+router.get('/google-drive/callback', SourcesController.googleDriveCallback);
+
+// Authenticated token route must be registered before the public /drive/* catch-all.
+router.get('/drive/:fileId/stream-token', authenticate, SourcesController.getDriveStreamToken);
+
 // Public media streaming and track metadata
 router.get('/drive/:fileId/info', SourcesController.getDriveFileInfo);
 router.get('/drive/:fileId/media-info', SourcesController.getDriveMediaInfo);
@@ -15,6 +21,11 @@ router.get(['/drive/:fileId/stream', '/drive/*'], SourcesController.streamDrive)
 
 // Authenticated routes
 router.use(authenticate);
+
+// Google Drive account / OAuth management
+router.get('/google-drive/auth-url', SourcesController.getGoogleDriveAuthUrl);
+router.get('/google-drive/account', SourcesController.getGoogleDriveAccount);
+router.delete('/google-drive/account', SourcesController.disconnectGoogleDrive);
 
 const addSourceSchema = z.object({
   userMovieId: z.string().min(1),

@@ -47,3 +47,20 @@ npm run dev
 - **Email**: `demo@yourcinema.com`
 - **Password**: `password123`
 *(Pre-loaded with Christopher Nolan, Denis Villeneuve, and Kamal Haasan sample library records)*.
+
+### 4. Google Drive Streaming
+Your Cinema streams Drive files through the official Google Drive API v3.
+
+- **Public files (recommended starting point):** create an API key in Google Cloud Console,
+  enable the **Google Drive API**, restrict the key to it, and set
+  `GOOGLE_DRIVE_API_KEY` in `backend/.env`. Files must be shared as
+  **Anyone with the link**.
+- **Private files:** set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and
+  `GOOGLE_REDIRECT_URI`, add the same redirect URI to your Google OAuth client,
+  then open **Settings → Google Drive → Connect Google Drive**. Tokens are stored
+  encrypted in `google_drive_accounts`.
+- The redirect URI must match exactly, e.g.
+  `http://localhost:5000/api/sources/google-drive/callback` locally or
+  `https://<your-api-domain>/api/sources/google-drive/callback` in production.
+- `CLIENT_URL` must point to the frontend so the OAuth callback can return to
+  `Settings → Google Drive`.

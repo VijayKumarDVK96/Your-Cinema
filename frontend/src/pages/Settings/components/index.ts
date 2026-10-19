@@ -1,5 +1,6 @@
 export * from './AccountSecurityTab.js';
 export * from './AiSettingsTab.js';
+export * from './GoogleDriveTab.js';
 export * from './TvDisplayTab.js';
 export * from './CustomGenresTab.js';
 export * from './BackupRestoreTab.js';

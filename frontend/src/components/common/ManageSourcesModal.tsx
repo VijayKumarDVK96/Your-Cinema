@@ -278,7 +278,7 @@ export const ManageSourcesModal: React.FC<ManageSourcesModalProps> = ({
               value={externalFileId}
               onChange={(e) => setExternalFileId(e.target.value)}
               size="small"
-              helperText="Paste full Google Drive sharing link or bare File ID"
+              helperText="Public links work with the API key. For private files, connect Google Drive in Settings → Google Drive."
             />
           ) : (
             <TextField

@@ -1,4 +1,42 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+
+interface ParsedSubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function parseWebVTT(vttText: string): ParsedSubtitleCue[] {
+  const cues: ParsedSubtitleCue[] = [];
+  const blocks = vttText.split(/\r?\n\r?\n/);
+  const timeRegex = /(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})/;
+
+  for (const block of blocks) {
+    const lines = block.trim().split(/\r?\n/);
+    let timeLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (timeRegex.test(lines[i])) {
+        timeLineIdx = i;
+        break;
+      }
+    }
+    if (timeLineIdx !== -1) {
+      const match = lines[timeLineIdx].match(timeRegex);
+      if (match) {
+        const parseSec = (h: string | undefined, m: string, s: string, ms: string) =>
+          (parseInt(h || '0', 10) * 3600) + (parseInt(m, 10) * 60) + parseInt(s, 10) + (parseInt(ms, 10) / 1000);
+        const start = parseSec(match[1], match[2], match[3], match[4]);
+        const end = parseSec(match[5], match[6], match[7], match[8]);
+        const text = lines.slice(timeLineIdx + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+        if (text) {
+          cues.push({ start, end, text });
+        }
+      }
+    }
+  }
+  return cues;
+}
+
 import {
   Dialog,
   DialogContent,
@@ -54,10 +92,12 @@ import PaletteIcon from '@mui/icons-material/Palette';
 import TvIcon from '@mui/icons-material/Tv';
 
 import '@vidstack/react/player/styles/default/theme.css';
+import '@vidstack/react/player/styles/default/captions.css';
 import {
   MediaPlayer,
   MediaProvider,
   Track,
+  Captions,
   type MediaPlayerInstance,
 } from '@vidstack/react';
 
@@ -163,6 +203,15 @@ export const UniversalPlayer: React.FC = () => {
   // For transcoded streams the backend restarts FFmpeg at this timestamp.
   const [streamStartSec, setStreamStartSec] = useState<number>(initialSec);
   const [progressReady, setProgressReady] = useState<boolean>(false);
+  // Short-lived, file-scoped token for OAuth-protected Drive files.
+  const [driveStreamToken, setDriveStreamToken] = useState<string | null>(null);
+  const [driveAuthReady, setDriveAuthReady] = useState<boolean>(false);
+
+  const withDriveStreamToken = useCallback((url: string): string => {
+    if (!driveStreamToken) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}st=${encodeURIComponent(driveStreamToken)}`;
+  }, [driveStreamToken]);
   const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
   const [timeInputValue, setTimeInputValue] = useState<string>('');
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -183,19 +232,36 @@ export const UniversalPlayer: React.FC = () => {
   const [showStatsForNerds, setShowStatsForNerds] = useState<boolean>(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState<boolean>(false);
 
-  // Audio track management
+  // Audio track management & sync delay
   const [audioTracks, setAudioTracks] = useState<AudioTrackInfo[]>([]);
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number>(0);
+  const [audioDelaySec, setAudioDelaySec] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('yourcinema_audio_delay');
+      return saved ? parseFloat(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [audioMenuAnchor, setAudioMenuAnchor] = useState<null | HTMLElement>(null);
 
   // Subtitle track management & Default Subtitles toggle
   const [embeddedSubtitles, setEmbeddedSubtitles] = useState<SubtitleTrackInfo[]>([]);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string>('default');
+  const [subtitleDelaySec, setSubtitleDelaySec] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('yourcinema_subtitle_delay');
+      return saved ? parseFloat(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [subtitleMenuAnchor, setSubtitleMenuAnchor] = useState<null | HTMLElement>(null);
   const [defaultSubtitlesEnabled, setDefaultSubtitlesEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('yourcinema_default_subtitles_enabled');
-      return saved === null ? true : saved === 'true';
+      // Subtitles are enabled by default for all videos unless explicitly turned off
+      return saved === null ? true : saved !== 'false';
     } catch {
       return true;
     }
@@ -285,6 +351,8 @@ export const UniversalPlayer: React.FC = () => {
       setCurrentPlaybackSec(initialSec);
       setStreamStartSec(initialSec);
       setProgressReady(false);
+      setDriveStreamToken(null);
+      setDriveAuthReady(false);
       setBufferedSec(0);
       setIsPlaying(true);
       setControlsVisible(true);
@@ -383,6 +451,35 @@ export const UniversalPlayer: React.FC = () => {
     : '';
   const drivePreviewUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
 
+  // Fetch a file-scoped token so OAuth-protected files can be streamed by the
+  // media element without putting the app JWT in the video URL.
+  useEffect(() => {
+    if (!isOpen || !isDrive || !driveFileId) {
+      setDriveStreamToken(null);
+      setDriveAuthReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    setDriveAuthReady(false);
+
+    api.get(`/sources/drive/${driveFileId}/stream-token`)
+      .then((res) => {
+        if (cancelled) return;
+        setDriveStreamToken(res.data?.data?.token || null);
+      })
+      .catch(() => {
+        if (!cancelled) setDriveStreamToken(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDriveAuthReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isDrive, driveFileId]);
+
   // Decide synchronously (before the first stream request) whether this file
   // needs the FFmpeg transcode/remux pipeline. Doing this after mount caused a
   // broken raw-MKV first load that could not be seeked.
@@ -404,7 +501,7 @@ export const UniversalPlayer: React.FC = () => {
 
   // Fetch embedded audio tracks and subtitles from backend ffprobe
   useEffect(() => {
-    if (!isOpen || !isDrive || !driveFileId) return;
+    if (!isOpen || !isDrive || !driveFileId || !driveAuthReady) return;
     let isSubscribed = true;
 
     const fn = (activeSource?.file_name || activeSource?.provider_name || '').toLowerCase();
@@ -412,7 +509,7 @@ export const UniversalPlayer: React.FC = () => {
       setIsTranscodedStream(true);
     }
 
-    api.get(`/sources/drive/${driveFileId}/media-info`)
+    api.get(withDriveStreamToken(`/sources/drive/${driveFileId}/media-info`))
       .then((res) => {
         if (!isSubscribed) return;
         const data = res.data?.data;
@@ -444,7 +541,7 @@ export const UniversalPlayer: React.FC = () => {
     return () => {
       isSubscribed = false;
     };
-  }, [isOpen, isDrive, driveFileId, defaultSubtitlesEnabled, activeSource]);
+  }, [isOpen, isDrive, driveFileId, driveAuthReady, driveStreamToken, defaultSubtitlesEnabled, activeSource]);
 
   // Save playback progress to backend
   const saveProgress = useCallback(
@@ -776,7 +873,7 @@ export const UniversalPlayer: React.FC = () => {
     }
   }, [getCurrentAbsoluteSec, getNativeVideo, saveProgress]);
 
-  // Subtitle settings toggle
+  // Subtitle track management & Default Subtitles toggle
   const handleToggleDefaultSubtitles = (enabled: boolean) => {
     setDefaultSubtitlesEnabled(enabled);
     try {
@@ -785,14 +882,103 @@ export const UniversalPlayer: React.FC = () => {
     if (!enabled) {
       setSelectedSubtitleId('off');
     } else if (embeddedSubtitles.length > 0) {
-      setSelectedSubtitleId(embeddedSubtitles[0].id);
+      const defTrack = embeddedSubtitles.find((t: any) => t.default) || embeddedSubtitles[0];
+      setSelectedSubtitleId(defTrack.id);
+    } else {
+      setSelectedSubtitleId('default');
     }
   };
+
+  const [parsedSubtitleCues, setParsedSubtitleCues] = useState<ParsedSubtitleCue[]>([]);
 
   const handleSelectSubtitleTrack = (subId: string) => {
     setSelectedSubtitleId(subId);
     setSubtitleMenuAnchor(null);
+
+    // Sync with Vidstack player textTracks
+    const player = vidstackPlayerRef.current;
+    if (player && (player as any).textTracks) {
+      try {
+        const tracks = Array.from((player as any).textTracks) as any[];
+        tracks.forEach((track) => {
+          if (subId === 'off') {
+            if (typeof track.setMode === 'function') track.setMode('disabled');
+            else track.mode = 'disabled';
+          } else {
+            const matched = embeddedSubtitles.find((s) => s.id === subId);
+            if (matched && (track.label === matched.label || track.language === matched.language)) {
+              if (typeof track.setMode === 'function') track.setMode('showing');
+              else track.mode = 'showing';
+            } else {
+              if (typeof track.setMode === 'function') track.setMode('disabled');
+              else track.mode = 'disabled';
+            }
+          }
+        });
+      } catch {}
+    }
+
+    // Sync with native HTML5 video element textTracks
+    const video = getNativeVideo();
+    if (video && video.textTracks) {
+      const selectedTrackIndex = embeddedSubtitles.findIndex((track) => track.id === subId);
+      Array.from(video.textTracks).forEach((track, index) => {
+        try {
+          track.mode = subId !== 'off' && index === selectedTrackIndex ? 'showing' : 'disabled';
+        } catch {}
+      });
+    }
   };
+
+  // Fetch and parse WebVTT cues directly for bulletproof rendering
+  useEffect(() => {
+    if (!isOpen || !isDrive || selectedSubtitleId === 'off' || embeddedSubtitles.length === 0) {
+      setParsedSubtitleCues([]);
+      return;
+    }
+
+    const activeSub =
+      embeddedSubtitles.find((s) => s.id === selectedSubtitleId) ||
+      (selectedSubtitleId === 'default' ? embeddedSubtitles[0] : null);
+
+    if (!activeSub?.src) {
+      setParsedSubtitleCues([]);
+      return;
+    }
+
+    let isCancelled = false;
+    const subUrl = withDriveStreamToken(activeSub.src);
+
+    fetch(subUrl, { cache: 'no-cache' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Subtitle HTTP error ${res.status}`);
+        return res.text();
+      })
+      .then((vttText) => {
+        if (!isCancelled && vttText) {
+          const cues = parseWebVTT(vttText);
+          setParsedSubtitleCues(cues);
+        }
+      })
+      .catch((err) => {
+        console.warn('Subtitle parse error:', err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, isDrive, selectedSubtitleId, embeddedSubtitles, withDriveStreamToken, playerKey]);
+
+  // Compute active subtitle cue for the current playback second with sync delay compensation
+  const activeSubtitleCue = useMemo(() => {
+    if (selectedSubtitleId === 'off' || parsedSubtitleCues.length === 0) return null;
+    const time = currentPlaybackSec + subtitleDelaySec;
+    return (
+      parsedSubtitleCues.find((c) => time >= c.start && time <= c.end) ||
+      parsedSubtitleCues.find((c) => time >= c.start - 0.25 && time <= c.end + 0.25) ||
+      null
+    );
+  }, [selectedSubtitleId, parsedSubtitleCues, currentPlaybackSec, subtitleDelaySec]);
 
   useEffect(() => {
     if (!isOpen || !isDrive) return;
@@ -801,9 +987,32 @@ export const UniversalPlayer: React.FC = () => {
     const tracks: TextTrack[] = Array.from(video?.textTracks || []);
     tracks.forEach((track, index) => {
       if (track.kind === 'subtitles' || track.kind === 'captions') {
-        track.mode = selectedSubtitleId !== 'off' && index === selectedTrackIndex ? 'showing' : 'disabled';
+        const isSelected = selectedSubtitleId !== 'off' && (index === selectedTrackIndex || (selectedTrackIndex === -1 && index === 0));
+        track.mode = isSelected ? 'showing' : 'disabled';
       }
     });
+
+    const player = vidstackPlayerRef.current;
+    if (player && (player as any).textTracks) {
+      try {
+        const vTracks = Array.from((player as any).textTracks) as any[];
+        vTracks.forEach((track) => {
+          if (selectedSubtitleId === 'off') {
+            if (typeof track.setMode === 'function') track.setMode('disabled');
+            else track.mode = 'disabled';
+          } else {
+            const matched = embeddedSubtitles.find((s) => s.id === selectedSubtitleId);
+            if (matched && (track.label === matched.label || track.language === matched.language)) {
+              if (typeof track.setMode === 'function') track.setMode('showing');
+              else track.mode = 'showing';
+            } else {
+              if (typeof track.setMode === 'function') track.setMode('disabled');
+              else track.mode = 'disabled';
+            }
+          }
+        });
+      } catch {}
+    }
   }, [embeddedSubtitles, isDrive, isOpen, playerKey, selectedSubtitleId, getNativeVideo]);
 
   // Playback speed switcher
@@ -1250,7 +1459,7 @@ export const UniversalPlayer: React.FC = () => {
     if (!driveFileId) return '';
     const params = new URLSearchParams();
     params.set('chunk', bufferChunkMode);
-    if (selectedAudioIndex > 0) {
+    if (hasMultipleAudio || selectedAudioIndex > 0) {
       params.set('audioIndex', String(selectedAudioIndex));
     }
     // Only transcoded streams receive 't'; FFmpeg restarts at this timestamp.
@@ -1263,8 +1472,13 @@ export const UniversalPlayer: React.FC = () => {
     } else if (streamQuality !== 'auto') {
       params.set('quality', streamQuality);
     }
+    if (audioDelaySec !== 0) {
+      params.set('audioOffset', String(audioDelaySec));
+    }
     const qs = params.toString();
-    return `/api/sources/drive/${driveFileId}/stream${qs ? `?${qs}` : ''}`;
+    return withDriveStreamToken(
+      `/api/sources/drive/${driveFileId}/stream${qs ? `?${qs}` : ''}`
+    );
   };
 
   const streamSrc = buildStreamSrc();
@@ -1312,11 +1526,12 @@ export const UniversalPlayer: React.FC = () => {
           overflow: 'hidden',
           borderRadius: isMobileOrTablet ? 0 : 3,
           boxShadow: isMobileOrTablet ? 'none' : '0 24px 60px rgba(0, 0, 0, 0.95)',
-          height: isMobileOrTablet ? '100dvh' : 'auto',
-          maxHeight: isMobileOrTablet ? '100dvh' : '94vh',
+          height: isMobileOrTablet || isFullscreen ? '100dvh' : 'min(88vh, calc(100vh - 40px))',
+          maxHeight: isMobileOrTablet || isFullscreen ? '100dvh' : 'min(88vh, calc(100vh - 40px))',
           display: 'flex',
           flexDirection: 'column',
           transition: 'all 0.3s ease',
+          m: isMobileOrTablet || isFullscreen ? 0 : '16px auto',
         },
       }}
     >
@@ -1439,6 +1654,53 @@ export const UniversalPlayer: React.FC = () => {
 
         {/* Right Header Action Icons */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+          {/* Start Over */}
+          <Tooltip title="Start Over from 0:00">
+            <IconButton
+              size="small"
+              onClick={handleStartOver}
+              sx={{
+                color: '#94A3B8',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                '&:hover': { color: '#FFF', backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+              }}
+            >
+              <RestartAltIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+
+          {/* Mark Finished */}
+          <Tooltip title="Mark movie as watched & completed">
+            <IconButton
+              size="small"
+              onClick={handleMarkFinished}
+              sx={{
+                color: '#10B981',
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                '&:hover': { color: '#34D399', backgroundColor: 'rgba(16, 185, 129, 0.25)' },
+              }}
+            >
+              <CheckCircleIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+
+          {/* Mobile / Tablet Vertical View Adaptor */}
+          {isMobileOrTablet && (
+            <Tooltip title={viewMode === 'contain' ? 'Fit View' : (viewMode === 'vertical-fit' ? 'Vertical View' : 'Fill Screen')}>
+              <IconButton
+                size="small"
+                onClick={() => setViewMode(viewMode === 'contain' ? 'vertical-fit' : (viewMode === 'vertical-fit' ? 'fill' : 'contain'))}
+                sx={{
+                  color: themeStyles.accentColor,
+                  backgroundColor: themeStyles.badgeBg,
+                  '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+                }}
+              >
+                <StayCurrentPortraitIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          )}
+
           {/* Theme Switcher Button */}
           <Tooltip title="Switch Player Theme (Jellyfin / Plex)">
             <IconButton
@@ -1530,453 +1792,364 @@ export const UniversalPlayer: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Jellyfin & Plex Interactive Control Bar (Audio, Subtitles, Quality, Speed, View Mode) */}
-      {(isDrive || isYouTube) && (
-        <Box
-          sx={{
-            px: { xs: 1.5, sm: 2.5 },
-            py: 0.8,
-            backgroundColor: 'rgba(10, 15, 26, 0.95)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 1,
-            zIndex: 9,
-          }}
-        >
-          {/* Left: Playback Info & Skip Buttons */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            <Chip
-              label={streamStartSec > 0 ? `Resumed at ${formatPlaybackTime(streamStartSec)}` : 'Playing from start'}
-              size="small"
-              sx={{
-                height: 22,
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                color: '#CBD5E1',
-              }}
-            />
+      {/* Popover Menus for Bottom Controls */}
+      {/* Playback Speed Menu */}
+      <Menu
+        anchorEl={speedMenuAnchor}
+        open={Boolean(speedMenuAnchor)}
+        onClose={() => setSpeedMenuAnchor(null)}
+        PaperProps={{
+          sx: { backgroundColor: '#0B1120', border: `1px solid ${themeStyles.accentColor}40`, color: '#FFF', minWidth: 140, borderRadius: 2 },
+        }}
+      >
+        <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+          PLAYBACK SPEED
+        </Typography>
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+        {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((s) => (
+          <MenuItem key={s} selected={playbackSpeed === s} onClick={() => handleSelectSpeed(s)} sx={{ fontSize: '12px', py: 0.6 }}>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: playbackSpeed === s ? themeStyles.accentColor : '#F8FAFC', fontWeight: playbackSpeed === s ? 700 : 500 }}>
+              {s === 1.0 ? 'Normal (1x)' : `${s}x`}
+            </Typography>
+            {playbackSpeed === s && <CheckIcon sx={{ fontSize: 14, color: themeStyles.accentColor, ml: 1 }} />}
+          </MenuItem>
+        ))}
+      </Menu>
 
-            {/* Quick 10s Rewind / Forward */}
-            <Tooltip title="Rewind 10s (Left Arrow / J)">
-              <IconButton
-                size="small"
-                onClick={() => handleSkipSeconds(-10)}
-                sx={{ color: '#E2E8F0', backgroundColor: 'rgba(255, 255, 255, 0.06)', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.15)', color: themeStyles.accentColor }, p: 0.5 }}
-              >
-                <Replay10Icon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Forward 10s (Right Arrow / L)">
-              <IconButton
-                size="small"
-                onClick={() => handleSkipSeconds(10)}
-                sx={{ color: '#E2E8F0', backgroundColor: 'rgba(255, 255, 255, 0.06)', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.15)', color: themeStyles.accentColor }, p: 0.5 }}
-              >
-                <Forward10Icon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Tooltip>
+      {/* Stream Quality Menu */}
+      <Menu
+        anchorEl={qualityMenuAnchor}
+        open={Boolean(qualityMenuAnchor)}
+        onClose={() => setQualityMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0B1120',
+            border: `1px solid ${themeStyles.accentColor}40`,
+            color: '#FFF',
+            minWidth: 260,
+            borderRadius: 2,
+          },
+        }}
+      >
+        <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+          STREAM QUALITY / BANDWIDTH PRESETS
+        </Typography>
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+
+        <MenuItem selected={streamQuality === 'auto'} onClick={() => handleSelectQuality('auto')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'auto' ? themeStyles.accentColor : '#F8FAFC', fontWeight: streamQuality === 'auto' ? 700 : 500 }}>
+              ⚡ Auto (Fast Load & Smooth Stream)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+              Adapts for weak & fast connections
+            </Typography>
           </Box>
+          {streamQuality === 'auto' && <CheckIcon sx={{ fontSize: 15, color: themeStyles.accentColor, ml: 1.5 }} />}
+        </MenuItem>
 
-          {/* Right: Audio Track + Subtitles + Speed + Quality + Start Over + Drive Mode */}
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            {/* Playback Speed Switcher */}
-            {isDrive && (
-              <>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={(e) => setSpeedMenuAnchor(e.currentTarget)}
-                  startIcon={<SpeedIcon sx={{ fontSize: '14px !important', color: playbackSpeed !== 1.0 ? themeStyles.accentColor : '#94A3B8' }} />}
-                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
-                  sx={{
-                    borderColor: playbackSpeed !== 1.0 ? themeStyles.accentColor : 'rgba(255, 255, 255, 0.2)',
-                    color: playbackSpeed !== 1.0 ? themeStyles.accentColor : '#CBD5E1',
-                    backgroundColor: playbackSpeed !== 1.0 ? themeStyles.badgeBg : 'rgba(255, 255, 255, 0.04)',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    py: 0.2,
-                    px: 1,
-                    textTransform: 'none',
-                    '&:hover': { borderColor: themeStyles.accentColor, backgroundColor: themeStyles.badgeBg },
-                  }}
-                >
-                  Speed: {playbackSpeed}x
-                </Button>
-                <Menu
-                  anchorEl={speedMenuAnchor}
-                  open={Boolean(speedMenuAnchor)}
-                  onClose={() => setSpeedMenuAnchor(null)}
-                  PaperProps={{
-                    sx: { backgroundColor: '#0B1120', border: `1px solid ${themeStyles.accentColor}40`, color: '#FFF', minWidth: 140, borderRadius: 2 },
-                  }}
-                >
-                  <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-                    PLAYBACK SPEED
-                  </Typography>
-                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-                  {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((s) => (
-                    <MenuItem key={s} selected={playbackSpeed === s} onClick={() => handleSelectSpeed(s)} sx={{ fontSize: '12px', py: 0.6 }}>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: playbackSpeed === s ? themeStyles.accentColor : '#F8FAFC', fontWeight: playbackSpeed === s ? 700 : 500 }}>
-                        {s === 1.0 ? 'Normal (1x)' : `${s}x`}
-                      </Typography>
-                      {playbackSpeed === s && <CheckIcon sx={{ fontSize: 14, color: themeStyles.accentColor, ml: 1 }} />}
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </>
-            )}
+        <MenuItem selected={streamQuality === '720p'} onClick={() => handleSelectQuality('720p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '720p' ? '#34D399' : '#F8FAFC', fontWeight: streamQuality === '720p' ? 700 : 500 }}>
+              🎬 720p HD (Balanced & Crisp)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+              Ideal for normal broadband/WiFi
+            </Typography>
+          </Box>
+          {streamQuality === '720p' && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
+        </MenuItem>
 
-            {/* Quality / Low Bandwidth Selector for Drive stream */}
-            {isDrive && (
-              <>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={(e) => setQualityMenuAnchor(e.currentTarget)}
-                  startIcon={<SettingsIcon sx={{ fontSize: '14px !important', color: streamQuality === 'auto' ? '#38BDF8' : (streamQuality === '480p' || streamQuality === '360p' ? '#F59E0B' : themeStyles.accentColor) }} />}
-                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
-                  sx={{
-                    borderColor: streamQuality === 'auto' ? 'rgba(56, 189, 248, 0.4)' : (streamQuality === '480p' || streamQuality === '360p' ? 'rgba(245, 158, 11, 0.5)' : `${themeStyles.accentColor}60`),
-                    color: streamQuality === 'auto' ? '#38BDF8' : (streamQuality === '480p' || streamQuality === '360p' ? '#F59E0B' : '#F8FAFC'),
-                    backgroundColor: streamQuality === 'auto' ? 'rgba(56, 189, 248, 0.08)' : (streamQuality === '480p' || streamQuality === '360p' ? 'rgba(245, 158, 11, 0.1)' : themeStyles.badgeBg),
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    py: 0.2,
-                    px: 1.2,
-                    textTransform: 'none',
-                    '&:hover': { borderColor: themeStyles.accentColor, backgroundColor: themeStyles.badgeBg },
-                  }}
-                >
-                  Quality: {streamQuality === 'auto' ? 'Auto (Adaptive)' : (streamQuality === 'direct' ? directQualityLabel : streamQuality)}
-                </Button>
-                <Menu
-                  anchorEl={qualityMenuAnchor}
-                  open={Boolean(qualityMenuAnchor)}
-                  onClose={() => setQualityMenuAnchor(null)}
-                  PaperProps={{
-                    sx: {
-                      backgroundColor: '#0B1120',
-                      border: `1px solid ${themeStyles.accentColor}40`,
-                      color: '#FFF',
-                      minWidth: 260,
-                      borderRadius: 2,
-                    },
-                  }}
-                >
-                  <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-                    STREAM QUALITY / BANDWIDTH PRESETS
-                  </Typography>
-                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+        <MenuItem selected={streamQuality === '1080p'} onClick={() => handleSelectQuality('1080p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '1080p' ? '#38BDF8' : '#F8FAFC', fontWeight: streamQuality === '1080p' ? 700 : 500 }}>
+              📺 1080p Full HD (High Quality)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+              Maximum fidelity transcode
+            </Typography>
+          </Box>
+          {streamQuality === '1080p' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
+        </MenuItem>
 
-                  <MenuItem selected={streamQuality === 'auto'} onClick={() => handleSelectQuality('auto')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'auto' ? themeStyles.accentColor : '#F8FAFC', fontWeight: streamQuality === 'auto' ? 700 : 500 }}>
-                        ⚡ Auto (Fast Load & Smooth Stream)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
-                        Adapts for weak & fast connections
-                      </Typography>
-                    </Box>
-                    {streamQuality === 'auto' && <CheckIcon sx={{ fontSize: 15, color: themeStyles.accentColor, ml: 1.5 }} />}
-                  </MenuItem>
+        <MenuItem selected={streamQuality === '480p'} onClick={() => handleSelectQuality('480p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '480p' ? '#F59E0B' : '#F8FAFC', fontWeight: streamQuality === '480p' ? 700 : 500 }}>
+              📶 480p SD (Weak Connection)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#F59E0B' }}>
+              Buffers instantly on slow internet
+            </Typography>
+          </Box>
+          {streamQuality === '480p' && <CheckIcon sx={{ fontSize: 15, color: '#F59E0B', ml: 1.5 }} />}
+        </MenuItem>
 
-                  <MenuItem selected={streamQuality === '720p'} onClick={() => handleSelectQuality('720p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '720p' ? '#34D399' : '#F8FAFC', fontWeight: streamQuality === '720p' ? 700 : 500 }}>
-                        🎬 720p HD (Balanced & Crisp)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
-                        Ideal for normal broadband/WiFi
-                      </Typography>
-                    </Box>
-                    {streamQuality === '720p' && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
-                  </MenuItem>
+        <MenuItem selected={streamQuality === '360p'} onClick={() => handleSelectQuality('360p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '360p' ? '#EF4444' : '#F8FAFC', fontWeight: streamQuality === '360p' ? 700 : 500 }}>
+              📉 360p Data Saver (Extreme Low Data)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+              For 3G/throttled hotspot networks
+            </Typography>
+          </Box>
+          {streamQuality === '360p' && <CheckIcon sx={{ fontSize: 15, color: '#EF4444', ml: 1.5 }} />}
+        </MenuItem>
 
-                  <MenuItem selected={streamQuality === '1080p'} onClick={() => handleSelectQuality('1080p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '1080p' ? '#38BDF8' : '#F8FAFC', fontWeight: streamQuality === '1080p' ? 700 : 500 }}>
-                        📺 1080p Full HD (High Quality)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
-                        Maximum fidelity transcode
-                      </Typography>
-                    </Box>
-                    {streamQuality === '1080p' && <CheckIcon sx={{ fontSize: 15, color: '#38BDF8', ml: 1.5 }} />}
-                  </MenuItem>
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
 
-                  <MenuItem selected={streamQuality === '480p'} onClick={() => handleSelectQuality('480p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '480p' ? '#F59E0B' : '#F8FAFC', fontWeight: streamQuality === '480p' ? 700 : 500 }}>
-                        📶 480p SD (Weak Connection)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#F59E0B' }}>
-                        Buffers instantly on slow internet
-                      </Typography>
-                    </Box>
-                    {streamQuality === '480p' && <CheckIcon sx={{ fontSize: 15, color: '#F59E0B', ml: 1.5 }} />}
-                  </MenuItem>
+        <MenuItem selected={streamQuality === 'direct'} onClick={() => handleSelectQuality('direct')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
+          <Box>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'direct' ? '#A855F7' : '#F8FAFC', fontWeight: streamQuality === 'direct' ? 700 : 500 }}>
+              🚀 {directQualityLabel} (Original Source)
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
+              Original file copy (Requires high-speed connection)
+            </Typography>
+          </Box>
+          {streamQuality === 'direct' && <CheckIcon sx={{ fontSize: 15, color: '#A855F7', ml: 1.5 }} />}
+        </MenuItem>
+      </Menu>
 
-                  <MenuItem selected={streamQuality === '360p'} onClick={() => handleSelectQuality('360p')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === '360p' ? '#EF4444' : '#F8FAFC', fontWeight: streamQuality === '360p' ? 700 : 500 }}>
-                        📉 360p Data Saver (Extreme Low Data)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
-                        For 3G/throttled hotspot networks
-                      </Typography>
-                    </Box>
-                    {streamQuality === '360p' && <CheckIcon sx={{ fontSize: 15, color: '#EF4444', ml: 1.5 }} />}
-                  </MenuItem>
+      {/* Audio Stream Menu */}
+      <Menu
+        anchorEl={audioMenuAnchor}
+        open={Boolean(audioMenuAnchor)}
+        onClose={() => setAudioMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0B1120',
+            border: `1px solid ${themeStyles.accentColor}50`,
+            color: '#FFF',
+            minWidth: 240,
+            borderRadius: 2,
+          },
+        }}
+      >
+        <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+          SELECT AUDIO STREAM
+        </Typography>
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+        {effectiveAudioTracks.length === 0 ? (
+          <MenuItem disabled sx={{ fontSize: '12px', py: 0.8 }}>
+            <Typography variant="body2" sx={{ fontSize: '12px', color: '#94A3B8' }}>
+              Default Audio Stream
+            </Typography>
+          </MenuItem>
+        ) : (
+          effectiveAudioTracks.map((track) => {
+            const isSelected = track.index === selectedAudioIndex;
+            return (
+              <MenuItem
+                key={track.id}
+                selected={isSelected}
+                onClick={() => handleSelectAudioTrack(track.index, track.language)}
+                sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+              >
+                <Typography variant="body2" sx={{ fontSize: '12px', color: isSelected ? themeStyles.accentColor : '#F8FAFC', fontWeight: isSelected ? 700 : 500 }}>
+                  {track.label || track.language || `Track ${track.index + 1}`}
+                </Typography>
+                {isSelected && <CheckIcon sx={{ fontSize: 15, color: themeStyles.accentColor, ml: 1.5 }} />}
+              </MenuItem>
+            );
+          })
+        )}
 
-                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-
-                  <MenuItem selected={streamQuality === 'direct'} onClick={() => handleSelectQuality('direct')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'direct' ? '#A855F7' : '#F8FAFC', fontWeight: streamQuality === 'direct' ? 700 : 500 }}>
-                        🚀 {directQualityLabel} (Original Source)
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
-                        Original file copy (Requires high-speed connection)
-                      </Typography>
-                    </Box>
-                    {streamQuality === 'direct' && <CheckIcon sx={{ fontSize: 15, color: '#A855F7', ml: 1.5 }} />}
-                  </MenuItem>
-                </Menu>
-              </>
-            )}
-
-            {/* Audio Track Selector for Drive */}
-            {isDrive && hasMultipleAudio && (
-              <>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={(e) => setAudioMenuAnchor(e.currentTarget)}
-                  startIcon={<AudiotrackIcon sx={{ fontSize: '14px !important', color: themeStyles.accentColor }} />}
-                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
-                  disabled={isAudioSwitching}
-                  sx={{
-                    borderColor: `${themeStyles.accentColor}60`,
-                    color: '#F8FAFC',
-                    backgroundColor: themeStyles.badgeBg,
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    py: 0.2,
-                    px: 1.2,
-                    textTransform: 'none',
-                    '&:hover': { borderColor: themeStyles.accentColor, backgroundColor: 'rgba(255,255,255,0.15)' },
-                  }}
-                >
-                  Audio: {activeAudioLabel}
-                </Button>
-                <Menu
-                  anchorEl={audioMenuAnchor}
-                  open={Boolean(audioMenuAnchor)}
-                  onClose={() => setAudioMenuAnchor(null)}
-                  PaperProps={{
-                    sx: {
-                      backgroundColor: '#0B1120',
-                      border: `1px solid ${themeStyles.accentColor}50`,
-                      color: '#FFF',
-                      minWidth: 220,
-                      borderRadius: 2,
-                    },
-                  }}
-                >
-                  <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-                    SELECT AUDIO STREAM
-                  </Typography>
-                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-                  {effectiveAudioTracks.map((track) => {
-                    const isSelected = track.index === selectedAudioIndex;
-                    return (
-                      <MenuItem
-                        key={track.id}
-                        selected={isSelected}
-                        onClick={() => handleSelectAudioTrack(track.index, track.language)}
-                        sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
-                      >
-                        <Typography variant="body2" sx={{ fontSize: '12px', color: isSelected ? themeStyles.accentColor : '#F8FAFC', fontWeight: isSelected ? 700 : 500 }}>
-                          {track.label || track.language || `Track ${track.index + 1}`}
-                        </Typography>
-                        {isSelected && <CheckIcon sx={{ fontSize: 15, color: themeStyles.accentColor, ml: 1.5 }} />}
-                      </MenuItem>
-                    );
-                  })}
-                </Menu>
-              </>
-            )}
-
-            {/* Subtitle / CC Track Selector */}
-            {isDrive && embeddedSubtitles.length > 0 && (
-              <>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={(e) => setSubtitleMenuAnchor(e.currentTarget)}
-                  startIcon={
-                    selectedSubtitleId === 'off' ? (
-                      <ClosedCaptionDisabledIcon sx={{ fontSize: '14px !important', color: '#94A3B8' }} />
-                    ) : (
-                      <ClosedCaptionIcon sx={{ fontSize: '14px !important', color: '#10B981' }} />
-                    )
-                  }
-                  endIcon={<ArrowDropDownIcon sx={{ fontSize: '14px !important' }} />}
-                  sx={{
-                    borderColor: selectedSubtitleId === 'off' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(16, 185, 129, 0.5)',
-                    color: selectedSubtitleId === 'off' ? '#94A3B8' : '#34D399',
-                    backgroundColor: selectedSubtitleId === 'off' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(16, 185, 129, 0.1)',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    py: 0.2,
-                    px: 1.2,
-                    textTransform: 'none',
-                    '&:hover': { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.2)' },
-                  }}
-                >
-                  Subtitles: {selectedSubtitleId === 'off' ? 'Off' : (embeddedSubtitles.find((s) => s.id === selectedSubtitleId)?.label || 'On')}
-                </Button>
-                <Menu
-                  anchorEl={subtitleMenuAnchor}
-                  open={Boolean(subtitleMenuAnchor)}
-                  onClose={() => setSubtitleMenuAnchor(null)}
-                  PaperProps={{
-                    sx: {
-                      backgroundColor: '#0B1120',
-                      border: '1px solid rgba(16, 185, 129, 0.3)',
-                      color: '#FFF',
-                      minWidth: 230,
-                      borderRadius: 2,
-                      p: 0.5,
-                    },
-                  }}
-                >
-                  <Box sx={{ px: 1.5, py: 0.8, backgroundColor: 'rgba(255, 255, 255, 0.04)', borderRadius: 1.5, mb: 0.5 }}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          size="small"
-                          checked={defaultSubtitlesEnabled}
-                          onChange={(e) => handleToggleDefaultSubtitles(e.target.checked)}
-                          sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#10B981' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#10B981' } }}
-                        />
-                      }
-                      label={
-                        <Typography variant="caption" sx={{ color: '#F8FAFC', fontWeight: 700, fontSize: '11px' }}>
-                          Auto Subtitles On
-                        </Typography>
-                      }
-                      sx={{ m: 0, width: '100%', justifyContent: 'space-between' }}
-                    />
-                  </Box>
-
-                  <Typography variant="caption" sx={{ px: 1.5, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
-                    SUBTITLE TRACKS
-                  </Typography>
-                  <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-
-                  <MenuItem
-                    selected={selectedSubtitleId === 'off'}
-                    onClick={() => handleSelectSubtitleTrack('off')}
-                    sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
-                  >
-                    <Typography variant="body2" sx={{ fontSize: '12px', color: selectedSubtitleId === 'off' ? '#F87171' : '#CBD5E1', fontWeight: selectedSubtitleId === 'off' ? 700 : 500 }}>
-                      Off (Disable Subtitles)
-                    </Typography>
-                    {selectedSubtitleId === 'off' && <CheckIcon sx={{ fontSize: 15, color: '#F87171', ml: 1.5 }} />}
-                  </MenuItem>
-
-                  {embeddedSubtitles.map((sub) => {
-                    const isSelected = selectedSubtitleId === sub.id;
-                    return (
-                      <MenuItem
-                        key={sub.id}
-                        selected={isSelected}
-                        onClick={() => handleSelectSubtitleTrack(sub.id)}
-                        sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
-                      >
-                        <Typography variant="body2" sx={{ fontSize: '12px', color: isSelected ? '#34D399' : '#F8FAFC', fontWeight: isSelected ? 700 : 500 }}>
-                          {sub.label || `${sub.language.toUpperCase()} Subtitles`}
-                        </Typography>
-                        {isSelected && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
-                      </MenuItem>
-                    );
-                  })}
-                </Menu>
-              </>
-            )}
-
-            {/* Mobile / Tablet Vertical View Adaptor */}
-            {isMobileOrTablet && (
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.8 }} />
+        <Box sx={{ px: 2, py: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.8 }}>
+            <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 700, fontSize: '11px' }}>
+              AUDIO SYNC / DELAY
+            </Typography>
+            <Typography variant="caption" sx={{ color: themeStyles.accentColor, fontWeight: 700, fontFamily: 'monospace' }}>
+              {audioDelaySec === 0 ? '0 ms (Sync)' : `${audioDelaySec > 0 ? '+' : ''}${Math.round(audioDelaySec * 1000)} ms`}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={0.6} sx={{ mb: 1.2 }}>
+            {[-0.2, -0.1, 0, 0.1, 0.2].map((val) => (
               <Button
+                key={val}
                 size="small"
-                variant="outlined"
-                onClick={() => setViewMode(viewMode === 'contain' ? 'vertical-fit' : (viewMode === 'vertical-fit' ? 'fill' : 'contain'))}
-                startIcon={<StayCurrentPortraitIcon sx={{ fontSize: '13px !important', color: themeStyles.accentColor }} />}
+                variant={audioDelaySec === val ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setAudioDelaySec(val);
+                  try { localStorage.setItem('yourcinema_audio_delay', String(val)); } catch {}
+                  setPlayerKey((k) => k + 1);
+                }}
                 sx={{
-                  borderColor: `${themeStyles.accentColor}60`,
-                  color: themeStyles.accentColor,
-                  fontSize: '11px',
-                  py: 0.2,
-                  px: 1,
-                  textTransform: 'none',
+                  minWidth: 32,
+                  py: 0.1,
+                  px: 0.6,
+                  fontSize: '9.5px',
                   fontWeight: 700,
-                }}
-              >
-                {viewMode === 'contain' ? 'Fit View' : (viewMode === 'vertical-fit' ? 'Vertical View' : 'Fill Screen')}
-              </Button>
-            )}
-
-            {/* Start Over */}
-            <Tooltip title="Start over from 0:00">
-              <Button
-                size="small"
-                variant="outlined"
-                color="inherit"
-                onClick={handleStartOver}
-                startIcon={<RestartAltIcon sx={{ fontSize: '13px !important' }} />}
-                sx={{
-                  borderColor: 'rgba(255, 255, 255, 0.2)',
-                  color: '#CBD5E1',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  py: 0.2,
-                  px: 1,
+                  backgroundColor: audioDelaySec === val ? themeStyles.accentColor : 'transparent',
+                  borderColor: audioDelaySec === val ? themeStyles.accentColor : 'rgba(255,255,255,0.15)',
+                  color: audioDelaySec === val ? '#000' : '#CBD5E1',
                   textTransform: 'none',
-                  '&:hover': { borderColor: 'rgba(255, 255, 255, 0.4)', color: '#FFF' },
                 }}
               >
-                Start Over
+                {val === 0 ? 'Sync' : `${val > 0 ? '+' : ''}${Math.round(val * 1000)}ms`}
               </Button>
-            </Tooltip>
+            ))}
+          </Stack>
+          <Slider
+            size="small"
+            value={audioDelaySec}
+            min={-1.0}
+            max={1.0}
+            step={0.05}
+            onChange={(_, v) => {
+              const val = v as number;
+              setAudioDelaySec(val);
+              try { localStorage.setItem('yourcinema_audio_delay', String(val)); } catch {}
+            }}
+            onChangeCommitted={() => setPlayerKey((k) => k + 1)}
+            sx={{
+              color: themeStyles.accentColor,
+              height: 3,
+              '& .MuiSlider-thumb': { width: 10, height: 10 },
+            }}
+          />
+        </Box>
+      </Menu>
 
-            {/* Mark Finished */}
-            <Tooltip title="Mark movie as watched & completed">
-              <Button
+      {/* Subtitles Menu */}
+      <Menu
+        anchorEl={subtitleMenuAnchor}
+        open={Boolean(subtitleMenuAnchor)}
+        onClose={() => setSubtitleMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#0B1120',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            color: '#FFF',
+            minWidth: 230,
+            borderRadius: 2,
+            p: 0.5,
+          },
+        }}
+      >
+        <Box sx={{ px: 1.5, py: 0.8, backgroundColor: 'rgba(255, 255, 255, 0.04)', borderRadius: 1.5, mb: 0.5 }}>
+          <FormControlLabel
+            control={
+              <Switch
                 size="small"
-                variant="text"
-                onClick={handleMarkFinished}
-                startIcon={<CheckCircleIcon sx={{ fontSize: '13px !important', color: '#10B981' }} />}
+                checked={defaultSubtitlesEnabled}
+                onChange={(e) => handleToggleDefaultSubtitles(e.target.checked)}
+                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#10B981' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#10B981' } }}
+              />
+            }
+            label={
+              <Typography variant="caption" sx={{ color: '#F8FAFC', fontWeight: 700, fontSize: '11px' }}>
+                Auto Subtitles On
+              </Typography>
+            }
+            sx={{ m: 0, width: '100%', justifyContent: 'space-between' }}
+          />
+        </Box>
+
+        <Typography variant="caption" sx={{ px: 1.5, py: 0.5, color: '#94A3B8', fontWeight: 700, display: 'block' }}>
+          SUBTITLE TRACKS
+        </Typography>
+        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+
+        <MenuItem
+          selected={selectedSubtitleId === 'off'}
+          onClick={() => handleSelectSubtitleTrack('off')}
+          sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+        >
+          <Typography variant="body2" sx={{ fontSize: '12px', color: selectedSubtitleId === 'off' ? '#F87171' : '#CBD5E1', fontWeight: selectedSubtitleId === 'off' ? 700 : 500 }}>
+            Off (Disable Subtitles)
+          </Typography>
+          {selectedSubtitleId === 'off' && <CheckIcon sx={{ fontSize: 15, color: '#F87171', ml: 1.5 }} />}
+        </MenuItem>
+
+        {embeddedSubtitles.length === 0 ? (
+          <Box sx={{ px: 2, py: 1 }}>
+            <Typography variant="caption" sx={{ color: '#94A3B8', fontStyle: 'italic', display: 'block' }}>
+              No embedded subtitle tracks detected in this video file.
+            </Typography>
+          </Box>
+        ) : (
+          embeddedSubtitles.map((sub) => {
+            const isSelected =
+              selectedSubtitleId === sub.id ||
+              (selectedSubtitleId === 'default' && (sub.default || sub.id === embeddedSubtitles[0]?.id));
+            return (
+              <MenuItem
+                key={sub.id}
+                selected={isSelected}
+                onClick={() => handleSelectSubtitleTrack(sub.id)}
+                sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}
+              >
+                <Typography variant="body2" sx={{ fontSize: '12px', color: isSelected ? '#34D399' : '#F8FAFC', fontWeight: isSelected ? 700 : 500 }}>
+                  {sub.label || `${sub.language.toUpperCase()} Subtitles`}
+                </Typography>
+                {isSelected && <CheckIcon sx={{ fontSize: 15, color: '#34D399', ml: 1.5 }} />}
+              </MenuItem>
+            );
+          })
+        )}
+
+        {embeddedSubtitles.length > 0 && selectedSubtitleId !== 'off' && (
+          <>
+            <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 1 }} />
+            <Box sx={{ px: 1.5, py: 0.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.8 }}>
+                <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 700, fontSize: '11px' }}>
+                  SUBTITLE SYNC / DELAY
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#34D399', fontWeight: 700, fontFamily: 'monospace' }}>
+                  {subtitleDelaySec === 0 ? '0 ms (Sync)' : `${subtitleDelaySec > 0 ? '+' : ''}${Math.round(subtitleDelaySec * 1000)} ms`}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={0.5} sx={{ mb: 1 }}>
+                {[-2, -1, -0.5, 0, 0.5, 1, 2].map((val) => (
+                  <Button
+                    key={val}
+                    size="small"
+                    variant={subtitleDelaySec === val ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setSubtitleDelaySec(val);
+                      try { localStorage.setItem('yourcinema_subtitle_delay', String(val)); } catch {}
+                    }}
+                    sx={{
+                      minWidth: 28,
+                      py: 0.1,
+                      px: 0.5,
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      backgroundColor: subtitleDelaySec === val ? '#10B981' : 'transparent',
+                      borderColor: subtitleDelaySec === val ? '#10B981' : 'rgba(255,255,255,0.15)',
+                      color: subtitleDelaySec === val ? '#000' : '#CBD5E1',
+                      textTransform: 'none',
+                    }}
+                  >
+                    {val === 0 ? 'Sync' : `${val > 0 ? '+' : ''}${val}s`}
+                  </Button>
+                ))}
+              </Stack>
+              <Slider
+                size="small"
+                value={subtitleDelaySec}
+                min={-5.0}
+                max={5.0}
+                step={0.1}
+                onChange={(_, v) => {
+                  const val = v as number;
+                  setSubtitleDelaySec(val);
+                  try { localStorage.setItem('yourcinema_subtitle_delay', String(val)); } catch {}
+                }}
                 sx={{
                   color: '#10B981',
-                  fontSize: '11px',
-                  py: 0.2,
-                  px: 0.8,
-                  textTransform: 'none',
-                  fontWeight: 600,
+                  height: 3,
+                  '& .MuiSlider-thumb': { width: 10, height: 10 },
                 }}
-              >
-                Mark Finished
-              </Button>
-            </Tooltip>
-
-          </Stack>
-        </Box>
-      )}
+              />
+            </Box>
+          </>
+        )}
+      </Menu>
 
       {/* Main Video Viewport */}
       <DialogContent
@@ -1985,11 +2158,12 @@ export const UniversalPlayer: React.FC = () => {
           backgroundColor: '#000',
           position: 'relative',
           flex: 1,
+          height: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
-          minHeight: isMobileOrTablet ? 'calc(100dvh - 100px)' : '580px',
+          minHeight: 0,
         }}
       >
         {/* Double-tap ripple animation feedback */}
@@ -2270,7 +2444,7 @@ export const UniversalPlayer: React.FC = () => {
             sx={{
               width: '100%',
               height: '100%',
-              minHeight: isMobileOrTablet ? 'calc(100dvh - 100px)' : '580px',
+              minHeight: 0,
               backgroundColor: '#000',
               position: 'relative',
               display: 'flex',
@@ -2279,7 +2453,7 @@ export const UniversalPlayer: React.FC = () => {
               '& [data-media-player]': {
                 width: '100%',
                 height: '100%',
-                minHeight: isMobileOrTablet ? 'calc(100dvh - 100px)' : '580px',
+                minHeight: 0,
                 backgroundColor: '#000',
                 borderRadius: 0,
                 objectFit: viewMode === 'fill' ? 'cover' : (viewMode === 'vertical-fit' ? 'scale-down' : 'contain'),
@@ -2319,14 +2493,19 @@ export const UniversalPlayer: React.FC = () => {
                 backdropFilter: 'blur(4px) !important',
               },
               '& [data-part="captions"], & .vds-captions, & media-captions': {
-                bottom: '68px !important',
+                position: 'absolute !important',
+                bottom: '82px !important',
+                left: '0 !important',
+                right: '0 !important',
+                zIndex: '30 !important',
+                pointerEvents: 'none !important',
               },
             }}
             onMouseMove={handlePlayerMouseMove}
             onMouseLeave={handlePlayerMouseLeave}
             key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}-${requiresTranscode ? 'tc' : 'direct'}`}
           >
-            {!progressReady ? (
+            {!progressReady || !driveAuthReady ? (
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', minHeight: 320 }}>
                 <CircularProgress sx={{ color: themeStyles.accentColor }} />
               </Box>
@@ -2335,6 +2514,7 @@ export const UniversalPlayer: React.FC = () => {
                 ref={vidstackPlayerRef}
                 title={activeMovie.title}
                 src={mediaSrc}
+                crossOrigin="anonymous"
                 storage={`yourcinema_playback_${activeMovie.user_movie_id}`}
                 autoPlay={shouldResumePlaybackRef.current}
                 playsInline
@@ -2349,7 +2529,7 @@ export const UniversalPlayer: React.FC = () => {
                     return (
                       <Track
                         key={sub.id}
-                        src={sub.src}
+                        src={withDriveStreamToken(sub.src)}
                         kind="subtitles"
                         label={sub.label}
                         lang={sub.language}
@@ -2359,7 +2539,42 @@ export const UniversalPlayer: React.FC = () => {
                     );
                   })}
                 </MediaProvider>
+                <Captions className="vds-captions" />
               </MediaPlayer>
+            )}
+
+            {/* Direct Cinema Subtitle Overlay (Dual Fallback with Vidstack Captions) */}
+            {activeSubtitleCue && (
+              <Box
+                data-subtitle-overlay="true"
+                sx={{
+                  position: 'absolute',
+                  bottom: controlsVisible ? '105px' : '48px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 32,
+                  pointerEvents: 'none',
+                  textAlign: 'center',
+                  maxWidth: '85%',
+                  px: { xs: 1.5, sm: 2.2 },
+                  py: { xs: 0.6, sm: 0.9 },
+                  backgroundColor: 'rgba(5, 7, 13, 0.88)',
+                  backdropFilter: 'blur(8px)',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.9)',
+                  color: '#FFFFFF',
+                  fontFamily: '"Outfit", "Inter", -apple-system, sans-serif',
+                  fontSize: 'clamp(1.05rem, 2.2vw, 1.45rem)',
+                  fontWeight: 700,
+                  lineHeight: 1.4,
+                  textShadow: '0 2px 4px #000, 0 0 10px rgba(0,0,0,0.95)',
+                  whiteSpace: 'pre-line',
+                  transition: 'bottom 0.25s ease',
+                }}
+              >
+                {activeSubtitleCue.text}
+              </Box>
             )}
 
             {/* Custom cinema controls (desktop + mobile). Native Vidstack
@@ -2417,10 +2632,10 @@ export const UniversalPlayer: React.FC = () => {
                   {/* Bottom Controls Bar with YouTube-style Scrubber & Buffer Bar */}
                   <Box
                     sx={{
-                      background: 'linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.75) 70%, transparent 100%)',
-                      px: 2.5,
-                      pt: 2,
-                      pb: 1.5,
+                      background: 'linear-gradient(to top, rgba(0, 0, 0, 0.98) 0%, rgba(0, 0, 0, 0.8) 70%, transparent 100%)',
+                      px: { xs: 1.5, sm: 2.5 },
+                      pt: 1.5,
+                      pb: { xs: 1.5, sm: 2 },
                       pointerEvents: 'auto',
                     }}
                   >
@@ -2471,45 +2686,45 @@ export const UniversalPlayer: React.FC = () => {
                       )}
                     </Box>
 
-                    {/* Controls Row */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 0.8 }}>
+                    {/* Controls Row - NoWrap with sleek responsive sizing */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'nowrap', gap: { xs: 0.8, sm: 1.2 }, mt: 0.8, overflowX: 'auto', '&::-webkit-scrollbar': { display: 'none' } }}>
                       {/* Left controls: Play, 10s Rewind/Forward, Volume, Time */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, flexShrink: 0 }}>
                         <Tooltip title={isPlaying ? 'Pause (Space / K)' : 'Play (Space / K)'}>
                           <IconButton
                             onClick={handleTogglePlay}
-                            sx={{ color: '#FFF', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            sx={{ color: '#FFF', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                           >
-                            {isPlaying ? <PauseIcon sx={{ fontSize: 26 }} /> : <PlayArrowIcon sx={{ fontSize: 26 }} />}
+                            {isPlaying ? <PauseIcon sx={{ fontSize: { xs: 24, sm: 26 } }} /> : <PlayArrowIcon sx={{ fontSize: { xs: 24, sm: 26 } }} />}
                           </IconButton>
                         </Tooltip>
 
                         <Tooltip title="Rewind 10s (J / Left Arrow)">
                           <IconButton
                             onClick={() => handleSkipSeconds(-10)}
-                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            sx={{ color: '#CBD5E1', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                           >
-                            <Replay10Icon sx={{ fontSize: 22 }} />
+                            <Replay10Icon sx={{ fontSize: { xs: 20, sm: 22 } }} />
                           </IconButton>
                         </Tooltip>
 
                         <Tooltip title="Forward 10s (L / Right Arrow)">
                           <IconButton
                             onClick={() => handleSkipSeconds(10)}
-                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            sx={{ color: '#CBD5E1', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                           >
-                            <Forward10Icon sx={{ fontSize: 22 }} />
+                            <Forward10Icon sx={{ fontSize: { xs: 20, sm: 22 } }} />
                           </IconButton>
                         </Tooltip>
 
                         {/* Volume Control */}
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, ml: 0.5 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 0.3 }}>
                           <Tooltip title={isMuted ? 'Unmute (M)' : 'Mute (M)'}>
                             <IconButton
                               onClick={handleToggleMute}
-                              sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                              sx={{ color: '#CBD5E1', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                             >
-                              {isMuted || volume === 0 ? <VolumeOffIcon sx={{ fontSize: 20 }} /> : <VolumeUpIcon sx={{ fontSize: 20 }} />}
+                              {isMuted || volume === 0 ? <VolumeOffIcon sx={{ fontSize: 18 }} /> : <VolumeUpIcon sx={{ fontSize: 18 }} />}
                             </IconButton>
                           </Tooltip>
                           <Slider
@@ -2519,7 +2734,7 @@ export const UniversalPlayer: React.FC = () => {
                             min={0}
                             max={100}
                             sx={{
-                              width: 75,
+                              width: { xs: 55, sm: 75 },
                               color: themeStyles.accentColor,
                               height: 4,
                               '& .MuiSlider-thumb': {
@@ -2539,10 +2754,11 @@ export const UniversalPlayer: React.FC = () => {
                           sx={{
                             color: '#E2E8F0',
                             fontFamily: 'monospace',
-                            fontSize: '0.8rem',
+                            fontSize: { xs: '0.72rem', sm: '0.8rem' },
                             fontWeight: 600,
-                            ml: 1,
+                            ml: 0.5,
                             userSelect: 'none',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           {formatPlaybackTime(currentPlaybackSec)} / {formatPlaybackTime(runtimeSec)}
@@ -2550,29 +2766,21 @@ export const UniversalPlayer: React.FC = () => {
                       </Box>
 
                       {/* Right controls: Buffer Strategy, Audio, Subtitles, Quality, Speed, PiP, Fullscreen */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.4, sm: 0.8 }, flexShrink: 0 }}>
                         {/* YouTube-style Buffer Strategy Toggle */}
                         <Tooltip title="YouTube-style Chunk Buffering Strategy">
-                          <Button
+                          <IconButton
                             size="small"
-                            variant="outlined"
                             onClick={(e) => setBufferMenuAnchor(e.currentTarget)}
-                            startIcon={<GraphicEqIcon sx={{ fontSize: '13px !important', color: bufferChunkMode === '50mb' ? '#38BDF8' : '#F59E0B' }} />}
-                            endIcon={<ArrowDropDownIcon sx={{ fontSize: '13px !important' }} />}
                             sx={{
-                              borderColor: bufferChunkMode === '50mb' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(245, 158, 11, 0.5)',
                               color: bufferChunkMode === '50mb' ? '#38BDF8' : '#F59E0B',
-                              backgroundColor: bufferChunkMode === '50mb' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              py: 0.2,
-                              px: 1,
-                              textTransform: 'none',
-                              '&:hover': { borderColor: themeStyles.accentColor },
+                              backgroundColor: bufferChunkMode === '50mb' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                              p: { xs: 0.4, sm: 0.6 },
+                              '&:hover': { backgroundColor: 'rgba(255,255,255,0.15)' },
                             }}
                           >
-                            Buffer: {bufferChunkMode === '50mb' ? '50MB Chunk' : '10MB Chunk'}
-                          </Button>
+                            <GraphicEqIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
                         </Tooltip>
                         <Menu
                           anchorEl={bufferMenuAnchor}
@@ -2619,86 +2827,77 @@ export const UniversalPlayer: React.FC = () => {
                         </Menu>
 
                         {/* Audio Track Selector */}
-                        {hasMultipleAudio && (
-                          <Tooltip title="Select Audio Track">
-                            <Button
+                        {isDrive && (
+                          <Tooltip title={`Audio Stream (${activeAudioLabel})`}>
+                            <IconButton
                               size="small"
-                              variant="outlined"
                               onClick={(e) => setAudioMenuAnchor(e.currentTarget)}
-                              startIcon={<AudiotrackIcon sx={{ fontSize: '13px !important' }} />}
                               sx={{
-                                borderColor: 'rgba(255, 255, 255, 0.2)',
-                                color: '#E2E8F0',
-                                fontSize: '11px',
-                                py: 0.2,
-                                px: 1,
-                                textTransform: 'none',
-                                '&:hover': { borderColor: themeStyles.accentColor },
+                                color: '#F8FAFC',
+                                backgroundColor: themeStyles.badgeBg,
+                                p: { xs: 0.4, sm: 0.6 },
+                                '&:hover': { backgroundColor: 'rgba(255,255,255,0.15)' },
                               }}
                             >
-                              Audio
-                            </Button>
+                              <AudiotrackIcon sx={{ fontSize: 17, color: themeStyles.accentColor }} />
+                            </IconButton>
                           </Tooltip>
                         )}
 
                         {/* Subtitle Track Selector */}
-                        {embeddedSubtitles.length > 0 && (
-                          <Tooltip title="Subtitles / Closed Captions">
-                            <Button
+                        {isDrive && (
+                          <Tooltip title={`Subtitles (${selectedSubtitleId === 'off' ? 'Off' : 'On'})`}>
+                            <IconButton
                               size="small"
-                              variant="outlined"
                               onClick={(e) => setSubtitleMenuAnchor(e.currentTarget)}
-                              startIcon={selectedSubtitleId === 'off' ? <ClosedCaptionDisabledIcon sx={{ fontSize: '13px !important' }} /> : <ClosedCaptionIcon sx={{ fontSize: '13px !important', color: '#10B981' }} />}
                               sx={{
-                                borderColor: selectedSubtitleId === 'off' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(16, 185, 129, 0.4)',
                                 color: selectedSubtitleId === 'off' ? '#94A3B8' : '#34D399',
-                                fontSize: '11px',
-                                py: 0.2,
-                                px: 1,
-                                textTransform: 'none',
-                                '&:hover': { borderColor: '#10B981' },
+                                backgroundColor: selectedSubtitleId === 'off' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(16, 185, 129, 0.15)',
+                                p: { xs: 0.4, sm: 0.6 },
+                                '&:hover': { backgroundColor: 'rgba(16, 185, 129, 0.25)' },
                               }}
                             >
-                              Subtitles
-                            </Button>
+                              {selectedSubtitleId === 'off' ? (
+                                <ClosedCaptionDisabledIcon sx={{ fontSize: 17 }} />
+                              ) : (
+                                <ClosedCaptionIcon sx={{ fontSize: 17, color: '#10B981' }} />
+                              )}
+                            </IconButton>
                           </Tooltip>
                         )}
 
                         {/* Quality Preset */}
-                        <Tooltip title="Stream Quality">
-                          <Button
+                        <Tooltip title={`Stream Quality (${streamQuality})`}>
+                          <IconButton
                             size="small"
-                            variant="outlined"
                             onClick={(e) => setQualityMenuAnchor(e.currentTarget)}
-                            startIcon={<SettingsIcon sx={{ fontSize: '13px !important' }} />}
                             sx={{
-                              borderColor: 'rgba(255, 255, 255, 0.2)',
                               color: '#E2E8F0',
-                              fontSize: '11px',
-                              py: 0.2,
-                              px: 1,
-                              textTransform: 'none',
-                              '&:hover': { borderColor: themeStyles.accentColor },
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              p: { xs: 0.4, sm: 0.6 },
+                              '&:hover': { color: themeStyles.accentColor, backgroundColor: 'rgba(255,255,255,0.15)' },
                             }}
                           >
-                            {streamQuality}
-                          </Button>
+                            <SettingsIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
                         </Tooltip>
 
                         {/* Speed */}
-                        <Tooltip title="Playback Speed">
+                        <Tooltip title={`Speed (${playbackSpeed}x)`}>
                           <Button
                             size="small"
                             variant="outlined"
                             onClick={(e) => setSpeedMenuAnchor(e.currentTarget)}
                             sx={{
-                              borderColor: 'rgba(255, 255, 255, 0.2)',
+                              borderColor: 'rgba(255, 255, 255, 0.15)',
                               color: '#E2E8F0',
                               fontSize: '11px',
-                              py: 0.2,
-                              px: 0.8,
+                              fontWeight: 700,
+                              py: 0.1,
+                              px: 0.6,
+                              minWidth: 34,
+                              height: 26,
                               textTransform: 'none',
-                              minWidth: 42,
                               '&:hover': { borderColor: themeStyles.accentColor },
                             }}
                           >
@@ -2710,7 +2909,7 @@ export const UniversalPlayer: React.FC = () => {
                         <Tooltip title="Picture-in-Picture">
                           <IconButton
                             onClick={handleTogglePiP}
-                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            sx={{ color: '#CBD5E1', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                           >
                             <PictureInPictureAltIcon sx={{ fontSize: 18 }} />
                           </IconButton>
@@ -2720,7 +2919,7 @@ export const UniversalPlayer: React.FC = () => {
                         <Tooltip title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}>
                           <IconButton
                             onClick={handleToggleFullscreen}
-                            sx={{ color: '#CBD5E1', p: 0.6, '&:hover': { color: themeStyles.accentColor } }}
+                            sx={{ color: '#CBD5E1', p: { xs: 0.4, sm: 0.6 }, '&:hover': { color: themeStyles.accentColor } }}
                           >
                             {isFullscreen ? <FullscreenExitIcon sx={{ fontSize: 20 }} /> : <FullscreenIcon sx={{ fontSize: 20 }} />}
                           </IconButton>

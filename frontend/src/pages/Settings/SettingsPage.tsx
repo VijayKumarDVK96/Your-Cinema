@@ -14,7 +14,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import DisplaySettingsIcon from '@mui/icons-material/DisplaySettings';
 import BackupIcon from '@mui/icons-material/Backup';
-import { useNavigate } from 'react-router-dom';
+import CloudQueueIcon from '@mui/icons-material/CloudQueue';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTVNavigation } from '../../context/TVNavigationContext.js';
@@ -23,6 +24,7 @@ import { ImportProgressModal, ImportProgressState } from '../../components/commo
 import {
   AccountSecurityTab,
   AiSettingsTab,
+  GoogleDriveTab,
   TvDisplayTab,
   CustomGenresTab,
   BackupRestoreTab,
@@ -32,6 +34,7 @@ import {
 
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, refreshProfile } = useAuth();
   const { isTvMode, toggleTvMode } = useTVNavigation();
   const queryClient = useQueryClient();
@@ -54,6 +57,12 @@ export const SettingsPage: React.FC = () => {
 
   // Active Horizontal Tab: 'account' | 'ai' | 'display' | 'genres' | 'backup' | 'danger'
   const [activeTab, setActiveTab] = useState<string>('account');
+
+  useEffect(() => {
+    if (searchParams.get('drive')) {
+      setActiveTab('drive');
+    }
+  }, [searchParams]);
 
   // Custom Genres Management State
   const [addGenreOpen, setAddGenreOpen] = useState(false);
@@ -625,6 +634,7 @@ export const SettingsPage: React.FC = () => {
           }}
         >
           <Tab value="account" label="Account & Security" icon={<PersonIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
+          <Tab value="drive" label="Google Drive" icon={<CloudQueueIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
           <Tab value="ai" label="AI Engine & Models" icon={<SmartToyIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
           <Tab value="display" label="TV & Display Mode" icon={<DisplaySettingsIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
           <Tab value="genres" label="Custom Genres" icon={<CategoryIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
@@ -652,6 +662,9 @@ export const SettingsPage: React.FC = () => {
           setPwMsg={setPwMsg}
         />
       )}
+
+      {/* Tab: Google Drive streaming account */}
+      {activeTab === 'drive' && <GoogleDriveTab />}
 
       {/* Tab 2: AI Engine & Model Selection */}
       {activeTab === 'ai' && (

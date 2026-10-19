@@ -43,6 +43,16 @@ class ForbiddenError extends AppError {
   }
 }
 
+export class GoogleDriveError extends AppError {
+  constructor(
+    message: string,
+    statusCode: number = 502,
+    code: string = 'GOOGLE_DRIVE_ERROR'
+  ) {
+    super(message, statusCode, code);
+  }
+}
+
 export class ExternalServiceError extends AppError {
   constructor(service: string, message: string = 'External service is temporarily unavailable') {
     super(`${service}: ${message}`, 502, 'EXTERNAL_SERVICE_ERROR');
