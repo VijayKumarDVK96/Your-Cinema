@@ -10,6 +10,7 @@ const router = Router();
 router.get('/drive/:fileId/info', SourcesController.getDriveFileInfo);
 router.get('/drive/:fileId/media-info', SourcesController.getDriveMediaInfo);
 router.get('/drive/:fileId/subtitles/:trackIndex', SourcesController.getDriveSubtitleTrack);
+router.get(['/drive/:fileId/raw', '/drive/*/raw'], SourcesController.streamDriveRaw);
 router.get(['/drive/:fileId/stream', '/drive/*'], SourcesController.streamDrive);
 
 // Authenticated routes

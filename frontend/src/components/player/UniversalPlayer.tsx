@@ -54,17 +54,12 @@ import PaletteIcon from '@mui/icons-material/Palette';
 import TvIcon from '@mui/icons-material/Tv';
 
 import '@vidstack/react/player/styles/default/theme.css';
-import '@vidstack/react/player/styles/default/layouts/video.css';
 import {
   MediaPlayer,
   MediaProvider,
   Track,
   type MediaPlayerInstance,
 } from '@vidstack/react';
-import {
-  defaultLayoutIcons,
-  DefaultVideoLayout,
-} from '@vidstack/react/player/layouts/default';
 
 import { useQueryClient } from '@tanstack/react-query';
 import { usePlayer } from '../../context/PlayerContext.js';
@@ -149,13 +144,25 @@ export const UniversalPlayer: React.FC = () => {
   const { isOpen, activeMovie, activeSource, closePlayer, openPlayer } = usePlayer();
   const queryClient = useQueryClient();
 
-  const initialSec = activeMovie?.playback_position_sec || 0;
+  const runtimeSec = Math.max((activeMovie?.runtime || 120) * 60, 600);
+  const rawInitialSec = activeMovie?.playback_position_sec || 0;
+  // Never resume at (or within the last 30s of) the credits after a completed watch.
+  const initialSec = rawInitialSec > 0 && rawInitialSec < runtimeSec - 30 ? rawInitialSec : 0;
   const currentSecRef = useRef<number>(initialSec);
   const initialSeekDoneRef = useRef<boolean>(false);
   const seekRetryTimerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaSrcRef = useRef<{ src: string; type: 'video/mp4' }>({ src: '', type: 'video/mp4' });
+  const shouldResumePlaybackRef = useRef<boolean>(true);
+  const isSwitchingSourceRef = useRef<boolean>(false);
+  const dragSeekSecRef = useRef<number | null>(null);
 
   const [playerKey, setPlayerKey] = useState<number>(0);
+  // Absolute movie position at which the current stream was started.
+  // For transcoded streams the backend restarts FFmpeg at this timestamp.
+  const [streamStartSec, setStreamStartSec] = useState<number>(initialSec);
+  const [progressReady, setProgressReady] = useState<boolean>(false);
   const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
   const [timeInputValue, setTimeInputValue] = useState<string>('');
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -268,14 +275,16 @@ export const UniversalPlayer: React.FC = () => {
   const vidstackPlayerRef = useRef<MediaPlayerInstance>(null);
   const ytPlayerRef = useRef<any>(null);
 
-  const runtimeSec = Math.max((activeMovie?.runtime || 120) * 60, 600);
-
   // Reset seek and track states when a new movie/session opens
   useEffect(() => {
     if (isOpen) {
       initialSeekDoneRef.current = false;
+      shouldResumePlaybackRef.current = true;
+      isSwitchingSourceRef.current = false;
       currentSecRef.current = initialSec;
       setCurrentPlaybackSec(initialSec);
+      setStreamStartSec(initialSec);
+      setProgressReady(false);
       setBufferedSec(0);
       setIsPlaying(true);
       setControlsVisible(true);
@@ -286,6 +295,7 @@ export const UniversalPlayer: React.FC = () => {
       streamRecoveryAttemptsRef.current = 0;
       setAudioTracks([]);
       setSelectedAudioIndex(0);
+      setIsTranscodedStream(false);
       setEmbeddedSubtitles([]);
       setSelectedSubtitleId(defaultSubtitlesEnabled ? 'default' : 'off');
       setShowStatsForNerds(false);
@@ -307,32 +317,44 @@ export const UniversalPlayer: React.FC = () => {
     };
   }, [isOpen, activeMovie?.user_movie_id, initialSec, defaultSubtitlesEnabled]);
 
-  // Fetch latest exact progress from database on mount / movie open
+  // Fetch the authoritative resume position before mounting the media element.
+  // Rendering the player only after this resolves prevents a flash of playback
+  // from 0:00 and prevents the old "resume at the credits" bug.
   useEffect(() => {
-    if (!isOpen || !activeMovie?.user_movie_id) return;
+    if (!isOpen || !activeMovie?.user_movie_id) {
+      setProgressReady(true);
+      return;
+    }
+
     let isSubscribed = true;
+    setProgressReady(false);
 
     api.get(`/sources/movie/${activeMovie.user_movie_id}/progress`)
       .then((res) => {
         if (!isSubscribed) return;
-        const p = res.data?.data?.last_played_position_sec;
-        if (typeof p === 'number' && p > 0) {
-          currentSecRef.current = p;
-          initialSeekDoneRef.current = false;
-          if (vidstackPlayerRef.current) {
-            try {
-              vidstackPlayerRef.current.currentTime = p;
-              initialSeekDoneRef.current = true;
-            } catch {}
-          }
-        }
+        const progress = res.data?.data;
+        const savedPos = typeof progress?.last_played_position_sec === 'number'
+          ? progress.last_played_position_sec
+          : 0;
+        const completed = progress?.completed === true || (savedPos > 0 && savedPos >= runtimeSec - 30);
+        const resume = !completed && savedPos > 0 && savedPos < runtimeSec - 30 ? savedPos : 0;
+
+        currentSecRef.current = resume;
+        initialSeekDoneRef.current = resume === 0;
+        setCurrentPlaybackSec(resume);
+        setStreamStartSec(resume);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Keep the position already attached to the movie payload.
+      })
+      .finally(() => {
+        if (isSubscribed) setProgressReady(true);
+      });
 
     return () => {
       isSubscribed = false;
     };
-  }, [isOpen, activeMovie?.user_movie_id]);
+  }, [isOpen, activeMovie?.user_movie_id, runtimeSec]);
 
   const isDrive = isDriveSource(activeSource);
   const isYouTube =
@@ -360,6 +382,25 @@ export const UniversalPlayer: React.FC = () => {
     ? extractDriveFileId(activeSource?.external_file_id || activeSource?.external_url)
     : '';
   const drivePreviewUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
+
+  // Decide synchronously (before the first stream request) whether this file
+  // needs the FFmpeg transcode/remux pipeline. Doing this after mount caused a
+  // broken raw-MKV first load that could not be seeked.
+  const sourceFileName = (activeSource?.file_name || activeSource?.external_url || '').toLowerCase();
+  const isMkvSource = sourceFileName.includes('.mkv') || sourceFileName.includes('matroska');
+  // Browsers can play some MKVs but cannot seek them reliably, so MKV always
+  // goes through the remux/transcode pipeline even when Direct is selected.
+  const forceDirect = streamQuality === 'direct' && !isMkvSource;
+  const requiresTranscode = Boolean(
+    isDrive &&
+    driveFileId &&
+    !forceDirect &&
+    (isMkvSource ||
+      isTranscodedStream ||
+      selectedAudioIndex > 0 ||
+      streamQuality !== 'auto')
+  );
+  const directQualityLabel = isMkvSource ? 'Direct Remux' : 'Direct Pass-Through';
 
   // Fetch embedded audio tracks and subtitles from backend ffprobe
   useEffect(() => {
@@ -428,33 +469,266 @@ export const UniversalPlayer: React.FC = () => {
     [activeMovie, activeSource, queryClient]
   );
 
-  // Seek handler with retry logic
-  const performSeek = useCallback((targetSec: number, retries = 3) => {
-    const player = vidstackPlayerRef.current;
-    if (!player || targetSec <= 0) return;
+  // Native media element event bridge.
+  // Vidstack clamps currentTime to seekableEnd(), which is 0 for growing/
+  // transcoded Drive streams. The native element still has the real clock, so
+  // the UI, scrubber, play state and progress sync all read from it directly.
+  useEffect(() => {
+    if (!isOpen || !isDrive || !driveFileId || !progressReady) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    try {
-      player.currentTime = targetSec;
-      initialSeekDoneRef.current = true;
-    } catch {
-      if (retries > 0) {
-        seekRetryTimerRef.current = setTimeout(() => {
-          performSeek(targetSec, retries - 1);
-        }, 500);
+    let video: HTMLVideoElement | null = null;
+    let retryTimer: ReturnType<typeof setInterval> | null = null;
+
+    const absoluteFromVideo = () => {
+      const native = video && Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      return requiresTranscode
+        ? Math.min(runtimeSec, streamStartSec + native)
+        : Math.min(runtimeSec, native);
+    };
+
+    const updateBuffered = () => {
+      if (!video || video.buffered.length === 0) return;
+      const nativeEnd = video.buffered.end(video.buffered.length - 1);
+      setBufferedSec(Math.min(runtimeSec, (requiresTranscode ? streamStartSec : 0) + nativeEnd));
+    };
+
+    const onTimeUpdate = () => {
+      const absolute = absoluteFromVideo();
+      currentSecRef.current = absolute;
+      setCurrentPlaybackSec(absolute);
+      updateBuffered();
+    };
+
+    const onPlay = () => {
+      shouldResumePlaybackRef.current = true;
+      setIsPlaying(true);
+    };
+
+    const onPlaying = () => {
+      isSwitchingSourceRef.current = false;
+      setIsPlaying(true);
+      setIsBuffering(false);
+      setIsAudioSwitching(false);
+      setShowWeakNetworkHint(false);
+      streamRecoveryAttemptsRef.current = 0;
+      if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current);
+    };
+
+    const onPause = () => {
+      setIsPlaying(false);
+      if (isSwitchingSourceRef.current) return;
+      shouldResumePlaybackRef.current = false;
+      const sec = Math.floor(absoluteFromVideo());
+      if (sec > 0) saveProgress(sec, false);
+    };
+
+    const onWaiting = () => {
+      setIsBuffering(true);
+      if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current);
+      bufferTimerRef.current = setTimeout(() => {
+        setShowWeakNetworkHint(true);
+      }, 4000);
+    };
+
+    const onEnded = () => {
+      setIsPlaying(false);
+      const absolute = absoluteFromVideo();
+      if (absolute >= runtimeSec - 15) {
+        saveProgress(runtimeSec, true);
       }
+    };
+
+    const onLoaded = () => {
+      if (!video) return;
+      try {
+        video.volume = Math.max(0, Math.min(1, volume / 100));
+        video.muted = isMuted || volume === 0;
+        video.playbackRate = playbackSpeed;
+      } catch {}
+
+      // Direct range streams are truly seekable, so resume there once metadata
+      // is available. Transcoded streams already started at streamStartSec via
+      // the backend 't' parameter.
+      if (!requiresTranscode && streamStartSec > 0 && !initialSeekDoneRef.current) {
+        try {
+          video.currentTime = streamStartSec;
+          initialSeekDoneRef.current = true;
+        } catch {}
+      }
+
+      if (shouldResumePlaybackRef.current) {
+        // Programmatic resume after a seek/quality switch happens outside the
+        // original click gesture, so Chrome may reject unmuted autoplay. Retry
+        // muted (always allowed) and restore the user's audio state immediately.
+        const resume = async () => {
+          try {
+            await video!.play();
+          } catch {
+            try {
+              video!.muted = true;
+              await video!.play();
+              video!.muted = isMuted || volume === 0;
+            } catch {}
+          }
+        };
+        resume();
+      }
+    };
+
+    const onSeeked = () => {
+      updateBuffered();
+      if (!requiresTranscode) {
+        const absolute = absoluteFromVideo();
+        currentSecRef.current = absolute;
+        setCurrentPlaybackSec(absolute);
+      }
+    };
+
+    const onProgress = () => updateBuffered();
+
+    const onError = () => {
+      if (isSwitchingSourceRef.current || !isOpen) return;
+      if (streamRecoveryAttemptsRef.current < 2) {
+        streamRecoveryAttemptsRef.current += 1;
+        setIsBuffering(true);
+        setTimeout(() => setPlayerKey((k) => k + 1), 1000);
+      } else {
+        setIsBuffering(false);
+        setStreamError('Playback interrupted due to a network timeout or connection drop. You can retry or switch to Data Saver (480p SD).');
+      }
+    };
+
+    const attach = (element: HTMLVideoElement) => {
+      video = element;
+      nativeVideoRef.current = element;
+      element.addEventListener('timeupdate', onTimeUpdate);
+      element.addEventListener('play', onPlay);
+      element.addEventListener('playing', onPlaying);
+      element.addEventListener('pause', onPause);
+      element.addEventListener('waiting', onWaiting);
+      element.addEventListener('ended', onEnded);
+      element.addEventListener('loadedmetadata', onLoaded);
+      element.addEventListener('canplay', onLoaded);
+      element.addEventListener('seeked', onSeeked);
+      element.addEventListener('progress', onProgress);
+      element.addEventListener('error', onError);
+      if (element.readyState >= 1) onLoaded();
+    };
+
+    const findAndAttach = () => {
+      const element = container.querySelector('video') as HTMLVideoElement | null;
+      if (element) {
+        attach(element);
+        return true;
+      }
+      return false;
+    };
+
+    if (!findAndAttach()) {
+      retryTimer = setInterval(() => {
+        if (findAndAttach() && retryTimer) {
+          clearInterval(retryTimer);
+          retryTimer = null;
+        }
+      }, 150);
     }
+
+    return () => {
+      if (retryTimer) clearInterval(retryTimer);
+      if (video) {
+        video.removeEventListener('timeupdate', onTimeUpdate);
+        video.removeEventListener('play', onPlay);
+        video.removeEventListener('playing', onPlaying);
+        video.removeEventListener('pause', onPause);
+        video.removeEventListener('waiting', onWaiting);
+        video.removeEventListener('ended', onEnded);
+        video.removeEventListener('loadedmetadata', onLoaded);
+        video.removeEventListener('canplay', onLoaded);
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('progress', onProgress);
+        video.removeEventListener('error', onError);
+      }
+      nativeVideoRef.current = null;
+    };
+  }, [
+    isOpen,
+    isDrive,
+    driveFileId,
+    progressReady,
+    playerKey,
+    requiresTranscode,
+    streamStartSec,
+    runtimeSec,
+    isMuted,
+    volume,
+    playbackSpeed,
+    saveProgress,
+  ]);
+
+  // The Vidstack store reports 0 for non-seekable (growing) Drive streams, so
+  // always read directly from the native <video> element for timing/controls.
+  const getNativeVideo = useCallback((): HTMLVideoElement | null => {
+    return nativeVideoRef.current || (containerRef.current?.querySelector('video') as HTMLVideoElement | null) || null;
   }, []);
+
+  // Absolute timeline position (0 .. runtimeSec), accounting for the offset at
+  // which a transcoded FFmpeg stream was started.
+  const getCurrentAbsoluteSec = useCallback((): number => {
+    const video = getNativeVideo();
+    if (video && Number.isFinite(video.currentTime)) {
+      return requiresTranscode
+        ? Math.min(runtimeSec, streamStartSec + video.currentTime)
+        : Math.min(runtimeSec, video.currentTime);
+    }
+    return currentSecRef.current;
+  }, [getNativeVideo, requiresTranscode, runtimeSec, streamStartSec]);
+
+  const commitSeek = useCallback((targetSec: number, autoplay: boolean = true) => {
+    const target = Math.max(0, Math.min(runtimeSec, Math.floor(targetSec || 0)));
+    currentSecRef.current = target;
+    setCurrentPlaybackSec(target);
+    setStreamStartSec(target);
+    initialSeekDoneRef.current = true;
+    shouldResumePlaybackRef.current = autoplay;
+    saveProgress(target, false);
+
+    if (requiresTranscode) {
+      // The FFmpeg output is a non-seekable fragmented MP4. Restart the stream
+      // at the requested timestamp instead of trying to seek the element.
+      isSwitchingSourceRef.current = true;
+      setIsBuffering(true);
+      setPlayerKey((k) => k + 1);
+      return;
+    }
+
+    const video = getNativeVideo();
+    if (video) {
+      try {
+        video.currentTime = target;
+        if (autoplay) video.play().catch(() => {});
+      } catch {}
+    } else if (vidstackPlayerRef.current) {
+      try {
+        vidstackPlayerRef.current.currentTime = target;
+      } catch {}
+    }
+  }, [getNativeVideo, requiresTranscode, runtimeSec, saveProgress]);
 
   // Audio track switcher
   const handleSelectAudioTrack = useCallback((trackIndex: number, trackLang?: string) => {
-    const player = vidstackPlayerRef.current;
-    const currentPos = player?.currentTime || currentSecRef.current;
-    const safePos = Math.max(0, Math.floor(currentPos));
+    const video = getNativeVideo();
+    const wasPlaying = video ? !video.paused : true;
+    const safePos = Math.max(0, Math.floor(getCurrentAbsoluteSec()));
 
     setSelectedAudioIndex(trackIndex);
     setAudioMenuAnchor(null);
     setIsAudioSwitching(true);
     setStreamError(null);
+    setIsBuffering(true);
+    isSwitchingSourceRef.current = true;
+    shouldResumePlaybackRef.current = wasPlaying;
 
     if (trackLang) {
       try {
@@ -463,38 +737,44 @@ export const UniversalPlayer: React.FC = () => {
     }
 
     currentSecRef.current = safePos;
-    initialSeekDoneRef.current = false;
+    setCurrentPlaybackSec(safePos);
+    setStreamStartSec(safePos);
+    initialSeekDoneRef.current = true;
     setPlayerKey((k) => k + 1);
 
     if (safePos > 0) {
       saveProgress(safePos, false);
     }
-  }, [saveProgress]);
+  }, [getCurrentAbsoluteSec, getNativeVideo, saveProgress]);
 
   // Stream quality switcher (Optimized transcode / weak internet / data saver presets)
   const handleSelectQuality = useCallback((quality: 'auto' | '1080p' | '720p' | '480p' | '360p' | 'direct') => {
-    const player = vidstackPlayerRef.current;
-    const currentPos = player?.currentTime || currentSecRef.current;
-    const safePos = Math.max(0, Math.floor(currentPos));
+    const video = getNativeVideo();
+    const wasPlaying = video ? !video.paused : true;
+    const safePos = Math.max(0, Math.floor(getCurrentAbsoluteSec()));
 
     setStreamQuality(quality);
     setQualityMenuAnchor(null);
     setStreamError(null);
-    setIsBuffering(false);
+    setIsBuffering(true);
     setShowWeakNetworkHint(false);
+    isSwitchingSourceRef.current = true;
+    shouldResumePlaybackRef.current = wasPlaying;
 
     try {
       localStorage.setItem('yourcinema_stream_quality', quality);
     } catch {}
 
     currentSecRef.current = safePos;
-    initialSeekDoneRef.current = false;
+    setCurrentPlaybackSec(safePos);
+    setStreamStartSec(safePos);
+    initialSeekDoneRef.current = true;
     setPlayerKey((k) => k + 1);
 
     if (safePos > 0) {
       saveProgress(safePos, false);
     }
-  }, [saveProgress]);
+  }, [getCurrentAbsoluteSec, getNativeVideo, saveProgress]);
 
   // Subtitle settings toggle
   const handleToggleDefaultSubtitles = (enabled: boolean) => {
@@ -517,20 +797,25 @@ export const UniversalPlayer: React.FC = () => {
   useEffect(() => {
     if (!isOpen || !isDrive) return;
     const selectedTrackIndex = embeddedSubtitles.findIndex((track) => track.id === selectedSubtitleId);
-    const video = document.querySelector('video');
+    const video = getNativeVideo();
     const tracks: TextTrack[] = Array.from(video?.textTracks || []);
     tracks.forEach((track, index) => {
       if (track.kind === 'subtitles' || track.kind === 'captions') {
         track.mode = selectedSubtitleId !== 'off' && index === selectedTrackIndex ? 'showing' : 'disabled';
       }
     });
-  }, [embeddedSubtitles, isDrive, isOpen, playerKey, selectedSubtitleId]);
+  }, [embeddedSubtitles, isDrive, isOpen, playerKey, selectedSubtitleId, getNativeVideo]);
 
   // Playback speed switcher
   const handleSelectSpeed = (speed: number) => {
     setPlaybackSpeed(speed);
     setSpeedMenuAnchor(null);
-    if (vidstackPlayerRef.current) {
+    const video = getNativeVideo();
+    if (video) {
+      try {
+        video.playbackRate = speed;
+      } catch {}
+    } else if (vidstackPlayerRef.current) {
       try {
         vidstackPlayerRef.current.playbackRate = speed;
       } catch {}
@@ -542,22 +827,19 @@ export const UniversalPlayer: React.FC = () => {
     setSeekFeedback({ type: delta < 0 ? 'rewind' : 'forward', id: Date.now() });
     setTimeout(() => setSeekFeedback(null), 800);
 
-    const player = vidstackPlayerRef.current;
-    if (player) {
-      const cur = player.currentTime || currentSecRef.current;
-      const target = Math.max(0, Math.min(runtimeSec, cur + delta));
-      player.currentTime = target;
-      currentSecRef.current = target;
-      setCurrentPlaybackSec(target);
-      saveProgress(target, false);
-    } else if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
+    if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
       const cur = ytPlayerRef.current.getCurrentTime() || 0;
       const target = Math.max(0, Math.min(runtimeSec, cur + delta));
       ytPlayerRef.current.seekTo(target, true);
       currentSecRef.current = target;
       setCurrentPlaybackSec(target);
+      return;
     }
-  }, [isYouTube, runtimeSec, saveProgress]);
+
+    const video = getNativeVideo();
+    const wasPlaying = video ? !video.paused : true;
+    commitSeek(getCurrentAbsoluteSec() + delta, wasPlaying);
+  }, [isYouTube, runtimeSec, commitSeek, getCurrentAbsoluteSec, getNativeVideo]);
 
   // Fullscreen toggle handler
   const handleToggleFullscreen = () => {
@@ -573,53 +855,50 @@ export const UniversalPlayer: React.FC = () => {
 
   // Picture in Picture toggle
   const handleTogglePiP = () => {
-    const player = vidstackPlayerRef.current;
-    if (player) {
+    const video = getNativeVideo();
+    if (video) {
       try {
         if (document.pictureInPictureElement) {
           document.exitPictureInPicture();
-        } else if (player.provider && (player.provider as any).video) {
-          (player.provider as any).video.requestPictureInPicture();
+        } else {
+          video.requestPictureInPicture();
         }
       } catch {}
     }
   };
 
-  // Desktop timeline scrubbing and forward/rewind with mouse cursor
-  const handleTimelineScrub = useCallback((clientX: number) => {
+  // Desktop timeline scrubbing. While dragging we only update the preview;
+  // the actual seek (and any FFmpeg restart) happens once on mouse release.
+  const previewTimelineScrub = useCallback((clientX: number): number | null => {
     const elem = scrubberContainerRef.current;
-    if (!elem) return;
+    if (!elem) return null;
     const rect = elem.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const targetSec = Math.floor(ratio * runtimeSec);
-    currentSecRef.current = targetSec;
+    dragSeekSecRef.current = targetSec;
     setCurrentPlaybackSec(targetSec);
-    saveProgress(targetSec, false);
-
-    const player = vidstackPlayerRef.current;
-    if (player) {
-      try {
-        player.currentTime = targetSec;
-      } catch {}
-    }
-
-    if (isTranscodedStream || selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) {
-      setPlayerKey((k) => k + 1);
-    }
-  }, [runtimeSec, saveProgress, selectedAudioIndex, streamQuality, isTranscodedStream]);
+    return targetSec;
+  }, [runtimeSec]);
 
   const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const videoAtStart = getNativeVideo();
+    const wasPlaying = videoAtStart ? !videoAtStart.paused : true;
     setIsDraggingTimeline(true);
-    handleTimelineScrub(e.clientX);
+    previewTimelineScrub(e.clientX);
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      handleTimelineScrub(moveEvent.clientX);
+      previewTimelineScrub(moveEvent.clientX);
     };
 
     const handleMouseUp = () => {
       setIsDraggingTimeline(false);
+      const target = dragSeekSecRef.current;
+      dragSeekSecRef.current = null;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (target !== null) {
+        commitSeek(target, wasPlaying);
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -635,6 +914,27 @@ export const UniversalPlayer: React.FC = () => {
   };
 
   const handleTogglePlay = () => {
+    const video = getNativeVideo();
+
+    if (video) {
+      if (video.paused) {
+        // Browsers close and re-open non-seekable media requests after a pause.
+        // For transcoded Drive streams, restart FFmpeg at the paused position so
+        // resuming never jumps back to the beginning of the movie.
+        if (requiresTranscode && video.currentTime > 0.5) {
+          shouldResumePlaybackRef.current = true;
+          commitSeek(getCurrentAbsoluteSec(), true);
+        } else {
+          video.play().catch(() => {});
+          setIsPlaying(true);
+        }
+      } else {
+        video.pause();
+        setIsPlaying(false);
+      }
+      return;
+    }
+
     const player = vidstackPlayerRef.current;
     if (player) {
       if (player.paused) {
@@ -651,32 +951,41 @@ export const UniversalPlayer: React.FC = () => {
     const v = Number(newVol);
     setVolume(v);
     setIsMuted(v === 0);
-    const player = vidstackPlayerRef.current;
-    if (player) {
+    const video = getNativeVideo();
+    if (video) {
       try {
-        player.volume = v / 100;
-        player.muted = v === 0;
+        video.volume = v / 100;
+        video.muted = v === 0;
       } catch {}
     }
   };
 
   const handleToggleMute = () => {
-    const player = vidstackPlayerRef.current;
-    if (player) {
-      const nextMuted = !isMuted;
-      setIsMuted(nextMuted);
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    const video = getNativeVideo();
+    if (video) {
       try {
-        player.muted = nextMuted;
+        video.muted = nextMuted;
       } catch {}
     }
   };
 
   const handleSelectBufferMode = (mode: '50mb' | '10mb') => {
+    const video = getNativeVideo();
+    const wasPlaying = video ? !video.paused : true;
+    const safePos = Math.max(0, Math.floor(getCurrentAbsoluteSec()));
     setBufferChunkMode(mode);
     setBufferMenuAnchor(null);
     try {
       localStorage.setItem('yourcinema_buffer_chunk', mode);
     } catch {}
+    currentSecRef.current = safePos;
+    setCurrentPlaybackSec(safePos);
+    setStreamStartSec(safePos);
+    shouldResumePlaybackRef.current = wasPlaying;
+    isSwitchingSourceRef.current = true;
+    setIsBuffering(true);
     setPlayerKey((k) => k + 1);
   };
 
@@ -713,13 +1022,7 @@ export const UniversalPlayer: React.FC = () => {
         case 'k':
         case 'K':
           e.preventDefault();
-          if (vidstackPlayerRef.current) {
-            if (vidstackPlayerRef.current.paused) {
-              vidstackPlayerRef.current.play();
-            } else {
-              vidstackPlayerRef.current.pause();
-            }
-          }
+          handleTogglePlay();
           break;
         case 'ArrowLeft':
         case 'j':
@@ -741,10 +1044,7 @@ export const UniversalPlayer: React.FC = () => {
         case 'm':
         case 'M':
           e.preventDefault();
-          if (vidstackPlayerRef.current) {
-            vidstackPlayerRef.current.muted = !vidstackPlayerRef.current.muted;
-            setIsMuted(vidstackPlayerRef.current.muted);
-          }
+          handleToggleMute();
           break;
         case 'i':
         case 'I':
@@ -764,7 +1064,7 @@ export const UniversalPlayer: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleSkipSeconds, showStatsForNerds, showShortcutsHelp]);
+  }, [isOpen, handleSkipSeconds, handleTogglePlay, handleToggleMute, handleToggleFullscreen, showStatsForNerds, showShortcutsHelp]);
 
   // YouTube IDs and embed URLs
   const ytRawUrl = activeSource?.external_url || activeMovie?.trailer_url || '';
@@ -914,31 +1214,25 @@ export const UniversalPlayer: React.FC = () => {
   const handleSaveTimeInput = () => {
     const parsed = parsePlaybackInput(timeInputValue);
     if (parsed !== null && parsed >= 0) {
-      currentSecRef.current = parsed;
-      saveProgress(parsed, false);
-      if (vidstackPlayerRef.current) {
-        vidstackPlayerRef.current.currentTime = parsed;
-      }
+      const video = getNativeVideo();
+      commitSeek(parsed, video ? !video.paused : true);
       setIsEditingTime(false);
     }
   };
 
   const handleStartOver = () => {
-    currentSecRef.current = 0;
-    initialSeekDoneRef.current = true;
-    saveProgress(0, false);
     setIsEditingTime(false);
     if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
+      currentSecRef.current = 0;
+      setCurrentPlaybackSec(0);
+      saveProgress(0, false);
       try {
         ytPlayerRef.current.seekTo(0, true);
         ytPlayerRef.current.playVideo();
       } catch (e) {}
-    } else if (vidstackPlayerRef.current) {
-      vidstackPlayerRef.current.currentTime = 0;
-      vidstackPlayerRef.current.play().catch(() => {});
-    } else {
-      setPlayerKey((k) => k + 1);
+      return;
     }
+    commitSeek(0);
   };
 
   const handleMarkFinished = () => {
@@ -959,11 +1253,14 @@ export const UniversalPlayer: React.FC = () => {
     if (selectedAudioIndex > 0) {
       params.set('audioIndex', String(selectedAudioIndex));
     }
-    const seekPos = Math.floor(currentSecRef.current || 0);
-    if ((isTranscodedStream || selectedAudioIndex > 0 || (streamQuality !== 'auto' && streamQuality !== 'direct')) && seekPos > 0) {
-      params.set('t', String(seekPos));
+    // Only transcoded streams receive 't'; FFmpeg restarts at this timestamp.
+    // Direct range streams use native currentTime seeking instead.
+    if (requiresTranscode && streamStartSec > 0) {
+      params.set('t', String(Math.floor(streamStartSec)));
     }
-    if (streamQuality !== 'auto') {
+    if (forceDirect) {
+      params.set('quality', 'direct');
+    } else if (streamQuality !== 'auto') {
       params.set('quality', streamQuality);
     }
     const qs = params.toString();
@@ -971,6 +1268,12 @@ export const UniversalPlayer: React.FC = () => {
   };
 
   const streamSrc = buildStreamSrc();
+  // Stable source object: only create a new object when the URL truly changes,
+  // otherwise Vidstack reloads the media element on unrelated re-renders.
+  if (mediaSrcRef.current.src !== streamSrc) {
+    mediaSrcRef.current = { src: streamSrc, type: 'video/mp4' };
+  }
+  const mediaSrc = mediaSrcRef.current;
 
   // Dynamic Theme Colors: Jellyfin Cyan/Purple vs Plex Amber/Gold
   const themeStyles = {
@@ -1079,7 +1382,7 @@ export const UniversalPlayer: React.FC = () => {
                 streamQuality === 'auto'
                   ? 'Adaptive OTT Stream'
                   : streamQuality === 'direct'
-                  ? 'Direct Pass-Through'
+                  ? directQualityLabel
                   : `${streamQuality} Stream`
               }
               size="small"
@@ -1246,7 +1549,7 @@ export const UniversalPlayer: React.FC = () => {
           {/* Left: Playback Info & Skip Buttons */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Chip
-              label={initialSec > 0 ? `Resumed at ${formatPlaybackTime(initialSec)}` : 'Playing from start'}
+              label={streamStartSec > 0 ? `Resumed at ${formatPlaybackTime(streamStartSec)}` : 'Playing from start'}
               size="small"
               sx={{
                 height: 22,
@@ -1348,7 +1651,7 @@ export const UniversalPlayer: React.FC = () => {
                     '&:hover': { borderColor: themeStyles.accentColor, backgroundColor: themeStyles.badgeBg },
                   }}
                 >
-                  Quality: {streamQuality === 'auto' ? 'Auto (Adaptive)' : (streamQuality === 'direct' ? 'Direct Pass-Through' : streamQuality)}
+                  Quality: {streamQuality === 'auto' ? 'Auto (Adaptive)' : (streamQuality === 'direct' ? directQualityLabel : streamQuality)}
                 </Button>
                 <Menu
                   anchorEl={qualityMenuAnchor}
@@ -1434,7 +1737,7 @@ export const UniversalPlayer: React.FC = () => {
                   <MenuItem selected={streamQuality === 'direct'} onClick={() => handleSelectQuality('direct')} sx={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', py: 0.8 }}>
                     <Box>
                       <Typography variant="body2" sx={{ fontSize: '12px', color: streamQuality === 'direct' ? '#A855F7' : '#F8FAFC', fontWeight: streamQuality === 'direct' ? 700 : 500 }}>
-                        🚀 Direct Pass-Through (Raw Source)
+                        🚀 {directQualityLabel} (Original Source)
                       </Typography>
                       <Typography variant="caption" sx={{ fontSize: '10px', color: '#94A3B8' }}>
                         Original file copy (Requires high-speed connection)
@@ -1772,7 +2075,7 @@ export const UniversalPlayer: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Stream Quality Preset:</Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#34D399' }}>{streamQuality === 'auto' ? 'Auto (Adaptive Low-Latency)' : (streamQuality === 'direct' ? 'Direct Pass-Through (Raw Source)' : streamQuality)}</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#34D399' }}>{streamQuality === 'auto' ? 'Auto (Adaptive Low-Latency)' : (streamQuality === 'direct' ? `${directQualityLabel} (Original Source)` : streamQuality)}</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Network Buffer Health:</Typography>
@@ -1790,7 +2093,7 @@ export const UniversalPlayer: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Current Position:</Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#F8FAFC' }}>{formatPlaybackTime(currentSecRef.current)} / {formatPlaybackTime(runtimeSec)}</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#F8FAFC' }}>{formatPlaybackTime(currentPlaybackSec)} / {formatPlaybackTime(runtimeSec)}</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>Playback Rate:</Typography>
@@ -2021,135 +2324,49 @@ export const UniversalPlayer: React.FC = () => {
             }}
             onMouseMove={handlePlayerMouseMove}
             onMouseLeave={handlePlayerMouseLeave}
-            key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}`}
+            key={`vidstack-stream-${playerKey}-${activeMovie.user_movie_id}-audio${selectedAudioIndex}-${requiresTranscode ? 'tc' : 'direct'}`}
           >
-            <MediaPlayer
-              ref={vidstackPlayerRef}
-              title={activeMovie.title}
-              src={{ src: streamSrc, type: 'video/mp4' }}
-              storage={`yourcinema_playback_${activeMovie.user_movie_id}`}
-              autoPlay
-              playsInline
-              load="eager"
-              streamType="on-demand"
-              onCanPlay={() => {
-                setIsAudioSwitching(false);
-                setIsBuffering(false);
-                setShowWeakNetworkHint(false);
-                streamRecoveryAttemptsRef.current = 0;
-                if (!initialSeekDoneRef.current && currentSecRef.current > 0) {
-                  if (isTranscodedStream || selectedAudioIndex > 0) {
-                    initialSeekDoneRef.current = true;
-                  } else {
-                    performSeek(currentSecRef.current);
-                  }
-                }
-              }}
-              onSeeked={(detail) => {
-                const cur = Math.floor(typeof detail === 'number' ? detail : (detail as any)?.currentTime ?? 0);
-                if (cur > 0) {
-                  currentSecRef.current = cur;
-                  setCurrentPlaybackSec(cur);
-                }
-              }}
-              onWaiting={() => {
-                setIsBuffering(true);
-                if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current);
-                bufferTimerRef.current = setTimeout(() => {
-                  setShowWeakNetworkHint(true);
-                }, 4000);
-              }}
-              onPlaying={() => {
-                setIsPlaying(true);
-                setIsBuffering(false);
-                setShowWeakNetworkHint(false);
-                if (bufferTimerRef.current) {
-                  clearTimeout(bufferTimerRef.current);
-                  bufferTimerRef.current = null;
-                }
-              }}
-              onPause={() => {
-                setIsPlaying(false);
-                const cur = Math.floor(vidstackPlayerRef.current?.currentTime || currentSecRef.current);
-                if (cur > 0) {
-                  saveProgress(cur, false);
-                }
-              }}
-              onTimeUpdate={(detail) => {
-                const cur = Math.floor(detail.currentTime);
-                if (cur > 0) {
-                  currentSecRef.current = cur;
-                  setCurrentPlaybackSec(cur);
-                }
-                // YouTube-style buffer calculation
-                try {
-                  const player = vidstackPlayerRef.current;
-                  const videoElem = (player as any)?.provider?.video || (player as any)?.el?.querySelector('video');
-                  if (videoElem && videoElem.buffered && videoElem.buffered.length > 0) {
-                    let foundRange = false;
-                    for (let i = 0; i < videoElem.buffered.length; i++) {
-                      const bStart = videoElem.buffered.start(i);
-                      const bEnd = videoElem.buffered.end(i);
-                      if (cur >= bStart && cur <= bEnd) {
-                        setBufferedSec(bEnd);
-                        foundRange = true;
-                        break;
-                      }
-                    }
-                    if (!foundRange) {
-                      setBufferedSec(videoElem.buffered.end(videoElem.buffered.length - 1));
-                    }
-                  } else {
-                    const chunkEst = bufferChunkMode === '50mb' ? 120 : 35;
-                    setBufferedSec(Math.min(runtimeSec, cur + chunkEst));
-                  }
-                } catch {
-                  const chunkEst = bufferChunkMode === '50mb' ? 120 : 35;
-                  setBufferedSec(Math.min(runtimeSec, cur + chunkEst));
-                }
-              }}
-              onEnded={() => {
-                saveProgress(runtimeSec, true);
-              }}
-              onError={() => {
-                setIsAudioSwitching(false);
-                setIsBuffering(false);
-                if (streamRecoveryAttemptsRef.current < 2) {
-                  streamRecoveryAttemptsRef.current += 1;
-                  setTimeout(() => {
-                    setPlayerKey((k) => k + 1);
-                  }, 1200);
-                } else {
-                  setStreamError('Playback interrupted due to a network timeout or connection drop. You can retry or switch to Data Saver (480p SD).');
-                }
-              }}
-            >
-              <MediaProvider>
-                {embeddedSubtitles.map((sub) => {
-                  const isDefaultTrack =
-                    selectedSubtitleId === sub.id ||
-                    (selectedSubtitleId === 'default' && (sub.default || sub.id === embeddedSubtitles[0]?.id));
-                  return (
-                    <Track
-                      key={sub.id}
-                      src={sub.src}
-                      kind="subtitles"
-                      label={sub.label}
-                      lang={sub.language}
-                      type="vtt"
-                      default={isDefaultTrack}
-                    />
-                  );
-                })}
-              </MediaProvider>
+            {!progressReady ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', minHeight: 320 }}>
+                <CircularProgress sx={{ color: themeStyles.accentColor }} />
+              </Box>
+            ) : (
+              <MediaPlayer
+                ref={vidstackPlayerRef}
+                title={activeMovie.title}
+                src={mediaSrc}
+                storage={`yourcinema_playback_${activeMovie.user_movie_id}`}
+                autoPlay={shouldResumePlaybackRef.current}
+                playsInline
+                load="eager"
+                streamType="on-demand"
+              >
+                <MediaProvider>
+                  {embeddedSubtitles.map((sub) => {
+                    const isDefaultTrack =
+                      selectedSubtitleId === sub.id ||
+                      (selectedSubtitleId === 'default' && (sub.default || sub.id === embeddedSubtitles[0]?.id));
+                    return (
+                      <Track
+                        key={sub.id}
+                        src={sub.src}
+                        kind="subtitles"
+                        label={sub.label}
+                        lang={sub.language}
+                        type="vtt"
+                        default={isDefaultTrack}
+                      />
+                    );
+                  })}
+                </MediaProvider>
+              </MediaPlayer>
+            )}
 
-              {/* Mobile uses DefaultVideoLayout touch controls */}
-              {isMobileOrTablet && <DefaultVideoLayout icons={defaultLayoutIcons} />}
-            </MediaPlayer>
-
-            {/* Desktop Screen Cinema Controls Overlay */}
-            {!isMobileOrTablet && (
-              <Fade in={controlsVisible || !isPlaying}>
+            {/* Custom cinema controls (desktop + mobile). Native Vidstack
+                controls are intentionally not used for Drive because the
+                transcode stream has no reliable native duration/seekable range. */}
+            {progressReady && (
+              <Fade in={isMobileOrTablet || controlsVisible || !isPlaying}>
                 <Box
                   sx={{
                     position: 'absolute',
@@ -2255,7 +2472,7 @@ export const UniversalPlayer: React.FC = () => {
                     </Box>
 
                     {/* Controls Row */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.8 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 0.8 }}>
                       {/* Left controls: Play, 10s Rewind/Forward, Volume, Time */}
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
                         <Tooltip title={isPlaying ? 'Pause (Space / K)' : 'Play (Space / K)'}>

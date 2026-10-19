@@ -3,13 +3,14 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { SourcesService, extractDriveFileId } from './sources.service.js';
 import { MoviesService } from '../movies/movies.service.js';
+import { config } from '../../config/index.js';
 import { sendSuccess, sendCreated } from '../../utils/response.js';
 import { BadRequestError } from '../../utils/errors.js';
 
 const mediaInfoCache = new Map<string, { audioTracks: any[]; subtitleTracks: any[]; fileName?: string; isMkv?: boolean; isTranscoded?: boolean; timestamp: number }>();
 const subtitleCache = new Map<string, string>();
 
-export interface DriveDirectInfo {
+interface DriveDirectInfo {
   directUrl: string;
   cookies: string;
   totalSize: number;
@@ -21,7 +22,7 @@ export interface DriveDirectInfo {
 
 const driveDirectCache = new Map<string, DriveDirectInfo>();
 
-export async function resolveDriveDirect(fileId: string): Promise<DriveDirectInfo> {
+async function resolveDriveDirect(fileId: string): Promise<DriveDirectInfo> {
   const cached = driveDirectCache.get(fileId);
   if (cached && Date.now() < cached.expiresAt) {
     return cached;
@@ -108,6 +109,226 @@ export async function resolveDriveDirect(fileId: string): Promise<DriveDirectInf
   return info;
 }
 
+function buildDriveRawProxyUrl(fileId: string): string {
+  // FFmpeg/ffprobe must read through this proxy so every upstream request to
+  // Google includes a Range header. Without one, Drive returns an HTML
+  // "quota exceeded / confirm download" page instead of video bytes.
+  return `http://127.0.0.1:${config.port}/api/sources/drive/${encodeURIComponent(fileId)}/raw`;
+}
+
+/**
+ * Streams byte ranges from Google Drive. Always sends a Range header upstream,
+ * which avoids Drive's HTML confirmation/quota response and makes the stream
+ * seekable by ffmpeg and the browser.
+ */
+async function proxyDriveBytes(
+  req: Request,
+  res: Response,
+  fileId: string,
+  info: DriveDirectInfo,
+  capChunk: boolean
+): Promise<void> {
+  const chunkMode = String(req.query.chunk || req.headers['x-buffer-chunk'] || '').toLowerCase();
+  const quality = String(req.query.quality || req.query.res || 'auto').toLowerCase();
+  const isLowBandwidth = chunkMode === '10mb' || quality === '360p' || quality === '480p';
+  const chunkSize = isLowBandwidth ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+
+  const rangeHeader = req.headers.range;
+  let start = 0;
+  let end: number | null = null;
+
+  if (rangeHeader) {
+    const parts = rangeHeader.replace(/bytes=/, '').split('-');
+    start = parseInt(parts[0], 10) || 0;
+    const requestedEnd = parts[1] ? parseInt(parts[1], 10) : NaN;
+    if (!isNaN(requestedEnd) && requestedEnd >= start) {
+      end = capChunk ? Math.min(requestedEnd, start + chunkSize - 1) : requestedEnd;
+    } else {
+      end = capChunk ? start + chunkSize - 1 : null;
+    }
+  } else {
+    start = 0;
+    end = capChunk ? chunkSize - 1 : null;
+  }
+
+  const totalSize = info.totalSize;
+  const finalEnd = end ?? (totalSize > 0 ? totalSize - 1 : null);
+
+  if (totalSize > 0 && start >= totalSize) {
+    res.setHeader('Content-Range', `bytes */${totalSize}`);
+    res.status(416).end();
+    return;
+  }
+
+  if (req.method === 'HEAD') {
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', 'video/mp4');
+    if (totalSize > 0) res.setHeader('Content-Length', String(totalSize));
+    res.status(200).end();
+    return;
+  }
+
+  const abortController = new AbortController();
+  const onClientClose = () => abortController.abort();
+  req.on('close', onClientClose);
+  res.on('close', onClientClose);
+
+  const fetchUpstream = async (from: number, to: number) => {
+    return fetch(info.directUrl, {
+      signal: abortController.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ...(info.cookies ? { Cookie: info.cookies } : {}),
+        Range: `bytes=${from}-${to}`,
+      },
+    });
+  };
+
+  const writeUpstream = async (upstream: globalThis.Response) => {
+    if (!upstream.body) return;
+    const nodeStream = Readable.fromWeb(upstream.body as any);
+    for await (const chunk of nodeStream) {
+      if (abortController.signal.aborted) break;
+      if (!res.write(chunk as Buffer)) {
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            res.off('drain', done);
+            res.off('close', done);
+            resolve();
+          };
+          res.once('drain', done);
+          res.once('close', done);
+        });
+      }
+    }
+  };
+
+  try {
+    if (capChunk) {
+      // Browser path: one bounded range chunk at a time. The browser asks for
+      // the next chunk as it plays/scrubs.
+      const driveRes = await fetchUpstream(start, finalEnd ?? start + chunkSize - 1);
+      const upstreamType = driveRes.headers.get('content-type') || '';
+      if (upstreamType.includes('text/html') || (!driveRes.ok && driveRes.status !== 206)) {
+        driveDirectCache.delete(fileId);
+        if (!res.headersSent) {
+          res.status(upstreamType.includes('text/html') ? 502 : driveRes.status).json({
+            success: false,
+            error: {
+              message: upstreamType.includes('text/html')
+                ? 'Google Drive returned an HTML page instead of video data. The file may be quota-limited or require a confirmation step. Please try again later.'
+                : `Google Drive stream source returned HTTP ${driveRes.status}.`,
+            },
+          });
+        }
+        return;
+      }
+
+      const contentRange = driveRes.headers.get('content-range');
+      let actualStart = start;
+      let actualEnd: number | null = finalEnd;
+      let resolvedTotal = totalSize;
+      if (contentRange) {
+        const match = /bytes\s+(\d+)-(\d+)\/(\d+|\*)/i.exec(contentRange);
+        if (match) {
+          actualStart = parseInt(match[1], 10);
+          actualEnd = parseInt(match[2], 10);
+          if (match[3] !== '*') resolvedTotal = parseInt(match[3], 10);
+        }
+      }
+      const contentLen = actualEnd !== null ? actualEnd - actualStart + 1 : NaN;
+
+      res.status(206);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      if (actualEnd !== null) {
+        res.setHeader('Content-Range', `bytes ${actualStart}-${actualEnd}/${resolvedTotal || '*'}`);
+        if (!isNaN(contentLen) && contentLen > 0) res.setHeader('Content-Length', String(contentLen));
+      }
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Buffer-Chunk-Size', isLowBandwidth ? '10MB' : '50MB');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      await pipeline(Readable.fromWeb(driveRes.body as any), res);
+      return;
+    }
+
+    // FFmpeg/ffprobe path: present one continuous response but fetch it from
+    // Drive in bounded 50MB ranges. A single full-file Range makes Drive
+    // return its HTML quota page, while a bounded Range returns real bytes.
+    res.status(206);
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (finalEnd !== null && totalSize > 0) {
+      res.setHeader('Content-Range', `bytes ${start}-${finalEnd}/${totalSize}`);
+      res.setHeader('Content-Length', String(finalEnd - start + 1));
+    }
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    const UPSTREAM_CHUNK = 50 * 1024 * 1024;
+    let cursor = start;
+    while (!abortController.signal.aborted && (finalEnd === null || cursor <= finalEnd)) {
+      const chunkEnd = finalEnd === null
+        ? cursor + UPSTREAM_CHUNK - 1
+        : Math.min(cursor + UPSTREAM_CHUNK - 1, finalEnd);
+
+      const driveRes = await fetchUpstream(cursor, chunkEnd);
+      const upstreamType = driveRes.headers.get('content-type') || '';
+      if (upstreamType.includes('text/html') || (!driveRes.ok && driveRes.status !== 206)) {
+        driveDirectCache.delete(fileId);
+        if (!res.headersSent) {
+          res.status(upstreamType.includes('text/html') ? 502 : driveRes.status).json({
+            success: false,
+            error: {
+              message: upstreamType.includes('text/html')
+                ? 'Google Drive returned an HTML page instead of video data. The file may be quota-limited or require a confirmation step. Please try again later.'
+                : `Google Drive stream source returned HTTP ${driveRes.status}.`,
+            },
+          });
+        } else {
+          res.end();
+        }
+        return;
+      }
+
+      const contentRange = driveRes.headers.get('content-range');
+      let actualEnd = chunkEnd;
+      if (contentRange) {
+        const match = /bytes\s+(\d+)-(\d+)\/(\d+|\*)/i.exec(contentRange);
+        if (match) actualEnd = parseInt(match[2], 10);
+      }
+
+      await writeUpstream(driveRes);
+
+      if (abortController.signal.aborted) break;
+      cursor = actualEnd + 1;
+
+      if (actualEnd < chunkEnd) break; // end of file
+    }
+
+    if (!res.writableEnded) res.end();
+  } catch (err: any) {
+    if (
+      err.name === 'AbortError' ||
+      err.code === 'ABORT_ERR' ||
+      err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+      err.code === 'ECONNRESET' ||
+      err.code === 'EPIPE' ||
+      req.destroyed ||
+      res.destroyed ||
+      res.writableEnded
+    ) {
+      return;
+    }
+    throw err;
+  } finally {
+    req.off('close', onClientClose);
+    res.off('close', onClientClose);
+  }
+}
+
 export class SourcesController {
   static async getDriveFileInfo(req: Request, res: Response, next: NextFunction) {
     try {
@@ -165,7 +386,7 @@ export class SourcesController {
         '-analyzeduration', '8M',
         '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title',
         '-of', 'json',
-        info.directUrl,
+        buildDriveRawProxyUrl(fileId),
       ]);
 
       let stdout = '';
@@ -294,7 +515,7 @@ export class SourcesController {
         '-rw_timeout', '20000000',
         '-probesize', '8M',
         '-analyzeduration', '8M',
-        '-i', info.directUrl,
+        '-i', buildDriveRawProxyUrl(fileId),
         '-map', `0:s:${trackIndex}`,
         '-f', 'webvtt',
         '-',
@@ -466,14 +687,17 @@ export class SourcesController {
           '-probesize', '8M',
           '-analyzeduration', '8M',
           ...(seekSec > 0 ? ['-ss', String(seekSec)] : []),
-          '-i', info.directUrl,
+          '-i', buildDriveRawProxyUrl(fileId),
           '-map', '0:v:0',
           '-map', `${audioMap}?`,
           ...videoCodecArgs,
           '-c:a', 'aac',
           '-b:a', audioBitrate,
           '-ac', '2',
-          ...(seekSec > 0 ? ['-avoid_negative_ts', 'make_zero'] : []),
+          // Normalise timestamps so a restarted stream always begins at 0.
+          // The client adds the requested seek offset back for display/progress.
+          '-avoid_negative_ts', 'make_zero',
+          '-reset_timestamps', '1',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
           '-f', 'mp4',
           'pipe:1',
@@ -489,6 +713,9 @@ export class SourcesController {
         const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
         let hasData = false;
         let isCleanedUp = false;
+
+        // Drain stderr so a chatty FFmpeg process can never block on a full pipe.
+        ffmpegProc.stderr?.on('data', () => {});
 
         const cleanupProcess = () => {
           if (isCleanedUp) return;
@@ -535,106 +762,10 @@ export class SourcesController {
         return;
       }
 
-      // =========================================================================
-      // YOUTUBE-STYLE CHUNKED HTTP RANGE STREAMING (50MB Normal / 10MB Low Data)
-      // When user scrubs or forwards mouse cursor, requests new Range chunk instantly!
-      // =========================================================================
-      const rangeHeader = req.headers.range;
-      let start = 0;
-      let end = 0;
-
-      if (rangeHeader) {
-        const parts = rangeHeader.replace(/bytes=/, '').split('-');
-        start = parseInt(parts[0], 10) || 0;
-        const requestedEnd = parts[1] ? parseInt(parts[1], 10) : NaN;
-
-        if (!isNaN(requestedEnd) && requestedEnd >= start) {
-          end = Math.min(requestedEnd, start + chunkSize - 1);
-        } else {
-          // Open-ended Range: stream next 50MB (or 10MB) chunk from selected position
-          end = start + chunkSize - 1;
-        }
-      } else {
-        // No Range header provided: serve initial 50MB (or 10MB) chunk with 206
-        start = 0;
-        end = chunkSize - 1;
-      }
-
-      if (info.totalSize > 0 && end >= info.totalSize) {
-        end = info.totalSize - 1;
-      }
-
-      const contentLen = Math.max(0, end - start + 1);
-
-      const abortController = new AbortController();
-      const onClientClose = () => {
-        abortController.abort();
-      };
-      req.on('close', onClientClose);
-      res.on('close', onClientClose);
-
-      let driveRes: globalThis.Response;
-      try {
-        driveRes = await fetch(info.directUrl, {
-          signal: abortController.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ...(info.cookies ? { Cookie: info.cookies } : {}),
-            Range: `bytes=${start}-${end}`,
-          },
-        });
-      } catch (err: any) {
-        if (err.name === 'AbortError' || req.destroyed || res.destroyed) return;
-        driveDirectCache.delete(fileId);
-        throw err;
-      }
-
-      if (!driveRes.ok && driveRes.status !== 206) {
-        driveDirectCache.delete(fileId);
-        if (!res.headersSent) {
-          return res.status(driveRes.status).json({
-            error: 'Google Drive stream source returned an error',
-            status: driveRes.status,
-          });
-        }
-        return;
-      }
-
-      // Send 206 response headers ONLY after verified successful response from Google Drive
-      res.status(206);
-      res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${info.totalSize > 0 ? info.totalSize : '*'}`);
-      res.setHeader('Content-Length', String(contentLen));
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.setHeader('X-Buffer-Chunk-Size', `${isLowBandwidth ? '10MB' : '50MB'}`);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-
-      try {
-        if (driveRes.body) {
-          const nodeStream = Readable.fromWeb(driveRes.body as any);
-          await pipeline(nodeStream, res);
-        } else {
-          res.end();
-        }
-      } catch (err: any) {
-        if (
-          err.name === 'AbortError' ||
-          err.code === 'ABORT_ERR' ||
-          err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
-          err.code === 'ECONNRESET' ||
-          err.code === 'EPIPE' ||
-          req.destroyed ||
-          res.destroyed ||
-          res.writableEnded
-        ) {
-          return;
-        }
-        throw err;
-      } finally {
-        req.off('close', onClientClose);
-        res.off('close', onClientClose);
-      }
+      // Delegate to the shared range proxy. capChunk=true preserves the
+      // YouTube-style 10MB/50MB chunk window for browser playback.
+      await proxyDriveBytes(req, res, fileId, info, true);
+      return;
     } catch (err: any) {
       if (
         err.name === 'AbortError' ||
@@ -651,6 +782,34 @@ export class SourcesController {
     }
   }
 
+  /**
+   * Raw, uncapped byte-range endpoint used by ffmpeg/ffprobe. Keeping media
+   * processing on the same range proxy means Drive never sees a request
+   * without a Range header (which would return its HTML quota page).
+   */
+  static async streamDriveRaw(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rawParam = req.params.fileId || req.params[0] || (req.query.fileId as string) || '';
+      const fileId = extractDriveFileId(decodeURIComponent(rawParam));
+      if (!fileId) throw new BadRequestError('Drive file ID is required');
+
+      const info = await resolveDriveDirect(fileId);
+      await proxyDriveBytes(req, res, fileId, info, false);
+    } catch (err: any) {
+      if (
+        err.name === 'AbortError' ||
+        err.code === 'ABORT_ERR' ||
+        err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        err.code === 'ECONNRESET' ||
+        err.code === 'EPIPE' ||
+        req.destroyed ||
+        res.destroyed
+      ) {
+        return;
+      }
+      next(err);
+    }
+  }
 
   static async detect(req: Request, res: Response, next: NextFunction) {
     try {
